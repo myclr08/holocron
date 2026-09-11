@@ -70,6 +70,18 @@ REQUIRED_WHEELS = {
     "pydantic_core": "cp313",
 }
 
+# Yalnizca Windows paketinde aranan tekerlekler. `pywin32` ayri duruyor cunku
+# isaretcisi (`sys_platform == "win32"`) Linux'tan yapilan `pip download`
+# sirasinda YANLIS degerlendiriliyor: paket sessizce atlaniyor ve Windows
+# paketinde Outlook ozelligi calismiyordu. Bu yuzden ayrica indiriliyor ve
+# varligi burada denetleniyor.
+WINDOWS_ONLY_WHEELS = {
+    "pywin32": "cp313",
+}
+
+# Windows'a ozel paketler Linux zip'ine girmez (bos yer, yanlis izlenim).
+LINUX_EXCLUDED_WHEEL_PREFIXES = ("pywin32-", "pywin32_ctypes-", "pypiwin32-")
+
 
 def zip_name(target: str, variant: str = VARIANT_FULL) -> str:
     suffix = "-lite" if variant == VARIANT_LITE else ""
@@ -113,15 +125,27 @@ def patch_pth(embed_dir: Path) -> Path:
     return pth
 
 
-def check_wheels(wheels: Path) -> list[str]:
+def wanted_wheels(target: str) -> dict[str, str]:
+    """Hedefe gore aranan tekerlekler; pywin32 yalnizca Windows'ta gerekir."""
+    wanted = dict(REQUIRED_WHEELS)
+    if target == TARGET_WINDOWS:
+        wanted.update(WINDOWS_ONLY_WHEELS)
+    return wanted
+
+
+def check_wheels(wheels: Path, target: str = TARGET_WINDOWS) -> list[str]:
     """Kritik ikili tekerlekler geldi mi? Gelmediyse adlarini dondurur."""
     names = [path.name for path in wheels.glob("*.whl")]
     missing = []
-    for package, marker in REQUIRED_WHEELS.items():
+    for package, marker in wanted_wheels(target).items():
         hit = [name for name in names if name.startswith(package + "-") and marker in name]
         if not hit:
             missing.append(f"{package} ({marker})")
     return missing
+
+
+def wheel_is_windows_only(name: str) -> bool:
+    return name.startswith(LINUX_EXCLUDED_WHEEL_PREFIXES)
 
 
 def install_dependencies(embed_dir: Path, wheels: Path, python_version: str) -> None:
@@ -154,8 +178,36 @@ def install_dependencies(embed_dir: Path, wheels: Path, python_version: str) -> 
         ]
     subprocess.run(command, check=True)
 
+    if sys.platform != "win32":
+        # `sys_platform == "win32"` isaretcisi pip'in CALISTIGI yoruma gore
+        # degerlendirilir, `--platform` bayragina gore degil: Linux'tan
+        # uretirken pywin32 sessizce atlanir. Elle kuruyoruz.
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--no-index",
+                "--find-links",
+                str(wheels),
+                "--target",
+                str(target),
+                "--platform",
+                "win_amd64",
+                "--python-version",
+                python_version,
+                "--implementation",
+                "cp",
+                "--only-binary=:all:",
+                "--no-deps",
+                "pywin32",
+            ],
+            check=True,
+        )
 
-def copy_project(package_dir: Path, wheels: Path) -> None:
+
+def copy_project(package_dir: Path, wheels: Path, target: str = TARGET_WINDOWS) -> None:
     for name in PACKAGE_CONTENT:
         source = ROOT / name
         if not source.exists():
@@ -167,8 +219,14 @@ def copy_project(package_dir: Path, wheels: Path) -> None:
             )
         else:
             shutil.copy2(source, destination)
-    # Tekerlekler pakete girer: hedef makinede ag olmayabilir.
-    shutil.copytree(wheels, package_dir / "wheels")
+    # Tekerlekler pakete girer: hedef makinede ag olmayabilir. Windows'a ozel
+    # paketler Linux zip'ine alinmaz.
+    ignore = (
+        shutil.ignore_patterns(*(prefix + "*" for prefix in LINUX_EXCLUDED_WHEEL_PREFIXES))
+        if target == TARGET_LINUX
+        else None
+    )
+    shutil.copytree(wheels, package_dir / "wheels", ignore=ignore)
     launcher = package_dir / "holocron.sh"
     if launcher.exists():
         launcher.chmod(0o755)
@@ -204,7 +262,7 @@ def build(
         patch_pth(embed_dir)
         install_dependencies(embed_dir, wheels, python_version)
 
-    copy_project(package_dir, wheels)
+    copy_project(package_dir, wheels, target)
     return make_zip(package_dir, dist / zip_name(target, variant))
 
 
@@ -234,11 +292,13 @@ def describe(
     print(f"Paket icerigi    : {', '.join(contents)}")
     print(f"Cikti            : {dist / zip_name(target, variant)}")
 
-    missing = check_wheels(wheels)
+    missing = check_wheels(wheels, target)
     if missing:
         print("EKSIK tekerlek   : " + ", ".join(missing))
         return 1
-    print("Kritik tekerlek  : cryptography abi3 ve pydantic_core cp313 hazir")
+    print("Kritik tekerlek  : " + ", ".join(sorted(wanted_wheels(target))) + " hazir")
+    if target == TARGET_LINUX:
+        print("Linux disi       : pywin32 tekerlekleri pakete alinmaz")
     return 0
 
 
@@ -292,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
             args.target, args.embed_zip, args.wheels, args.python_version, args.dist, variant
         )
 
-    missing = check_wheels(args.wheels)
+    missing = check_wheels(args.wheels, args.target)
     if missing:
         raise SystemExit("Eksik tekerlek: " + ", ".join(missing))
 

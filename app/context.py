@@ -10,18 +10,21 @@ import sqlite3
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import requests
 
 from . import db
 from .jira_client import BaseJiraClient, create_client
 from .lifecycle import Heartbeat
+from .mail import default_source
 from .refresh import RefreshManager
 from .secrets import SecretBox
 from .settings_store import JiraConfig, SettingsStore
 
 ClientFactory = Callable[[JiraConfig], BaseJiraClient]
+# Posta kaynagi fabrikasi: uretimde Outlook, testlerde bellek ici sahte kaynak.
+MailFactory = Callable[..., Any]
 
 
 @dataclass
@@ -32,6 +35,7 @@ class AppContext:
     client_factory: ClientFactory
     shutdown_hook: Callable[[], None] = field(default=lambda: None)
     refresh: RefreshManager = field(default_factory=RefreshManager)
+    mail_factory: MailFactory = field(default=default_source)
     # Yazma islemleri bu kilitle sirayla girer (okumalar paralel kalabilir).
     db_lock: threading.RLock = field(default_factory=threading.RLock)
 

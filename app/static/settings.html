@@ -139,6 +139,64 @@
         <div class="diagnosis" id="diagnosis" hidden></div>
       </div>
 
+      <div class="card" id="mail-card">
+        <h2>E-posta</h2>
+        <p class="hint">
+          Kimden, Kime ya da CC alanında aşağıdaki adreslerden biri geçen her e-posta
+          <strong>Görevlerim → Yapılacak</strong> sütununa düşer: konu görevin adı, gövde
+          açıklaması olur. Aynı konuşmadan tek görev çıkar, takvim davetleri atlanır.
+          Outlook'un açık oturumu kullanılır; parola sorulmaz, saklanmaz.
+        </p>
+        <p class="warn-note" id="mail-unsupported" hidden>
+          Bu özellik yalnız Windows'ta Outlook ile çalışır.
+        </p>
+
+        <label class="checkbox">
+          <input type="checkbox" id="mail-enabled" />
+          E-postadan görev üret
+        </label>
+
+        <div class="field">
+          <label for="mail-addresses">Takip edilen adresler</label>
+          <input type="text" id="mail-addresses" placeholder="ornek@example.com, *@example.com" />
+          <p class="hint">
+            Virgülle ayırın. <code>*@example.com</code> yazarsanız o alan adının tamamı sayılır.
+          </p>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="mail-days">Kaç günlük geçmiş taransın</label>
+            <input type="number" id="mail-days" min="1" max="365" step="1" />
+          </div>
+          <div class="field">
+            <label for="mail-body-limit">Açıklama sınırı (karakter)</label>
+            <input type="number" id="mail-body-limit" min="200" max="100000" step="100" />
+          </div>
+        </div>
+
+        <label class="checkbox">
+          <input type="checkbox" id="mail-scan-on-refresh" />
+          Güncelle çalışırken e-postaları da tara
+        </label>
+
+        <div class="field">
+          <span class="label-text">Klasörler</span>
+          <div class="folder-tree" id="mail-folders"></div>
+          <p class="hint" id="mail-folders-hint">
+            Seçilen: Gelen Kutusu. Başka klasör eklemek için <strong>Klasörleri getir</strong>.
+          </p>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="mail-save">Kaydet</button>
+          <button id="mail-folders-fetch">Klasörleri getir</button>
+          <button id="mail-test">Bağlantıyı sına</button>
+          <button id="mail-scan">Şimdi tara</button>
+        </div>
+        <div class="status" id="mail-status" hidden></div>
+      </div>
+
       <div class="card" id="appearance">
         <h2>Görünüm</h2>
         <p class="hint">

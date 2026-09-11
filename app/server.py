@@ -12,6 +12,7 @@ from . import __version__, paths
 from .api import router
 from .context import AppContext
 from .jira_client import JiraError
+from .mail import MailError
 from .repository import RepositoryError
 
 
@@ -25,6 +26,13 @@ def create_app(context: AppContext) -> FastAPI:
 
     @app.exception_handler(RepositoryError)
     async def _repository_error(_: Request, exc: RepositoryError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status,
+            content={"error": {"code": exc.code, "message": exc.message}},
+        )
+
+    @app.exception_handler(MailError)
+    async def _mail_error(_: Request, exc: MailError) -> JSONResponse:
         return JSONResponse(
             status_code=exc.status,
             content={"error": {"code": exc.code, "message": exc.message}},

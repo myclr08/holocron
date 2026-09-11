@@ -51,6 +51,7 @@ const state = {
     summary: { open: 0, overdue: 0 },
     baseUrl: "",
     drag: null,
+    mail: false,
   },
 };
 
@@ -1596,6 +1597,11 @@ function taskCard(task, column) {
     );
   }
 
+  if (task.source === "mail") {
+    card.classList.add("is-mail");
+    card.appendChild(taskMailLine(task));
+  }
+
   if (task.issue) card.appendChild(taskIssueLine(task.issue));
 
   if (task.description) {
@@ -1616,6 +1622,35 @@ function taskCard(task, column) {
     card.classList.remove("dragging");
   });
   return card;
+}
+
+/** E-postadan gelen kartin kaynak satiri: zarf, rozet, gonderen, mesaj sayisi. */
+function taskMailLine(task) {
+  const line = h("div", { class: "task-mail" }, [icon("mail")]);
+  line.appendChild(h("span", { class: "mail-badge", text: "e-posta" }));
+  if (task.mail_sender) {
+    line.appendChild(h("span", { class: "mail-from", text: "Kimden: " + task.mail_sender }));
+  }
+  if ((task.mail_count || 0) > 1) {
+    const last = shortStamp(task.mail_last_at);
+    line.appendChild(
+      h("span", {
+        class: "mail-count",
+        text: `${task.mail_count} mesaj${last ? " · son: " + last : ""}`,
+        title: "Aynı konuşmadan gelen mesaj sayısı",
+      })
+    );
+  }
+  return line;
+}
+
+/** "GG.AA SS:dd" -- kart dar, yil yazilmaz. */
+function shortStamp(iso) {
+  const full = stamp(iso);
+  if (!full) return "";
+  const parts = full.split(" ");
+  const day = (parts[0] || "").split(".");
+  return day.length === 3 ? `${day[0]}.${day[1]} ${parts[1] || ""}`.trim() : full;
 }
 
 function taskIssueLine(issue) {
@@ -1668,6 +1703,78 @@ async function moveTask(taskId, status, position) {
     await loadTasks();
   } catch (err) {
     fail(err);
+  }
+}
+
+/** Pencerede e-posta kaynagi: salt okunur bilgi + Outlook'ta acma dugmesi. */
+function mailSourceBox(task) {
+  const box = h("div", { class: "mail-source" }, [
+    h("div", { class: "mail-source-head" }, [
+      icon("mail"),
+      h("strong", { text: "E-postadan geldi" }),
+    ]),
+  ]);
+  if (task.mail_sender) {
+    box.appendChild(h("div", { class: "hint", text: "Kimden: " + task.mail_sender }));
+  }
+  if (task.mail_received_at) {
+    box.appendChild(h("div", { class: "hint", text: "Alındı: " + stamp(task.mail_received_at) }));
+  }
+  if ((task.mail_count || 0) > 1) {
+    box.appendChild(
+      h("div", {
+        class: "hint",
+        text: `${task.mail_count} mesaj · son: ${stamp(task.mail_last_at)}`,
+      })
+    );
+  }
+  box.appendChild(
+    h("p", {
+      class: "hint",
+      text: "Kaynak bilgisi düzenlenemez. Aynı konuşmadan ikinci bir görev üretilmez.",
+    })
+  );
+  box.appendChild(
+    h("button", {
+      text: "Outlook'ta aç",
+      title: "E-postayı Outlook penceresinde aç",
+      onclick: () => openTaskMail(task),
+    })
+  );
+  return box;
+}
+
+async function openTaskMail(task) {
+  try {
+    await api(`/api/tasks/${task.id}/open-mail`, { method: "POST" });
+    toast("Outlook açıldı", task.title, "ok");
+  } catch (err) {
+    fail(err);
+  }
+}
+
+/** Panodaki "E-postayı tara" dugmesi. */
+async function scanMailNow() {
+  const button = el("tasks-scan");
+  button.disabled = true;
+  try {
+    const data = await api("/api/mail/scan", { method: "POST" });
+    const summary = data.summary || {};
+    const items = (summary.errors || []).map((item) =>
+      h("span", { text: item.message || item.code })
+    );
+    toast(
+      "E-posta tarandı",
+      `${summary.created || 0} yeni görev · ${summary.appended || 0} mesaj eklendi · ` +
+        `${summary.scanned || 0} e-posta tarandı`,
+      items.length ? "" : "ok",
+      items
+    );
+    await loadTasks();
+  } catch (err) {
+    fail(err);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -1739,6 +1846,9 @@ function taskModal(existing, preset) {
       text: "Görevler Jira'ya gitmez; bağlı kayıt yalnızca burada görünür. Ctrl+Enter kaydeder.",
     }),
   ]);
+
+  // Kaynak alanlari bilgi amaclidir, duzenlenemez.
+  if (existing && existing.source === "mail") body.appendChild(mailSourceBox(existing));
 
   const save = async () => {
     const payload = {
@@ -1922,7 +2032,12 @@ function refreshToast(status) {
       `${summary.new || 0} yeni`,
       `${summary.updated || 0} güncellendi`,
     ];
+    const mail = summary.mail;
+    if (mail && mail.created) parts.push(`${mail.created} görev e-postadan`);
     const items = [];
+    (mail && mail.errors ? mail.errors : []).forEach((item) =>
+      items.push(h("span", { text: "E-posta: " + (item.message || item.code) }))
+    );
     (status.errors || []).forEach((item) =>
       items.push(h("span", { text: `${item.name}: ${item.message}` }))
     );
@@ -2008,6 +2123,7 @@ function bindEvents() {
   });
   el("new-task").addEventListener("click", () => taskModal(null));
   el("tasks-export").addEventListener("click", exportTasks);
+  el("tasks-scan").addEventListener("click", scanMailNow);
   el("tasks-old").addEventListener("click", () => {
     state.tasks.includeOld = !state.tasks.includeOld;
     loadTasks();
@@ -2085,6 +2201,9 @@ document.addEventListener("DOMContentLoaded", () => {
       applyAppearance(settings);
       maybeOpenCrawl(settings);
       state.baseUrl = (settings["jira.base_url"] || "").replace(/\/+$/, "");
+      // Dugme yalnizca ozellik acikken ve Windows'ta gorunur.
+      state.tasks.mail = settings["mail.enabled"] === "1" && settings.mail_supported !== false;
+      el("tasks-scan").hidden = !state.tasks.mail;
       const hint = el("connection-hint");
       if (settings["jira.base_url"] && settings.secret_set) {
         hint.textContent = "Bağlantı hazır: " + settings["jira.base_url"];

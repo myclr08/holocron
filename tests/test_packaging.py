@@ -37,6 +37,7 @@ def fake_wheels(tmp_path: Path) -> Path:
         "cryptography-44.0.0-cp39-abi3-win_amd64.whl",
         "pydantic_core-2.27.2-cp313-cp313-win_amd64.whl",
         "fastapi-0.115.6-py3-none-any.whl",
+        "pywin32-312-cp313-cp313-win_amd64.whl",
     ):
         (wheels / name).write_bytes(b"")
     return wheels
@@ -160,3 +161,70 @@ def test_lite_zip_contents(fake_wheels, tmp_path):
     assert not any("__pycache__" in name or name.endswith(".pyc") for name in names)
     for unwanted in ("holocron/tests/", "holocron/tools/", "holocron/.github/"):
         assert not any(name.startswith(unwanted) for name in names), unwanted
+
+
+# --- pywin32 (Asama 7) --------------------------------------------------
+#
+# `sys_platform == "win32"` isaretcisi `pip download --platform win_amd64`
+# sirasinda CALISTIRAN yoruma gore degerlendirilir: Linux'tan uretilen Windows
+# paketinde pywin32 sessizce eksik kaliyordu. Denetim bu yuzden var.
+
+
+def test_requirements_pin_pywin32_for_windows_only():
+    text = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    assert "pywin32==" in text
+    line = next(row for row in text.splitlines() if row.startswith("pywin32"))
+    assert 'sys_platform == "win32"' in line
+
+
+def test_windows_package_demands_the_pywin32_wheel(tmp_path):
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    for name in (
+        "cryptography-44.0.0-cp39-abi3-win_amd64.whl",
+        "pydantic_core-2.27.2-cp313-cp313-win_amd64.whl",
+    ):
+        (wheels / name).write_bytes(b"")
+    assert any("pywin32" in item for item in builder.check_wheels(wheels, "windows"))
+
+
+def test_linux_package_does_not_demand_pywin32(tmp_path):
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    for name in (
+        "cryptography-44.0.0-cp39-abi3-win_amd64.whl",
+        "pydantic_core-2.27.2-cp313-cp313-win_amd64.whl",
+    ):
+        (wheels / name).write_bytes(b"")
+    assert builder.check_wheels(wheels, "linux") == []
+
+
+def test_the_windows_wheel_is_there_when_downloaded(fake_wheels):
+    assert builder.check_wheels(fake_wheels, "windows") == []
+
+
+def test_pywin32_never_enters_the_linux_zip(fake_wheels, tmp_path):
+    output = builder.build(
+        target="linux",
+        embed_zip=None,
+        wheels=fake_wheels,
+        python_version="3.13",
+        dist=tmp_path / "dist",
+    )
+    with zipfile.ZipFile(output) as archive:
+        names = archive.namelist()
+    assert not any("pywin32" in name for name in names)
+    assert any("cryptography" in name for name in names)
+
+
+def test_pywin32_stays_in_the_windows_zip(fake_wheels, tmp_path):
+    output = builder.build(
+        target="windows",
+        embed_zip=None,
+        wheels=fake_wheels,
+        python_version="3.13",
+        dist=tmp_path / "dist",
+        variant=builder.VARIANT_LITE,
+    )
+    with zipfile.ZipFile(output) as archive:
+        assert any("pywin32" in name for name in archive.namelist())

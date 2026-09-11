@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from . import repository
 from .jira_client import KEY_CHUNK_SIZE, JiraError
+from .mail import MailError
+from .mail import intake as mail_intake
 from .settings_store import MODE_CLOUD
 
 if TYPE_CHECKING:  # dairesel ice aktarimi onlemek icin yalnizca tip zamaninda
@@ -76,6 +78,8 @@ def empty_summary() -> dict[str, Any]:
         "unchanged": 0,
         "not_found": [],
         "filter_groups": {},
+        # Posta taramasi calistiysa ozeti buraya duser; calismadiysa None kalir.
+        "mail": None,
     }
 
 
@@ -167,9 +171,26 @@ class RefreshManager:
     # --- is govdesi ---------------------------------------------------
 
     def _run(self, context: "AppContext", group_id: int | None) -> None:
-        conn = context.connection()
+        """Once Jira, sonra e-posta.
+
+        Iki asama birbirini engellemez: Jira patlasa da posta taranir, posta
+        patlasa da Jira sonucu kaydedilir. Iptal edilen iste posta taranmaz.
+        """
         summary = empty_summary()
         report = repository.UpsertReport()
+        state, error = self._run_jira(context, group_id, summary, report)
+        if state != STATE_CANCELLED:
+            self._scan_mail(context, summary)
+        self._finish(state, summary, report, error=error)
+
+    def _run_jira(
+        self,
+        context: "AppContext",
+        group_id: int | None,
+        summary: dict[str, Any],
+        report: repository.UpsertReport,
+    ) -> tuple[str, dict[str, str] | None]:
+        conn = context.connection()
         try:
             config = context.settings.jira_config()
             client = context.client_factory(config)
@@ -188,7 +209,7 @@ class RefreshManager:
             fetched: set[str] = set()
             for index, group in enumerate(filter_groups, start=1):
                 if self._cancel.is_set():
-                    return self._finish(STATE_CANCELLED, summary, report)
+                    return STATE_CANCELLED, None
                 self._touch(stage=f"Filtre süzülüyor: {group['name']}", done=index - 1)
                 try:
                     issues = client.search(group["jql"], fields=selector)
@@ -210,7 +231,7 @@ class RefreshManager:
 
             self._touch(done=len(filter_groups))
             if self._cancel.is_set():
-                return self._finish(STATE_CANCELLED, summary, report)
+                return STATE_CANCELLED, None
 
             # JQL'den gelmeyen anahtarlar: manuel grup uyeleri ve iglenmis kayitlar.
             wanted = [
@@ -226,7 +247,7 @@ class RefreshManager:
 
             for index, chunk in enumerate(chunks, start=1):
                 if self._cancel.is_set():
-                    return self._finish(STATE_CANCELLED, summary, report)
+                    return STATE_CANCELLED, None
                 self._touch(
                     stage=f"Kayıtlar çekiliyor ({index}/{len(chunks)})",
                     done=len(filter_groups) + index - 1,
@@ -241,16 +262,41 @@ class RefreshManager:
                 done=len(filter_groups) + max(len(chunks), 1),
                 total=len(filter_groups) + max(len(chunks), 1),
             )
-            self._finish(STATE_DONE, summary, report)
+            return STATE_DONE, None
         except JiraError as exc:
-            self._finish(STATE_ERROR, summary, report, error={"code": exc.code, "message": exc.message})
+            return STATE_ERROR, {"code": exc.code, "message": exc.message}
         except Exception as exc:  # beklenmeyen hata da temiz gorunmeli
-            self._finish(
-                STATE_ERROR,
-                summary,
-                report,
-                error={"code": "refresh_failed", "message": str(exc) or exc.__class__.__name__},
-            )
+            return STATE_ERROR, {
+                "code": "refresh_failed",
+                "message": str(exc) or exc.__class__.__name__,
+            }
+
+    def _scan_mail(self, context: "AppContext", summary: dict[str, Any]) -> None:
+        """Isin son asamasi: e-posta taramasi.
+
+        Jira hatasi burayi engellemez, buradaki hata da Jira sonucunu
+        bozmaz; posta hatasi yalnizca ozetin `errors` listesine duser.
+        """
+        try:
+            config = mail_intake.load_config(context.settings)
+        except Exception:  # pragma: no cover - ayar okunamiyorsa sessizce gec
+            return
+        if not (config.ready and config.scan_on_refresh):
+            return
+
+        self._touch(stage="E-posta taranıyor")
+        try:
+            source = context.mail_factory(config.body_limit)
+            with context.db_lock:
+                summary["mail"] = mail_intake.scan(context.connection(), source, config)
+        except MailError as exc:
+            summary["mail"] = {"created": 0, "appended": 0, "errors": [
+                {"code": exc.code, "message": exc.message}
+            ]}
+        except Exception as exc:
+            summary["mail"] = {"created": 0, "appended": 0, "errors": [
+                {"code": "mail_failed", "message": str(exc) or exc.__class__.__name__}
+            ]}
 
     # --- ic yardimcilar -----------------------------------------------
 

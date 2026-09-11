@@ -19,6 +19,8 @@ from . import (
 from .context import AppContext
 from .diagnose import run_diagnostics
 from .jira_client import JiraError
+from .mail import MailError
+from .mail import intake as mail_intake
 from .lifecycle import BEAT_INTERVAL_SECONDS
 from .repository import RepositoryError
 from .settings_store import MODE_CLOUD, MODE_SERVER, PROXY_MODES
@@ -497,6 +499,63 @@ def _task_payload(context: AppContext, task: dict[str, Any]) -> dict[str, Any]:
     else:
         card["issue"] = None
     return card
+
+
+# --- e-posta (Outlook) --------------------------------------------------
+#
+# Windows disinda uclar `feature_unavailable` doner: COM yok, sahte bir
+# basari da uretilmez. Sifre saklanmaz; acik Outlook oturumu kullanilir.
+
+
+def mail_source(context: AppContext, config: Any = None) -> Any:
+    """Yapilandirilmis posta kaynagi (uretimde Outlook, testte sahte kaynak)."""
+    return context.mail_factory(getattr(config, "body_limit", None))
+
+
+@router.post("/mail/test")
+def test_mail(request: Request) -> dict[str, Any]:
+    """Baglantiyi sinar: Outlook surumu, hesap adi, klasor oge sayilari."""
+    context = get_context(request)
+    config = mail_intake.load_config(context.settings)
+    source = mail_source(context, config)
+    result = source.probe()
+    return {"result": result}
+
+
+@router.get("/mail/folders")
+def list_mail_folders(request: Request) -> dict[str, Any]:
+    """Klasor agaci; arayuzdeki onay kutulu secici bunu cizer."""
+    context = get_context(request)
+    config = mail_intake.load_config(context.settings)
+    source = mail_source(context, config)
+    return {"folders": [folder.to_dict() for folder in source.folders()]}
+
+
+@router.post("/mail/scan")
+def scan_mail(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
+    """Elle tarama. Ozet: created / appended / skipped_* / scanned / errors."""
+    context = get_context(request)
+    config = mail_intake.load_config(context.settings)
+    if not config.enabled:
+        return error_response("mail_disabled", "Önce Ayarlar → E-posta'dan taramayı açın.")
+    if not config.addresses:
+        return error_response("mail_no_address", "Önce takip edilecek e-posta adreslerini girin.")
+    source = mail_source(context, config)
+    with context.db_lock:
+        summary = mail_intake.scan(context.connection(), source, config)
+    return {"summary": summary, "board": _board_payload(task_utils.build_board(context))}
+
+
+@router.post("/tasks/{task_id}/open-mail")
+def open_task_mail(request: Request, task_id: int) -> dict[str, Any]:
+    """Gorevin kaynagi olan e-postayi Outlook'ta acar."""
+    context = get_context(request)
+    task = repository.require_task(context.connection(), task_id)
+    if task["source"] != repository.TASK_SOURCE_MAIL or not task["mail_entry_id"]:
+        raise MailError("mail_not_found", "Bu görev bir e-postadan gelmedi.", status=404)
+    source = mail_source(context)
+    source.open_message(task["mail_entry_id"], task["mail_store_id"])
+    return {"ok": True}
 
 
 # --- yerel alanlar ------------------------------------------------------

@@ -1413,6 +1413,66 @@ html.crawl-open .layout { visibility: hidden; }
 
 .task-done-at { color: var(--muted); font-size: 11px; font-family: var(--mono); }
 
+/* --- e-postadan gelen gorevler ----------------------------------------- */
+
+/* Sol kenardaki ince mavi serit: kart bir bakista "bu benim yazdigim degil" der. */
+.task-card.is-mail { border-left: 2px solid var(--saber-blue); }
+
+.task-mail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.task-mail .icon { color: var(--saber-blue); flex: 0 0 auto; }
+
+.mail-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--saber-blue);
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.mail-from { overflow-wrap: anywhere; }
+.mail-count { font-family: var(--mono); color: var(--text); }
+
+/* Duzenleme penceresindeki salt okunur kaynak kutusu. */
+.mail-source {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--saber-blue);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.mail-source-head { display: flex; align-items: center; gap: 6px; color: var(--saber-blue); }
+.mail-source .hint { margin: 0; }
+.mail-source button { margin-top: 6px; }
+
+/* Ayarlardaki klasor agaci. */
+.folder-tree {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  padding: 8px;
+}
+
+.folder-tree:empty { display: none; }
+.folder-row { margin: 0; font-size: 12px; }
+
 /* 1024'te sutunlar yan yana kalir, yalnizca daralir. */
 @media (max-width: 1024px) {
   .kanban { gap: 8px; }

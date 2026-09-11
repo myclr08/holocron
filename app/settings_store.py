@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from .mail.source import is_supported as mail_supported
 from .secrets import SecretBox, SecretError
 
 MODE_CLOUD = "cloud"
@@ -50,7 +51,19 @@ DEFAULTS: dict[str, str] = {
     "ui.starfield": "1",
     "ui.motion": "1",
     "ui.crawl_seen": "",
+    # E-posta (Outlook COM): sifre saklanmaz, acik oturum kullanilir.
+    "mail.enabled": "0",
+    "mail.addresses": "",
+    "mail.folders": '["Gelen Kutusu"]',
+    "mail.days": "30",
+    "mail.body_limit": "4000",
+    "mail.scan_on_refresh": "1",
 }
+
+# "1"/"0" olarak saklanan anahtarlar: arayuz bazen gercek boolean gonderir.
+BOOLEAN_KEYS: frozenset[str] = frozenset(
+    {"net.verify_ssl", "net.ipv4_first", "mail.enabled", "mail.scan_on_refresh"}
+)
 
 # Arayuzun gonderebilecegi duz ayarlar; buradaki liste beyaz listedir.
 PUBLIC_KEYS: tuple[str, ...] = tuple(DEFAULTS)
@@ -145,6 +158,8 @@ class SettingsStore:
         data["verify_ssl"] = self.get("net.verify_ssl", "1") == "1"
         data["ipv4_first"] = self.get("net.ipv4_first", "1") == "1"
         data["secret_set"] = self.has_secret("jira.secret")
+        # Arayuz karti buna bakar: Windows disinda dugmeler pasif kalir.
+        data["mail_supported"] = mail_supported()
         return data
 
     def apply(self, payload: dict[str, Any]) -> None:
@@ -153,7 +168,7 @@ class SettingsStore:
             if key not in payload:
                 continue
             value = payload[key]
-            if key in ("net.verify_ssl", "net.ipv4_first"):
+            if key in BOOLEAN_KEYS:
                 value = "1" if _as_bool(value) else "0"
             self.set(key, "" if value is None else str(value))
 

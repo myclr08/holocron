@@ -12,8 +12,8 @@ uygulamanın yanındaki `holocron.db` dosyasında kalır, hiçbir yere gönderil
 
 Gruplar (manuel ve JQL filtresi), kayıt listesi, sütun seçici, arama, arka
 planda çalışan **Güncelle** işi, kendi tanımladığınız **yerel alanlar** (alan
-başına değişim geçmişiyle), kişisel kanban panosu (**Görevlerim**),
-**Excel'e aktarma** ve tam tema kullanılabilir durumda. Taşınabilir Windows/Linux paketleri etiket itildiğinde üretilir.
+başına değişim geçmişiyle), kişisel kanban panosu (**Görevlerim**), **Outlook e-postalarından görev
+üretme** (yalnız Windows), **Excel'e aktarma** ve tam tema kullanılabilir durumda. Taşınabilir Windows/Linux paketleri etiket itildiğinde üretilir.
 
 ## Gereksinimler
 
@@ -96,7 +96,13 @@ Tekerlekler şöyle toplanır:
 ```bash
 pip download --only-binary=:all: --python-version 3.13 \
   --platform win_amd64 --implementation cp -r requirements.txt -d wheels
+# pywin32'nin isaretcisi (sys_platform == "win32") pip'in CALISTIGI yoruma gore
+# degerlendirilir: Linux'tan indirirken sessizce atlanir, ayrica istenir.
+pip download --only-binary=:all: --python-version 3.13 \
+  --platform win_amd64 --implementation cp --no-deps pywin32 -d wheels
 ```
+
+Linux paketinde `pywin32` tekerlekleri `wheels/` klasörüne kopyalanmaz.
 
 ### Çalıştırma seçenekleri
 
@@ -348,6 +354,46 @@ Açıklama, Not, Son tarih (gerçek tarih hücresi), Jira kaydı (köprü), Jira
 Jira durumu, Oluşturma, Tamamlanma. Dosya eski biten kartları da kapsar.
 Doğrudan da indirilebilir: `GET /api/tasks/export.xlsx?status=all|todo|doing|done`
 
+### E-posta (yalnız Windows)
+
+**Ayarlar → E-posta**, Outlook'taki postalarınızdan görev üretir. Kimden, Kime
+ya da CC alanında sizin yazdığınız adreslerden biri geçen her e-posta
+**Görevlerim → Yapılacak** sütununun en üstüne düşer: konu görevin adı, gövde
+açıklaması, altına da "Kimden / Alındı" satırı yazılır. Kart zarf ikonu ve
+**e-posta** rozetiyle gelir, penceresinde **Outlook'ta aç** düğmesi durur.
+
+Nasıl çalışır:
+
+- **Bağlantı**: masaüstündeki klasik Outlook'a COM ile bağlanılır (`pywin32`).
+  Açık olan oturumunuz kullanılır: **parola sorulmaz, hiçbir yere yazılmaz**,
+  sunucu adresi girilmez. Outlook kapalıysa "Bağlantıyı sına" bunu söyler.
+- **Adresler**: virgülle ayrılır. `*@example.com` yazarsanız o alan adının
+  tamamı sayılır. Büyük/küçük harf ayrımı yoktur. Kurum içi adresler Exchange'de
+  `/O=.../CN=...` biçiminde gelir; Holocron bunları birincil SMTP adresine
+  çevirir, çeviremezse o alıcıyı yok sayar (postayı düşürmez).
+- **Klasörler**: varsayılan Gelen Kutusu'dur. **Klasörleri getir** Outlook'tan
+  ağacı çeker, işaretlediğiniz klasörler `Gelen Kutusu\Alt\Klasör` yoluyla
+  saklanır.
+- **Pencere**: varsayılan son 30 gün. Klasör yeniden eskiye taranır ve
+  pencerenin dışına çıkılınca durulur.
+- **Takvim yok**: toplantı davetleri ve yanıtları, görev istekleri, teslim
+  raporları ve "ofiste değilim" şablonları atlanır. Yalnızca normal postalar
+  (`IPM.Note`) görev üretir.
+- **Tek görev kuralı**: bir konuşmadan yalnızca bir görev çıkar. Aynı
+  konuşmanın sonraki mesajları karta "N mesaj · son: GG.AA SS:dd" satırı olarak
+  düşer. Görevi **silerseniz, arşivlerseniz ya da Yapıldı'ya taşırsanız o
+  konuşma bir daha görev üretmez** — konuşma kaydı silinen görevden sonra da
+  durur.
+- **Ne zaman taranır**: **Şimdi tara** düğmesiyle elle, ya da **Güncelle**
+  işinin son aşaması olarak (kapatılabilir). Jira hatası e-posta taramasını
+  engellemez, tersi de geçerlidir; özet balonunda "N görev e-postadan" yazar.
+
+Windows dışında kart "Bu özellik yalnız Windows'ta Outlook ile çalışır" der ve
+düğmeler pasiftir; uçlar `feature_unavailable` döner. `pywin32` yalnızca Windows
+paketine girer (`requirements.txt` içinde `sys_platform == "win32"` işaretçisi
+vardır), Linux zip'ine alınmaz. Ayrı bir `pywin32_postinstall` adımı
+**gerekmez**: `win32com` site-packages'tan olduğu gibi çalışır.
+
 ### Güncelle
 
 **Güncelle** bütün grupları, **Güncelle (bu grup)** yalnız açık olanı tazeler.
@@ -454,6 +500,9 @@ değiştirilir (`tests/fake_jira.py`).
 | `app/tasks.py` | Görev panosunun kurulması (sütunlar, son tarih durumu) |
 | `app/export.py` | Grup → Excel (.xlsx) dosyası |
 | `app/refresh.py` | Arka planda çalışan Güncelle işi |
+| `app/mail/` | Outlook'tan görev üretme (kaynak sözleşmesi, COM sarmalayıcı, iş mantığı) |
+| `app/mail/intake.py` | Eşleştirme, tekilleştirme, görev üretimi (COM'dan bağımsız) |
+| `app/mail/outlook.py` | Outlook COM sarmalayıcısı (yalnız Windows) |
 | `app/static/` | Vanilla HTML/CSS/JS arayüz, dış bağımlılık yok |
 | `app/static/fonts/` | Gömülü OFL yazı tipleri ve lisans metinleri |
 | `app/static/js/starfield.js` | Arka plandaki yıldız alanı (canvas) |

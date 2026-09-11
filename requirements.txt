@@ -3,3 +3,5 @@ uvicorn==0.34.0
 requests==2.32.3
 openpyxl==3.1.5
 cryptography==44.0.0
+# Outlook COM (Asama 7): yalnizca Windows'ta kurulur, Linux paketine girmez.
+pywin32==312; sys_platform == "win32"

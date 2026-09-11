@@ -14,6 +14,7 @@ from app import db  # noqa: E402
 from app.context import AppContext  # noqa: E402
 from app.jira_client import create_client  # noqa: E402
 from app.lifecycle import Heartbeat  # noqa: E402
+from app.mail.fake import FakeMailSource  # noqa: E402
 from app.secrets import SecretBox  # noqa: E402
 from app.settings_store import SettingsStore  # noqa: E402
 from tests.fake_jira import FakeJira  # noqa: E402
@@ -63,12 +64,19 @@ def client_factory(fake_jira, sleeps):
 
 
 @pytest.fixture
-def context(conn, store, client_factory):
+def fake_mail():
+    """Bellek ici posta kaynagi; hicbir test gercek Outlook'a dokunmaz."""
+    return FakeMailSource()
+
+
+@pytest.fixture
+def context(conn, store, client_factory, fake_mail):
     return AppContext(
         conn=conn,
         settings=store,
         heartbeat=Heartbeat(),
         client_factory=client_factory,
+        mail_factory=lambda body_limit=None: fake_mail,
     )
 
 

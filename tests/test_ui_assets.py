@@ -457,3 +457,102 @@ def test_the_diagnosis_is_built_from_nodes_not_html(api_client):
     body = script.split("function renderDiagnosis", 1)[1].split("async function diagnose", 1)[0]
     assert "innerHTML" not in body
     assert "textContent" in body
+
+
+# --- e-posta karti ve posta kaynakli kartlar ----------------------------
+
+
+def test_mail_card_is_on_the_settings_page(api_client):
+    page = api_client.get("/settings").text
+    for marker in (
+        'id="mail-card"',
+        ">E-posta<",
+        'id="mail-enabled"',
+        'id="mail-addresses"',
+        'id="mail-days"',
+        'id="mail-body-limit"',
+        'id="mail-folders"',
+        'id="mail-folders-fetch"',
+        "Klasörleri getir",
+        'id="mail-test"',
+        'id="mail-scan"',
+        "Şimdi tara",
+        'id="mail-unsupported"',
+        "Bu özellik yalnız Windows'ta Outlook ile çalışır.",
+        "ornek@example.com",
+    ):
+        assert marker in page, marker
+    # Depo aciktir: karttaki her ornek adres uydurma alan adinda olmali.
+    import re
+
+    card = page.split('id="mail-card"', 1)[1].split("</div>\n      </div>", 1)[0]
+    for address in re.findall(r"[\w.*-]+@[\w.-]+", card):
+        assert address.endswith("@example.com"), address
+
+
+def test_mail_settings_script_saves_and_scans(api_client):
+    script = api_client.get("/static/js/settings.js").text
+    for marker in (
+        "/api/mail/folders",
+        "/api/mail/test",
+        "/api/mail/scan",
+        "mail.enabled",
+        "mail.addresses",
+        "mail.folders",
+        "mail.days",
+        "mail.body_limit",
+        "mail.scan_on_refresh",
+        "mail_supported",
+        "function renderFolders",
+        "function collectMail",
+    ):
+        assert marker in script, marker
+
+
+def test_the_folder_tree_is_built_from_nodes_not_html(api_client):
+    """Klasor adlari Outlook'tan gelir: innerHTML'e girmemeli."""
+    script = api_client.get("/static/js/settings.js").text
+    body = script.split("function folderRow", 1)[1].split("async function saveMail", 1)[0]
+    assert "innerHTML" not in body
+    assert "textContent" in body
+
+
+def test_the_board_can_scan_the_mail(api_client):
+    page = api_client.get("/").text
+    assert 'id="tasks-scan"' in page
+    assert "E-postayı tara" in page
+    script = api_client.get("/static/js/app.js").text
+    for marker in (
+        "/api/mail/scan",
+        "open-mail",
+        "function taskMailLine",
+        "function mailSourceBox",
+        "Outlook'ta aç",
+        '"e-posta"',
+        "Kimden: ",
+        "mail_count",
+        "görev e-postadan",
+    ):
+        assert marker in script, marker
+
+
+def test_the_envelope_icon_is_our_own_drawing(api_client):
+    common = api_client.get("/static/js/common.js").text
+    assert "mail: [" in common
+    # Emoji degil, kendi cizdigimiz SVG.
+    assert "✉" not in common
+
+
+def test_mail_card_styles_are_defined(api_client):
+    css = api_client.get("/static/css/app.css").text
+    for name in (
+        ".task-card.is-mail",
+        ".task-mail",
+        ".mail-badge",
+        ".mail-from",
+        ".mail-count",
+        ".mail-source",
+        ".folder-tree",
+        ".folder-row",
+    ):
+        assert name in css, name

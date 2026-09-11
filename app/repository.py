@@ -1088,6 +1088,17 @@ TASK_STATUS_LABELS: dict[str, str] = {
 
 TASK_TITLE_LIMIT = 200
 
+# Gorevin kaynagi: kullanici mi yazdi, e-postadan mi dustu.
+TASK_SOURCE_MANUAL = "manual"
+TASK_SOURCE_MAIL = "mail"
+TASK_SOURCES: tuple[str, ...] = (TASK_SOURCE_MANUAL, TASK_SOURCE_MAIL)
+
+# Konusma durumu: acik gorev / gorev silindi / kullanici yoksaydi.
+MAIL_ACTIVE = "active"
+MAIL_TASK_DELETED = "task_deleted"
+MAIL_IGNORED = "ignored"
+MAIL_STATES: tuple[str, ...] = (MAIL_ACTIVE, MAIL_TASK_DELETED, MAIL_IGNORED)
+
 
 def clean_task_status(value: Any) -> str:
     text = str(value or "").strip().lower()
@@ -1234,9 +1245,20 @@ def update_task(
 
 
 def delete_task(conn: sqlite3.Connection, task_id: int) -> bool:
+    """Gorevi siler.
+
+    E-postadan gelen bir gorev silindiginde konusma satiri KALIR, yalnizca
+    `task_deleted` isaretlenir: kullanici sildiyse ayni konusma bir daha gorev
+    uretmemeli.
+    """
     task = require_task(conn, task_id)
     with conn:
         conn.execute("DELETE FROM tasks WHERE id = ?", (task["id"],))
+        conn.execute(
+            "UPDATE mail_conversations SET task_id = NULL, state = ? WHERE task_id = ?",
+            (MAIL_TASK_DELETED, task["id"]),
+        )
+        conn.execute("UPDATE mail_messages SET task_id = NULL WHERE task_id = ?", (task["id"],))
     _renumber_tasks(conn, task["status"])
     return True
 
@@ -1366,7 +1388,197 @@ def _task_dict(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "done_at": row["done_at"],
+        "source": row["source"] or TASK_SOURCE_MANUAL,
+        "mail_conversation_id": row["mail_conversation_id"] or "",
+        "mail_sender": row["mail_sender"] or "",
+        "mail_received_at": row["mail_received_at"] or "",
+        "mail_count": int(row["mail_count"] or 0),
+        "mail_last_at": row["mail_last_at"] or "",
+        "mail_entry_id": row["mail_entry_id"] or "",
+        "mail_store_id": row["mail_store_id"] or "",
     }
+
+
+# --- posta kaynakli gorevler --------------------------------------------
+#
+# Tekillestirmenin otoritesi `mail_conversations`: bir konusma buraya yazildi
+# mi, bir daha gorev uretmez. Gorev silinse bile satir kalir. `mail_messages`
+# her isledigimiz mesaji tutar; ayni mesaji iki kez islemeyi de bu engeller.
+
+
+def get_mail_conversation(
+    conn: sqlite3.Connection, conversation_id: str
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM mail_conversations WHERE conversation_id = ?",
+        (str(conversation_id or ""),),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "conversation_id": row["conversation_id"],
+        "task_id": row["task_id"],
+        "state": row["state"],
+        "first_seen": row["first_seen"],
+        "last_seen": row["last_seen"],
+    }
+
+
+def upsert_mail_conversation(
+    conn: sqlite3.Connection,
+    conversation_id: str,
+    task_id: int | None = None,
+    state: str = MAIL_ACTIVE,
+    seen_at: str | None = None,
+) -> dict[str, Any]:
+    stamp = seen_at or now_iso()
+    marker = str(conversation_id or "")
+    with conn:
+        conn.execute(
+            "INSERT INTO mail_conversations (conversation_id, task_id, state, first_seen, last_seen) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(conversation_id) DO UPDATE SET task_id = excluded.task_id, "
+            "state = excluded.state, last_seen = excluded.last_seen",
+            (marker, task_id, state if state in MAIL_STATES else MAIL_ACTIVE, stamp, stamp),
+        )
+    return get_mail_conversation(conn, marker) or {}
+
+
+def touch_mail_conversation(
+    conn: sqlite3.Connection, conversation_id: str, seen_at: str | None = None
+) -> None:
+    """Yalnizca 'son goruldu' damgasi; durum ve gorev bagi degismez."""
+    with conn:
+        conn.execute(
+            "UPDATE mail_conversations SET last_seen = ? WHERE conversation_id = ?",
+            (seen_at or now_iso(), str(conversation_id or "")),
+        )
+
+
+def mail_message_seen(conn: sqlite3.Connection, message_id: str) -> bool:
+    marker = str(message_id or "")
+    if not marker:
+        return False
+    row = conn.execute(
+        "SELECT 1 FROM mail_messages WHERE message_id = ?", (marker,)
+    ).fetchone()
+    return row is not None
+
+
+def record_mail_message(
+    conn: sqlite3.Connection, message: Any, task_id: int | None = None
+) -> None:
+    """Islenen mesaji kaydeder (duck typing: kaynak nesnesi COM'dan bagimsiz)."""
+    received = getattr(message, "received_at", None)
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO mail_messages (message_id, conversation_id, task_id, "
+            "subject, sender, received_at, folder_path, entry_id, store_id, seen_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(getattr(message, "message_id", "") or getattr(message, "entry_id", "")),
+                str(message.conversation() if callable(getattr(message, "conversation", None)) else ""),
+                task_id,
+                str(getattr(message, "subject", "") or ""),
+                str(getattr(message, "sender_smtp", "") or ""),
+                received.isoformat() if hasattr(received, "isoformat") else str(received or ""),
+                str(getattr(message, "folder_path", "") or ""),
+                str(getattr(message, "entry_id", "") or ""),
+                str(getattr(message, "store_id", "") or ""),
+                now_iso(),
+            ),
+        )
+
+
+def list_mail_messages(
+    conn: sqlite3.Connection, conversation_id: str
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT * FROM mail_messages WHERE conversation_id = ? ORDER BY received_at, message_id",
+        (str(conversation_id or ""),),
+    ).fetchall()
+    return [
+        {
+            "message_id": row["message_id"],
+            "conversation_id": row["conversation_id"],
+            "task_id": row["task_id"],
+            "subject": row["subject"] or "",
+            "sender": row["sender"] or "",
+            "received_at": row["received_at"] or "",
+            "folder_path": row["folder_path"] or "",
+            "entry_id": row["entry_id"] or "",
+            "store_id": row["store_id"] or "",
+        }
+        for row in rows
+    ]
+
+
+def create_mail_task(
+    conn: sqlite3.Connection,
+    title: str,
+    description: Any = None,
+    note: Any = None,
+    conversation_id: str = "",
+    sender: str = "",
+    received_at: str = "",
+    entry_id: str = "",
+    store_id: str = "",
+) -> dict[str, Any]:
+    """E-postadan gorev: her zaman 'Yapilacak' sutununun EN USTUNE duser."""
+    stamp = now_iso()
+    with conn:
+        conn.execute(
+            "UPDATE tasks SET position = position + 1 WHERE status = ?", (TASK_TODO,)
+        )
+        cursor = conn.execute(
+            "INSERT INTO tasks (title, description, note, due_date, status, issue_key, "
+            "position, created_at, updated_at, done_at, source, mail_conversation_id, "
+            "mail_sender, mail_received_at, mail_count, mail_last_at, mail_entry_id, "
+            "mail_store_id) "
+            "VALUES (?, ?, ?, NULL, ?, NULL, 0, ?, ?, NULL, ?, ?, ?, ?, 1, ?, ?, ?)",
+            (
+                clean_task_title(title),
+                _task_text(description),
+                _task_text(note),
+                TASK_TODO,
+                stamp,
+                stamp,
+                TASK_SOURCE_MAIL,
+                str(conversation_id or ""),
+                str(sender or ""),
+                str(received_at or ""),
+                str(received_at or ""),
+                str(entry_id or ""),
+                str(store_id or ""),
+            ),
+        )
+    return require_task(conn, int(cursor.lastrowid))  # type: ignore[arg-type]
+
+
+def bump_mail_task(
+    conn: sqlite3.Connection, task_id: int, received_at: str = ""
+) -> dict[str, Any]:
+    """Ayni konusmadan yeni mesaj: sayac artar, son mesaj damgasi guncellenir."""
+    task = require_task(conn, task_id)
+    stamp = str(received_at or "")
+    last = task["mail_last_at"]
+    with conn:
+        conn.execute(
+            "UPDATE tasks SET mail_count = COALESCE(mail_count, 0) + 1, mail_last_at = ?, "
+            "updated_at = ? WHERE id = ?",
+            (stamp if stamp > last else last, now_iso(), task["id"]),
+        )
+    return require_task(conn, task["id"])
+
+
+def task_by_conversation(
+    conn: sqlite3.Connection, conversation_id: str
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM tasks WHERE mail_conversation_id = ? ORDER BY id LIMIT 1",
+        (str(conversation_id or ""),),
+    ).fetchone()
+    return _task_dict(row) if row else None
 
 
 # --- ic yardimcilar -----------------------------------------------------

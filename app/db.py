@@ -147,11 +147,63 @@ def _migration_0003_tasks(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0004_mail(conn: sqlite3.Connection) -> None:
+    """Asama 7: Outlook e-postalarindan gorev uretme.
+
+    `mail_conversations` tekillestirmenin otoritesidir: bir konusma buraya bir
+    kez yazildiktan sonra bir daha gorev uretmez. Gorev silinse bile satir
+    KALIR (`state='task_deleted'`), yoksa silinen gorev bir sonraki taramada
+    geri gelirdi.
+    """
+    _add_column(conn, "tasks", "source", "TEXT NOT NULL DEFAULT 'manual'")
+    _add_column(conn, "tasks", "mail_conversation_id", "TEXT")
+    _add_column(conn, "tasks", "mail_sender", "TEXT")
+    _add_column(conn, "tasks", "mail_received_at", "TEXT")
+    _add_column(conn, "tasks", "mail_count", "INTEGER DEFAULT 0")
+    _add_column(conn, "tasks", "mail_last_at", "TEXT")
+    _add_column(conn, "tasks", "mail_entry_id", "TEXT")
+    _add_column(conn, "tasks", "mail_store_id", "TEXT")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS mail_conversations (
+            conversation_id TEXT PRIMARY KEY,
+            task_id         INTEGER,
+            state           TEXT NOT NULL DEFAULT 'active'
+                            CHECK (state IN ('active', 'task_deleted', 'ignored')),
+            first_seen      TEXT,
+            last_seen       TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS mail_messages (
+            message_id      TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            task_id         INTEGER,
+            subject         TEXT,
+            sender          TEXT,
+            received_at     TEXT,
+            folder_path     TEXT,
+            entry_id        TEXT,
+            store_id        TEXT,
+            seen_at         TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mail_messages_conversation
+            ON mail_messages(conversation_id, received_at);
+        CREATE INDEX IF NOT EXISTS idx_mail_messages_task ON mail_messages(task_id);
+        CREATE INDEX IF NOT EXISTS idx_mail_conversations_task
+            ON mail_conversations(task_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_mail_conversation
+            ON tasks(mail_conversation_id);
+        """
+    )
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
     (2, "local field history", _migration_0002_local_history),
     (3, "personal tasks", _migration_0003_tasks),
+    (4, "mail intake", _migration_0004_mail),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

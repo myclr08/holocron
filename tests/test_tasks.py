@@ -68,7 +68,8 @@ def test_migration_creates_the_tasks_table(conn):
     assert "tasks" in db.table_names(conn)
     assert repo.list_tasks(conn) == []
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
-    assert columns == {
+    # Asama 7 posta sutunlarini ekledi; asagidaki liste kanbanin cekirdegi.
+    assert columns >= {
         "id",
         "title",
         "description",
