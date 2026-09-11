@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/app.css" />
 </head>
 <body>
-  <div class="layout">
+  <div class="layout no-sidebar">
     <div class="brand">HOLOCRON</div>
 
     <header class="topbar">
@@ -19,17 +19,12 @@
       </div>
     </header>
 
-    <aside class="sidebar">
-      <h2>Hangar</h2>
-      <div class="empty">Henuz grup yok.</div>
-    </aside>
-
     <main class="main">
       <div class="card">
-        <h2>Jira baglantisi</h2>
+        <h2>Jira bağlantısı</h2>
         <p class="hint">
-          Kimlik bilgileri yalnizca bu bilgisayarda, sifreli olarak saklanir. Kaydedilen token
-          bir daha ekranda gosterilmez.
+          Kimlik bilgileri yalnızca bu bilgisayarda, şifreli olarak saklanır. Kaydedilen token
+          bir daha ekranda gösterilmez.
         </p>
 
         <div class="row">
@@ -49,14 +44,14 @@
         <div id="server-fields">
           <div class="row">
             <div class="field">
-              <label for="auth-type">Kimlik turu</label>
+              <label for="auth-type">Kimlik türü</label>
               <select id="auth-type">
-                <option value="pat">Kisisel erisim anahtari (PAT)</option>
-                <option value="basic">Kullanici adi ve parola</option>
+                <option value="pat">Kişisel erişim anahtarı (PAT)</option>
+                <option value="basic">Kullanıcı adı ve parola</option>
               </select>
             </div>
             <div class="field" id="server-username" hidden>
-              <label for="username">Kullanici adi</label>
+              <label for="username">Kullanıcı adı</label>
               <input type="text" id="username" placeholder="kullanici.adi" />
             </div>
           </div>
@@ -64,21 +59,21 @@
 
         <div id="cloud-fields" hidden>
           <div class="field">
-            <label for="email">Atlassian e-postasi</label>
+            <label for="email">Atlassian e-postası</label>
             <input type="text" id="email" placeholder="kullanici@example.com" />
           </div>
         </div>
 
         <div class="field">
-          <label for="secret"><span id="secret-label">Kisisel erisim anahtari (PAT)</span>
-            <span class="badge" id="secret-state">ayarsiz</span></label>
-          <input type="password" id="secret" autocomplete="off" placeholder="Deger girin" />
+          <label for="secret"><span id="secret-label">Kişisel erişim anahtarı (PAT)</span>
+            <span class="badge" id="secret-state">ayarsız</span></label>
+          <input type="password" id="secret" autocomplete="off" placeholder="Değer girin" />
         </div>
       </div>
 
       <div class="card">
-        <h2>Ag</h2>
-        <p class="hint">Kurum agi vekil sunucu ya da ozel sertifika kullaniyorsa buraya yazin.</p>
+        <h2>Ağ</h2>
+        <p class="hint">Kurum ağı vekil sunucu ya da özel sertifika kullanıyorsa buraya yazın.</p>
         <div class="row">
           <div class="field">
             <label for="proxy-http">HTTP vekil sunucu</label>
@@ -90,19 +85,19 @@
           </div>
         </div>
         <div class="field">
-          <label for="ca-file">Ozel CA dosyasi yolu</label>
-          <input type="text" id="ca-file" placeholder="C:\\sertifika\\kurum-ca.pem" />
+          <label for="ca-file">Özel CA dosyası yolu</label>
+          <input type="text" id="ca-file" placeholder="C:\sertifika\kurum-ca.pem" />
         </div>
         <label class="checkbox">
           <input type="checkbox" id="verify-ssl" checked />
-          SSL sertifikasini dogrula (kapatmak guvenligi dusurur)
+          SSL sertifikasını doğrula (kapatmak güvenliği düşürür)
         </label>
 
         <div class="actions">
           <button class="primary" id="save">Kaydet</button>
-          <button id="test">Baglantiyi sina</button>
-          <button id="fields">Alan katalogunu cek</button>
-          <button class="danger" id="clear-secret">Kayitli siri sil</button>
+          <button id="test">Bağlantıyı sına</button>
+          <button id="fields">Alan kataloğunu çek</button>
+          <button class="danger" id="clear-secret">Kayıtlı sırrı sil</button>
         </div>
         <div class="status" id="status" hidden></div>
       </div>

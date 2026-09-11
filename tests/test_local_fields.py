@@ -137,7 +137,7 @@ def test_invalid_value_is_refused_with_turkish_message(conn):
     with pytest.raises(repo.RepositoryError) as excinfo:
         repo.set_local_value(conn, "DEMO-1", field["id"], "salatalik")
     assert excinfo.value.code == "invalid_value"
-    assert "secenekler arasinda yok" in excinfo.value.message
+    assert "seçenekler arasında yok" in excinfo.value.message
     assert repo.get_local_value(conn, "DEMO-1", field["id"]) == ""
 
 
@@ -392,9 +392,9 @@ def test_local_fields_appear_in_schemas_with_derived_columns(conn):
     base = field["column_id"]
 
     assert schemas[base]["name"] == "Musteri durumu"
-    assert schemas[f"{base}:changed_at"]["name"] == "Musteri durumu (son degisim)"
+    assert schemas[f"{base}:changed_at"]["name"] == "Musteri durumu (son değişim)"
     assert schemas[f"{base}:changed_at"]["schema"]["type"] == "datetime"
-    assert schemas[f"{base}:changes"]["name"] == "Musteri durumu (kac kez degisti)"
+    assert schemas[f"{base}:changes"]["name"] == "Musteri durumu (kaç kez değişti)"
     assert schemas[f"{base}:changes"]["schema"]["type"] == "number"
 
 

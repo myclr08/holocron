@@ -10,10 +10,10 @@ uygulamanın yanındaki `holocron.db` dosyasında kalır, hiçbir yere gönderil
 
 ## Durum
 
-Aşama 3 tamam: gruplar (manuel ve JQL filtresi), kayıt listesi, sütun seçici,
-arama, arka planda çalışan **Güncelle** işi ve kendi tanımladığınız **yerel
-alanlar** (alan başına değişim geçmişiyle) kullanılabilir durumda. Excel'e
-aktarım ve tam tema sonraki aşamalarda gelecek.
+Aşama 4 tamam: gruplar (manuel ve JQL filtresi), kayıt listesi, sütun seçici,
+arama, arka planda çalışan **Güncelle** işi, kendi tanımladığınız **yerel
+alanlar** (alan başına değişim geçmişiyle) ve **Excel'e aktarma** kullanılabilir
+durumda. Tam tema sonraki aşamada gelecek.
 
 ## Gereksinimler
 
@@ -117,6 +117,27 @@ gibi sıralanır.
 Kayıt gruptan çıkarılsa bile yerel değer ve geçmiş durur (kayıt geri gelirse
 bilgi kaybolmasın).
 
+### Excel'e aktarma
+
+Araç çubuğundaki **Excel'e aktar** ekranda görüneni bir `.xlsx` dosyasına yazar.
+Küçük pencerede hangi sütunların gideceğini seçer, istersen **Geçmiş sayfasını**
+eklersin; **görünen süzgeç ve sıralama** varsayılan olarak uygulanır. Dosya adı
+`<grup-adı>-<YYYY-AA-GG>.xlsx` olur, boş grupta düğme pasiftir.
+
+- Satırlar grid ile birebir aynıdır; tek fark uzun metinlerin **kırpılmamasıdır**.
+- Tarih ve tarih-saat alanları gerçek tarih hücresi olur (`GG.AA.YYYY`,
+  `GG.AA.YYYY SS:DD`, yerel saat), sayılar sayı hücresi; anahtar sütunu Jira
+  kaydına köprü taşır.
+- İlk sayfanın adı grup adıdır (Excel'in 31 karakter ve yasak karakter kuralına
+  göre kısaltılır), başlık satırı kalın ve donuktur, otomatik filtre açıktır.
+- **Geçmiş** sayfası yalnız dışa aktarılan kayıtların, geçmişi açık yerel
+  alanlardaki değişimlerini yeniden eskiye listeler.
+- **Bilgi** sayfası grup adını, türünü, varsa JQL'i, dışa aktarma zamanını, kayıt
+  sayısını ve uygulama sürümünü taşır.
+
+Aynı dosyayı doğrudan da indirebilirsin:
+`GET /api/groups/<id>/export.xlsx?columns=issuekey,summary&history=1&q=&sort=&dir=`
+
 ### Güncelle
 
 **Güncelle** bütün grupları, **Güncelle (bu grup)** yalnız açık olanı tazeler.
@@ -176,6 +197,8 @@ değiştirilir (`tests/fake_jira.py`).
 | `app/` | Uygulama kodu (API, veritabanı, Jira istemcisi, arayüz) |
 | `app/repository.py` | Gruplar, üyelikler, kayıtlar ve alan kataloğu (tüm SQL) |
 | `app/fields.py` | Alan değerlerini metne çeviren saf formatlayıcı |
+| `app/grid.py` | Grid satırlarının kurulması (ekran ve Excel ortak kaynağı) |
+| `app/export.py` | Grup → Excel (.xlsx) dosyası |
 | `app/refresh.py` | Arka planda çalışan Güncelle işi |
 | `app/static/` | Vanilla HTML/CSS/JS arayüz, dış bağımlılık yok |
 | `tests/` | pytest testleri ve sahte Jira sunucusu |

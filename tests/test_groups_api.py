@@ -306,7 +306,7 @@ def test_refresh_runs_and_reports_status(api_client, conn, fake_jira):
     status = api_client.get("/api/refresh/status").json()["status"]
     assert status["state"] == "done"
     assert status["summary"]["new"] == 1
-    assert status["stage"] == "Tamamlandi"
+    assert status["stage"] == "Tamamlandı"
 
 
 def test_refresh_status_is_idle_before_any_run(api_client):

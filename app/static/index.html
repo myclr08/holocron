@@ -13,15 +13,15 @@
 
     <header class="topbar">
       <div class="topbar-left">
-        <button class="primary" id="refresh-all" title="Tum gruplari Jira'dan tazeler">Guncelle</button>
-        <button class="danger" id="refresh-cancel" hidden>Iptal</button>
+        <button class="primary" id="refresh-all" title="Tüm grupları Jira'dan tazeler">Güncelle</button>
+        <button class="danger" id="refresh-cancel" hidden>İptal</button>
         <div class="progress" id="progress" hidden>
           <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
           <span class="progress-stage" id="progress-stage"></span>
         </div>
       </div>
       <div class="topbar-actions">
-        <button id="local-fields" title="Kendi alanlarinizi tanimlayin">Alanlar</button>
+        <button id="local-fields" title="Kendi alanlarınızı tanımlayın">Alanlar</button>
         <a class="button" href="/settings">Ayarlar</a>
         <button class="danger" data-action="shutdown">Kapat</button>
       </div>
@@ -30,18 +30,18 @@
     <aside class="sidebar">
       <div class="sidebar-head">
         <h2>Hangar</h2>
-        <button id="new-group" title="Yeni grup olustur">+ Yeni Filo</button>
+        <button id="new-group" title="Yeni grup oluştur">+ Yeni Filo</button>
       </div>
       <div id="group-list"></div>
     </aside>
 
     <main class="main">
       <section class="placeholder" id="placeholder">
-        <h2>Holocron hazir</h2>
-        <p class="hint" id="connection-hint">Baglanti durumu okunuyor...</p>
+        <h2>Holocron hazır</h2>
+        <p class="hint" id="connection-hint">Bağlantı durumu okunuyor...</p>
         <p class="hint">
-          Soldaki <strong>Yeni Filo</strong> ile bir grup acin. Manuel grupta anahtarlari elle
-          yapistirirsiniz; JQL filtresinde uyelik her Guncelle'de sorgudan gelir.
+          Soldaki <strong>Yeni Filo</strong> ile bir grup açın. Manuel grupta anahtarları elle
+          yapıştırırsınız; JQL filtresinde üyelik her Güncelle'de sorgudan gelir.
         </p>
       </section>
 
@@ -54,18 +54,22 @@
             <span class="badge" id="group-count"></span>
           </div>
           <div class="group-actions">
-            <button id="edit-group">Duzenle</button>
+            <button id="edit-group">Düzenle</button>
             <button class="danger" id="delete-group">Sil</button>
           </div>
         </div>
         <div class="jql-line" id="group-jql" hidden></div>
 
         <div class="toolbar">
-          <button id="add-items">Kayit ekle</button>
-          <button id="choose-columns">Sutunlar</button>
-          <button id="refresh-group">Guncelle (bu grup)</button>
+          <button id="add-items">Kayıt ekle</button>
+          <button id="choose-columns">Sütunlar</button>
+          <button id="export-xlsx" title="Görüneni Excel dosyası olarak indir">Excel'e aktar</button>
+          <button id="refresh-group">Güncelle (bu grup)</button>
           <input type="search" id="search" placeholder="Ara ( / )" autocomplete="off" />
           <span class="hint" id="row-count"></span>
+          <span class="warn-note" id="catalog-warning" hidden>
+            Alan adları için kataloğu çekin: <a href="/settings">Ayarlar → Alan kataloğunu çek</a>
+          </span>
         </div>
 
         <div class="grid-wrap">
@@ -74,8 +78,8 @@
             <tbody id="grid-body"></tbody>
           </table>
           <div class="empty" id="grid-empty" hidden>
-            <p>Bu sektorde kayit yok.</p>
-            <button id="empty-add">Kayit ekle</button>
+            <p>Bu sektörde kayıt yok.</p>
+            <button id="empty-add">Kayıt ekle</button>
           </div>
         </div>
       </section>
@@ -86,19 +90,19 @@
     <header class="drawer-head">
       <div class="drawer-title">
         <strong id="drawer-key"></strong>
-        <a id="drawer-link" target="_blank" rel="noopener" hidden>Jira'da ac</a>
+        <a id="drawer-link" target="_blank" rel="noopener" hidden>Jira'da aç</a>
       </div>
       <button id="drawer-close" title="Kapat (Esc)">✕</button>
     </header>
     <label class="checkbox drawer-toggle">
       <input type="checkbox" id="drawer-empty" />
-      Bos alanlari da goster
+      Boş alanları da göster
     </label>
     <div class="drawer-body" id="drawer-body"></div>
   </aside>
 
   <div class="modal-backdrop" id="modal" hidden>
-    <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal" id="modal-box" role="dialog" aria-modal="true">
       <header class="modal-head">
         <strong id="modal-title"></strong>
         <button id="modal-close" title="Kapat (Esc)">✕</button>
@@ -115,7 +119,7 @@
     </header>
     <div class="popover-body" id="history-body"></div>
     <footer class="popover-foot">
-      <button class="danger small" id="history-clear">Gecmisi temizle</button>
+      <button class="danger small" id="history-clear">Geçmişi temizle</button>
     </footer>
   </div>
 

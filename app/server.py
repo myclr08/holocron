@@ -69,8 +69,8 @@ def create_app(context: AppContext) -> FastAPI:
 def _first_message(exc: RequestValidationError) -> str:
     errors = exc.errors()
     if not errors:
-        return "Istek dogrulanamadi."
+        return "İstek doğrulanamadı."
     first = errors[0]
     location = ".".join(str(part) for part in first.get("loc", ()) if part != "body")
-    message = first.get("msg", "gecersiz deger")
+    message = first.get("msg", "geçersiz değer")
     return f"{location}: {message}" if location else str(message)

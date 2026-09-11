@@ -26,7 +26,7 @@ def ensure_key(path: Path | None = None) -> bytes:
     if target.exists():
         key = target.read_bytes().strip()
         if not key:
-            raise SecretError("Anahtar dosyasi bos.")
+            raise SecretError("Anahtar dosyası boş.")
         _harden(target)
         return key
 

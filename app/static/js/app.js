@@ -28,6 +28,7 @@ const state = {
   drawerFetchedAt: null,
   drawerShowEmpty: false,
   lastRefreshState: "idle",
+  catalogEmpty: false,
   editing: null,
   popover: null,
 };
@@ -79,13 +80,15 @@ function toast(title, message, kind, items) {
 }
 
 function fail(err) {
-  toast("Islem yapilamadi", err.message || String(err), "error");
+  toast("İşlem yapılamadı", err.message || String(err), "error");
 }
 
 // --- modal --------------------------------------------------------------
 
-function openModal(title, body, buttons) {
+function openModal(title, body, buttons, options) {
   el("modal-title").textContent = title;
+  // Sutun secici gibi iki listeli pencereler genis kipte acilir.
+  el("modal-box").classList.toggle("wide", !!(options && options.wide));
   const bodyBox = el("modal-body");
   clear(bodyBox);
   bodyBox.appendChild(body);
@@ -126,7 +129,7 @@ function renderGroups() {
   const list = el("group-list");
   clear(list);
   if (!state.groups.length) {
-    list.appendChild(h("div", { class: "empty", text: "Henuz grup yok." }));
+    list.appendChild(h("div", { class: "empty", text: "Henüz grup yok." }));
     return;
   }
   state.groups.forEach((group, index) => {
@@ -145,7 +148,7 @@ function renderGroups() {
           h("button", {
             class: "move",
             text: "▲",
-            title: "Yukari tasi",
+            title: "Yukarı taşı",
             disabled: index === 0,
             onclick: (event) => {
               event.stopPropagation();
@@ -155,7 +158,7 @@ function renderGroups() {
           h("button", {
             class: "move",
             text: "▼",
-            title: "Asagi tasi",
+            title: "Aşağı taşı",
             disabled: index === state.groups.length - 1,
             onclick: (event) => {
               event.stopPropagation();
@@ -212,7 +215,7 @@ function renderGroupHead() {
   el("group-color").className = "color-strip color-" + group.color;
   el("group-name").textContent = group.name;
   el("group-kind").textContent = KIND_LABEL[group.kind] || group.kind;
-  el("group-count").textContent = group.count + " kayit";
+  el("group-count").textContent = group.count + " kayıt";
   const jqlLine = el("group-jql");
   jqlLine.textContent = group.jql ? "JQL: " + group.jql : "";
   jqlLine.hidden = !group.jql;
@@ -238,6 +241,7 @@ async function loadIssues() {
     state.baseUrl = data.base_url;
     state.shown = data.shown;
     state.total = data.total;
+    state.catalogEmpty = !!data.catalog_empty;
     const index = state.groups.findIndex((group) => group.id === data.group.id);
     if (index >= 0) state.groups[index] = data.group;
     renderGroups();
@@ -271,15 +275,18 @@ function renderGrid() {
 
   el("grid-empty").hidden = state.rows.length > 0;
   el("grid").hidden = state.rows.length === 0;
+  // Bos grupta disa aktaracak bir sey yok.
+  el("export-xlsx").disabled = state.total === 0;
+  el("catalog-warning").hidden = !state.catalogEmpty;
   el("row-count").textContent =
-    state.shown === state.total ? `${state.total} kayit` : `${state.shown} / ${state.total} kayit`;
+    state.shown === state.total ? `${state.total} kayıt` : `${state.shown} / ${state.total} kayıt`;
 }
 
 function renderRow(row) {
   const changedFields = state.changed[row.key] || [];
   const tr = h("tr", {
     class: (row.missing ? "missing " : "") + (state.drawerKey === row.key ? "selected" : ""),
-    title: row.missing ? "Bu kayit henuz Jira'dan cekilmedi." : "",
+    title: row.missing ? "Bu kayıt henüz Jira'dan çekilmedi." : "",
     onclick: () => openDrawer(row.key),
   });
 
@@ -296,7 +303,7 @@ function renderRow(row) {
       return;
     }
     if (cell.field === "issuekey") {
-      if (row.pinned) td.appendChild(h("span", { class: "pin-mark", text: "📌", title: "Iglenmis" }));
+      if (row.pinned) td.appendChild(h("span", { class: "pin-mark", text: "📌", title: "İğnelenmiş" }));
       if (row.url) {
         td.appendChild(
           h("a", {
@@ -322,7 +329,7 @@ function renderRow(row) {
       ? h("button", {
           class: row.pinned ? "on" : "",
           text: "📌",
-          title: row.pinned ? "Igneyi kaldir" : "Ignele: guncellemede dusmesin",
+          title: row.pinned ? "İğneyi kaldır" : "İğnele: güncellemede düşmesin",
           onclick: (event) => {
             event.stopPropagation();
             togglePin(row.key);
@@ -331,7 +338,7 @@ function renderRow(row) {
       : null,
     h("button", {
       text: "✕",
-      title: "Gruptan cikar",
+      title: "Gruptan çıkar",
       onclick: (event) => {
         event.stopPropagation();
         removeItem(row.key);
@@ -366,7 +373,7 @@ async function togglePin(key) {
 }
 
 async function removeItem(key) {
-  if (!confirm(`${key} bu gruptan cikarilsin mi?`)) return;
+  if (!confirm(`${key} bu gruptan çıkarılsın mı?`)) return;
   try {
     await api(`/api/groups/${state.activeId}/items/${encodeURIComponent(key)}`, { method: "DELETE" });
     if (state.drawerKey === key) closeDrawer();
@@ -409,10 +416,10 @@ function renderDrawerBody() {
   const body = el("drawer-body");
   clear(body);
   if (state.drawerFetchedAt) {
-    body.appendChild(h("p", { class: "hint", text: "Cekilme: " + state.drawerFetchedAt }));
+    body.appendChild(h("p", { class: "hint", text: "Çekilme: " + state.drawerFetchedAt }));
   } else {
     body.appendChild(
-      h("p", { class: "hint", text: "Bu kayit henuz Jira'dan cekilmedi." })
+      h("p", { class: "hint", text: "Bu kayıt henüz Jira'dan çekilmedi." })
     );
   }
   renderDrawerLocal(body);
@@ -438,9 +445,9 @@ function closeDrawer() {
 
 const LOCAL_TYPE_LABEL = {
   text: "Metin",
-  number: "Sayi",
+  number: "Sayı",
   date: "Tarih",
-  bool: "Evet/Hayir",
+  bool: "Evet/Hayır",
   select: "Liste",
 };
 
@@ -468,7 +475,7 @@ function renderLocalCell(td, row, cell, column) {
       h("button", {
         class: "clock" + (cell.changes ? " on" : ""),
         text: "🕘" + badge,
-        title: cell.changes ? `${cell.changes} degisim` : "Henuz degisim yok",
+        title: cell.changes ? `${cell.changes} değişim` : "Henüz değişim yok",
         onclick: (event) => {
           event.stopPropagation();
           openHistory(event.currentTarget, row.key, column.local);
@@ -634,7 +641,7 @@ function renderHistory(entries) {
   clear(body);
   el("history-clear").disabled = entries.length === 0;
   if (!entries.length) {
-    body.appendChild(h("p", { class: "hint", text: "Bu hucrede henuz degisim yok." }));
+    body.appendChild(h("p", { class: "hint", text: "Bu hücrede henüz değişim yok." }));
     return;
   }
   entries.forEach((entry) => body.appendChild(historyLine(entry)));
@@ -651,7 +658,7 @@ function historyLine(entry) {
     h("button", {
       class: "drop",
       text: "✕",
-      title: "Bu satiri sil",
+      title: "Bu satırı sil",
       onclick: () => dropHistoryEntry(entry.id),
     }),
   ]);
@@ -679,7 +686,7 @@ async function dropHistoryEntry(historyId) {
 async function clearHistory() {
   const target = state.popover;
   if (!target) return;
-  if (!confirm(`${target.key} icin "${target.field.name}" gecmisi tamamen silinsin mi?`)) return;
+  if (!confirm(`${target.key} için "${target.field.name}" geçmişi tamamen silinsin mi?`)) return;
   try {
     await api(`/api/issues/${encodeURIComponent(target.key)}/local/${target.field.id}/history`, {
       method: "DELETE",
@@ -726,7 +733,7 @@ function renderDrawerLocal(body) {
         h("button", {
           class: "local-open",
           text: item.text || "—",
-          title: "Duzenle",
+          title: "Düzenle",
           onclick: () => edit(),
         })
       );
@@ -746,7 +753,7 @@ function renderDrawerLocal(body) {
       h("span", { text: `${item.name} (${item.type_label})` }),
     ]);
     if (item.track_history || item.changes) {
-      head.appendChild(h("span", { class: "badge", text: `${item.changes} degisim` }));
+      head.appendChild(h("span", { class: "badge", text: `${item.changes} değişim` }));
     }
 
     const rowBox = h("div", { class: "detail-row" + (item.empty ? " is-empty" : "") }, [head, value]);
@@ -791,7 +798,7 @@ async function localFieldsModal() {
       list.appendChild(
         h("div", {
           class: "empty-note",
-          text: "Henuz yerel alan yok. 'Yeni alan' ile kendi bilginizi eklemeye baslayin.",
+          text: "Henüz yerel alan yok. 'Yeni alan' ile kendi bilginizi eklemeye başlayın.",
         })
       );
       return;
@@ -803,22 +810,22 @@ async function localFieldsModal() {
           h("span", { class: "id", text: field.type_label }),
           h("span", {
             class: "badge" + (field.track_history ? " on" : ""),
-            text: field.track_history ? "gecmis acik" : "gecmis kapali",
+            text: field.track_history ? "geçmiş açık" : "geçmiş kapalı",
           }),
           h("span", { class: "id", text: `${field.group_count} grup` }),
           h("button", {
             text: "▲",
-            title: "Yukari",
+            title: "Yukarı",
             disabled: index === 0,
             onclick: () => reorderFields(index, -1),
           }),
           h("button", {
             text: "▼",
-            title: "Asagi",
+            title: "Aşağı",
             disabled: index === fields.length - 1,
             onclick: () => reorderFields(index, 1),
           }),
-          h("button", { text: "Duzenle", onclick: () => fieldForm(field) }),
+          h("button", { text: "Düzenle", onclick: () => fieldForm(field) }),
           h("button", { class: "danger", text: "Sil", onclick: () => dropField(field) }),
         ])
       );
@@ -851,13 +858,13 @@ async function localFieldsModal() {
 
   async function dropField(field) {
     const warning =
-      `"${field.name}" alani silinsin mi?\n` +
-      `${field.value_count} kayittaki deger ve ${field.history_count} gecmis satiri silinecek.`;
+      `"${field.name}" alanı silinsin mi?\n` +
+      `${field.value_count} kayıttaki değer ve ${field.history_count} geçmiş satırı silinecek.`;
     if (!confirm(warning)) return;
     try {
       await api(`/api/local-fields/${field.id}`, { method: "DELETE" });
       await reload();
-      toast("Alan silindi", `"${field.name}" ve bagli degerleri kaldirildi.`, "ok");
+      toast("Alan silindi", `"${field.name}" ve bağlı değerleri kaldırıldı.`, "ok");
     } catch (err) {
       fail(err);
     }
@@ -872,9 +879,9 @@ async function localFieldsModal() {
     typeSelect.value = existing ? existing.type : "text";
     if (existing) typeSelect.disabled = true;
 
-    const optionsInput = h("textarea", { placeholder: "Her satira bir secenek" });
+    const optionsInput = h("textarea", { placeholder: "Her satıra bir seçenek" });
     if (existing) optionsInput.value = (existing.options || []).join("\n");
-    const optionsField = field("Secenekler", optionsInput);
+    const optionsField = field("Seçenekler", optionsInput);
     const syncOptions = () => {
       optionsField.hidden = typeSelect.value !== "select";
     };
@@ -885,19 +892,19 @@ async function localFieldsModal() {
     historyInput.checked = existing ? existing.track_history : false;
     const historyBox = h("label", { class: "checkbox" }, [
       historyInput,
-      document.createTextNode("Gecmisi tut (her degisim kaydedilir)"),
+      document.createTextNode("Geçmişi tut (her değişim kaydedilir)"),
     ]);
 
     const body = h("div", {}, [
       field("Ad", nameInput),
       field("Tip", typeSelect),
       optionsField,
-      field("Gecmis", historyBox),
+      field("Geçmiş", historyBox),
       h("p", {
         class: "hint",
         text:
-          "Yerel alanlar Jira'ya gitmez, Guncelle bunlari ezmez. " +
-          (existing ? "Tip sonradan degistirilemez." : ""),
+          "Yerel alanlar Jira'ya gitmez, Güncelle bunları ezmez. " +
+          (existing ? "Tip sonradan değiştirilemez." : ""),
       }),
     ]);
 
@@ -921,7 +928,7 @@ async function localFieldsModal() {
       }
     };
 
-    openModal(existing ? "Alani duzenle" : "Yeni alan", body, [
+    openModal(existing ? "Alanı düzenle" : "Yeni alan", body, [
       { label: "Geri", onClick: openList },
       { label: "Kaydet", kind: "primary", onClick: save },
     ]);
@@ -933,8 +940,8 @@ async function localFieldsModal() {
       h("p", {
         class: "hint",
         text:
-          "Buradaki alanlar butun gruplarda ortaktir, deger kayit basina tektir. " +
-          "Hangi grupta gorunecegini 'Sutunlar' ekranindan secersiniz.",
+          "Buradaki alanlar bütün gruplarda ortaktır, değer kayıt başına tektir. " +
+          "Hangi grupta görüneceğini 'Sütunlar' ekranından seçersiniz.",
       }),
       list,
     ]), [
@@ -950,7 +957,7 @@ async function localFieldsModal() {
 
 function groupModal(existing) {
   const nameInput = h("input", { type: "text", value: existing ? existing.name : "" });
-  const jqlInput = h("textarea", { placeholder: "project = DEMO AND status = Acik" });
+  const jqlInput = h("textarea", { placeholder: "project = DEMO AND status = Açık" });
   if (existing) jqlInput.value = existing.jql || "";
 
   const jqlField = field("JQL", jqlInput);
@@ -990,7 +997,7 @@ function groupModal(existing) {
 
   const body = h("div", {}, [
     field("Ad", nameInput),
-    field("Tur", kindBox),
+    field("Tür", kindBox),
     jqlField,
     field("Renk", picker),
   ]);
@@ -1014,15 +1021,15 @@ function groupModal(existing) {
     }
   };
 
-  openModal(existing ? "Filoyu duzenle" : "Yeni Filo", body, [
-    { label: "Vazgec", onClick: closeModal },
+  openModal(existing ? "Filoyu düzenle" : "Yeni Filo", body, [
+    { label: "Vazgeç", onClick: closeModal },
     { label: "Kaydet", kind: "primary", onClick: save },
   ]);
 }
 
 async function deleteGroup() {
   if (!state.group) return;
-  if (!confirm(`"${state.group.name}" grubu silinsin mi? Kayitlar veritabaninda kalir.`)) return;
+  if (!confirm(`"${state.group.name}" grubu silinsin mi? Kayıtlar veritabanında kalır.`)) return;
   try {
     await api(`/api/groups/${state.group.id}`, { method: "DELETE" });
     state.activeId = null;
@@ -1042,8 +1049,8 @@ function addItemsModal() {
     h("p", {
       class: "hint",
       text:
-        "Anahtarlari yapistirin. Satir, virgul ya da bosluk fark etmez; " +
-        "Jira baglantilarinin icinden de anahtar okunur.",
+        "Anahtarları yapıştırın. Satır, virgül ya da boşluk fark etmez; " +
+        "Jira bağlantılarının içinden de anahtar okunur.",
     }),
     area,
   ]);
@@ -1058,20 +1065,20 @@ function addItemsModal() {
       await loadIssues();
       const parts = [
         `${data.added.length} eklendi`,
-        `${data.already.length} zaten vardi`,
-        `${data.invalid.length} anlasilmadi`,
+        `${data.already.length} zaten vardı`,
+        `${data.invalid.length} anlaşılmadı`,
       ];
       const extra = data.invalid.length
-        ? [h("span", { text: "Anlasilmayan: " + data.invalid.join(", ") })]
+        ? [h("span", { text: "Anlaşılmayan: " + data.invalid.join(", ") })]
         : [];
-      toast("Kayit ekleme", parts.join(" · "), data.added.length ? "ok" : "", extra);
+      toast("Kayıt ekleme", parts.join(" · "), data.added.length ? "ok" : "", extra);
     } catch (err) {
       fail(err);
     }
   };
 
-  openModal("Kayit ekle", body, [
-    { label: "Vazgec", onClick: closeModal },
+  openModal("Kayıt ekle", body, [
+    { label: "Vazgeç", onClick: closeModal },
     { label: "Ekle", kind: "primary", onClick: save },
   ]);
 }
@@ -1099,17 +1106,19 @@ async function columnsModal() {
   function renderChosen() {
     clear(chosenBox);
     if (!chosen.length) {
-      chosenBox.appendChild(h("div", { class: "empty-note", text: "Sutun secilmedi." }));
+      chosenBox.appendChild(h("div", { class: "empty-note", text: "Sütun seçilmedi." }));
     }
     chosen.forEach((id, index) => {
       const known = byId[id];
       chosenBox.appendChild(
         h("div", { class: "entry" + (known && known.kind === "derived" ? " derived" : "") }, [
-          h("span", { class: "name", text: nameOf(id), title: id }),
-          h("span", { class: "id", text: id }),
+          h("div", { class: "label" }, [
+            h("span", { class: "name", text: nameOf(id) }),
+            h("span", { class: "id", text: id }),
+          ]),
           h("button", {
             text: "▲",
-            title: "Yukari",
+            title: "Yukarı",
             disabled: index === 0,
             onclick: () => {
               const swap = chosen[index - 1];
@@ -1120,7 +1129,7 @@ async function columnsModal() {
           }),
           h("button", {
             text: "▼",
-            title: "Asagi",
+            title: "Aşağı",
             disabled: index === chosen.length - 1,
             onclick: () => {
               const swap = chosen[index + 1];
@@ -1131,7 +1140,7 @@ async function columnsModal() {
           }),
           h("button", {
             text: "✕",
-            title: "Cikar",
+            title: "Çıkar",
             onclick: () => {
               chosen = chosen.filter((item) => item !== id);
               renderChosen();
@@ -1162,8 +1171,8 @@ async function columnsModal() {
         h("div", {
           class: "empty-note",
           text: state.fields.length
-            ? "Eslesen alan yok."
-            : "Alan katalogu bos. Ayarlar ekranindan cekin ya da bir kez Guncelle calistirin.",
+            ? "Eşleşen alan yok."
+            : "Alan kataloğu boş. Ayarlar ekranından çekin ya da bir kez Güncelle çalıştırın.",
         })
       );
     }
@@ -1171,8 +1180,10 @@ async function columnsModal() {
     const add = (item) => {
       availableBox.appendChild(
         h("div", { class: "entry" + (item.kind === "derived" ? " derived" : "") }, [
-          h("span", { class: "name", text: item.name, title: item.id }),
-          h("span", { class: "id", text: item.id }),
+          h("div", { class: "label" }, [
+            h("span", { class: "name", text: item.name }),
+            h("span", { class: "id", text: item.id }),
+          ]),
           h("button", {
             text: "+",
             title: "Ekle",
@@ -1198,7 +1209,7 @@ async function columnsModal() {
   renderAvailable();
 
   const body = h("div", { class: "column-editor" }, [
-    h("div", {}, [h("h3", { text: "Secili sutunlar" }), chosenBox]),
+    h("div", {}, [h("h3", { text: "Seçili sütunlar" }), chosenBox]),
     h("div", {}, [h("h3", { text: "Alanlar" }), search, availableBox]),
   ]);
 
@@ -1218,16 +1229,95 @@ async function columnsModal() {
   const makeDefault = async () => {
     try {
       await api("/api/settings/columns", { method: "PUT", body: JSON.stringify({ columns: chosen }) });
-      toast("Sutunlar", "Genel varsayilan guncellendi.", "ok");
+      toast("Sütunlar", "Genel varsayılan güncellendi.", "ok");
     } catch (err) {
       fail(err);
     }
   };
 
-  openModal("Sutunlar", body, [
-    { label: "Genel varsayilan yap", onClick: makeDefault },
-    { label: "Vazgec", onClick: closeModal },
-    { label: "Uygula", kind: "primary", onClick: save },
+  openModal(
+    "Sütunlar",
+    body,
+    [
+      { label: "Genel varsayılan yap", onClick: makeDefault },
+      { label: "Vazgeç", onClick: closeModal },
+      { label: "Uygula", kind: "primary", onClick: save },
+    ],
+    { wide: true }
+  );
+}
+
+// --- Excel'e aktar ------------------------------------------------------
+
+function exportModal() {
+  if (!state.group || !state.columns.length) return;
+
+  const list = h("div", { class: "export-columns" }, []);
+  const boxes = state.columns.map((column) => {
+    const input = h("input", { type: "checkbox" });
+    input.checked = true;
+    list.appendChild(
+      h("label", { class: "checkbox" }, [input, document.createTextNode(column.name)])
+    );
+    return { id: column.id, input: input };
+  });
+  const setAll = (value) => boxes.forEach((item) => (item.input.checked = value));
+
+  const historyInput = h("input", { type: "checkbox" });
+  const filterInput = h("input", { type: "checkbox" });
+  filterInput.checked = true;
+
+  const body = h("div", {}, [
+    h("div", { class: "export-head" }, [
+      h("span", { class: "hint", text: "Excel'e gidecek sütunlar" }),
+      h("button", { class: "small", text: "Tümünü seç", onclick: () => setAll(true) }),
+      h("button", { class: "small", text: "Temizle", onclick: () => setAll(false) }),
+    ]),
+    list,
+    h("label", { class: "checkbox" }, [
+      historyInput,
+      document.createTextNode("Geçmiş sayfasını ekle"),
+    ]),
+    h("label", { class: "checkbox" }, [
+      filterInput,
+      document.createTextNode("Görünen süzgeç ve sıralamayı uygula"),
+    ]),
+    h("p", {
+      class: "hint",
+      text: "Dosya ekranda görüneni yazar; uzun metinler kırpılmaz.",
+    }),
+  ]);
+
+  const start = () => {
+    const columns = boxes.filter((item) => item.input.checked).map((item) => item.id);
+    if (!columns.length) {
+      toast("Excel'e aktar", "En az bir sütun seçin.", "error");
+      return;
+    }
+    const params = new URLSearchParams();
+    params.set("columns", columns.join(","));
+    if (historyInput.checked) params.set("history", "1");
+    if (filterInput.checked) {
+      if (state.query) params.set("q", state.query);
+      if (state.sort) {
+        params.set("sort", state.sort.field);
+        params.set("dir", state.sort.dir);
+      }
+    }
+    // Indirme normal bir baglanti gibi gider; Content-Disposition adi belirler.
+    const link = h("a", {
+      href: `/api/groups/${state.activeId}/export.xlsx?${params.toString()}`,
+      download: true,
+    });
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    closeModal();
+  };
+
+  openModal("Excel'e aktar", body, [
+    { label: "Vazgeç", onClick: closeModal },
+    { label: "İndir", kind: "primary", onClick: start },
   ]);
 }
 
@@ -1284,15 +1374,15 @@ function applyRefreshStatus(status) {
 function finishRefresh(status) {
   if (status.state === "error") {
     const message = (status.error && status.error.message) || "Bilinmeyen hata";
-    toast("Guncelleme basarisiz", message, "error");
+    toast("Güncelleme başarısız", message, "error");
   } else if (status.state === "cancelled") {
-    toast("Guncelleme iptal edildi", "Iptale kadar cekilenler kaydedildi.");
+    toast("Güncelleme iptal edildi", "İptale kadar çekilenler kaydedildi.");
   } else {
     const summary = status.summary || {};
     const parts = [
-      `${summary.fetched || 0} cekildi`,
+      `${summary.fetched || 0} çekildi`,
       `${summary.new || 0} yeni`,
-      `${summary.updated || 0} guncellendi`,
+      `${summary.updated || 0} güncellendi`,
     ];
     const items = [];
     (status.errors || []).forEach((item) =>
@@ -1316,7 +1406,7 @@ function finishRefresh(status) {
       items.push(line);
     }
     const kind = status.errors && status.errors.length ? "" : "ok";
-    toast("Guncelleme bitti", parts.join(" · "), kind, items);
+    toast("Güncelleme bitti", parts.join(" · "), kind, items);
   }
 
   state.changed = status.changed || {};
@@ -1345,6 +1435,7 @@ function bindEvents() {
   el("add-items").addEventListener("click", addItemsModal);
   el("empty-add").addEventListener("click", addItemsModal);
   el("choose-columns").addEventListener("click", columnsModal);
+  el("export-xlsx").addEventListener("click", exportModal);
   el("local-fields").addEventListener("click", localFieldsModal);
   el("history-close").addEventListener("click", closeHistory);
   el("history-clear").addEventListener("click", clearHistory);
@@ -1408,10 +1499,10 @@ document.addEventListener("DOMContentLoaded", () => {
       state.baseUrl = (settings["jira.base_url"] || "").replace(/\/+$/, "");
       const hint = el("connection-hint");
       if (settings["jira.base_url"] && settings.secret_set) {
-        hint.textContent = "Baglanti hazir: " + settings["jira.base_url"];
+        hint.textContent = "Bağlantı hazır: " + settings["jira.base_url"];
       } else {
         hint.innerHTML =
-          'Once <a href="/settings">Ayarlar</a> ekranindan Jira baglantisini tanimlayin.';
+          'Önce <a href="/settings">Ayarlar</a> ekranından Jira bağlantısını tanımlayın.';
       }
     })
     .catch(() => {});

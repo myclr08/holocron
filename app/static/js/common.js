@@ -14,7 +14,7 @@ async function api(path, options = {}) {
   }
   if (!response.ok) {
     const error = (payload && payload.error) || {};
-    throw new Error(error.message || `Sunucu hatasi (${response.status})`);
+    throw new Error(error.message || `Sunucu hatası (${response.status})`);
   }
   return payload;
 }
@@ -28,7 +28,7 @@ function startHeartbeat() {
 }
 
 async function shutdown() {
-  if (!confirm("Holocron kapatilsin mi?")) return;
+  if (!confirm("Holocron kapatılsın mı?")) return;
   try {
     await api("/api/shutdown", { method: "POST" });
   } catch (err) {
@@ -36,7 +36,7 @@ async function shutdown() {
   }
   document.body.innerHTML =
     '<div style="padding:40px;font-family:var(--hc-font);color:var(--hc-text-dim)">' +
-    "Holocron kapatildi. Bu sekmeyi kapatabilirsiniz.</div>";
+    "Holocron kapatıldı. Bu sekmeyi kapatabilirsiniz.</div>";
 }
 
 function bindShell() {

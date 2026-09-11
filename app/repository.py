@@ -273,7 +273,7 @@ def default_columns(conn: sqlite3.Connection) -> list[str]:
 def set_default_columns(conn: sqlite3.Connection, columns: Sequence[str]) -> list[str]:
     cleaned = _clean_columns(columns)
     if not cleaned:
-        raise RepositoryError("invalid_columns", "En az bir sutun secilmeli.")
+        raise RepositoryError("invalid_columns", "En az bir sütun seçilmeli.")
     with conn:
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) "
@@ -385,12 +385,12 @@ def create_group(
 ) -> dict[str, Any]:
     clean_name = (name or "").strip()
     if not clean_name:
-        raise RepositoryError("invalid_name", "Grup adi bos olamaz.")
+        raise RepositoryError("invalid_name", "Grup adı boş olamaz.")
     if kind not in GROUP_KINDS:
-        raise RepositoryError("invalid_kind", "Grup turu 'manual' ya da 'filter' olmali.")
+        raise RepositoryError("invalid_kind", "Grup türü 'manual' ya da 'filter' olmalı.")
     clean_jql = (jql or "").strip()
     if kind == KIND_FILTER and not clean_jql:
-        raise RepositoryError("invalid_jql", "Filtre grubu icin JQL zorunlu.")
+        raise RepositoryError("invalid_jql", "Filtre grubu için JQL zorunlu.")
     if kind == KIND_MANUAL:
         clean_jql = ""
 
@@ -436,7 +436,7 @@ def get_group(conn: sqlite3.Connection, group_id: int) -> dict[str, Any] | None:
 def require_group(conn: sqlite3.Connection, group_id: int) -> dict[str, Any]:
     group = get_group(conn, group_id)
     if group is None:
-        raise RepositoryError("group_not_found", "Grup bulunamadi.", status=404)
+        raise RepositoryError("group_not_found", "Grup bulunamadı.", status=404)
     return group
 
 
@@ -447,20 +447,20 @@ def update_group(conn: sqlite3.Connection, group_id: int, payload: dict[str, Any
     if "name" in payload:
         clean_name = str(payload["name"] or "").strip()
         if not clean_name:
-            raise RepositoryError("invalid_name", "Grup adi bos olamaz.")
+            raise RepositoryError("invalid_name", "Grup adı boş olamaz.")
         updates["name"] = clean_name
 
     kind = group["kind"]
     if "kind" in payload and payload["kind"] is not None:
         kind = str(payload["kind"])
         if kind not in GROUP_KINDS:
-            raise RepositoryError("invalid_kind", "Grup turu 'manual' ya da 'filter' olmali.")
+            raise RepositoryError("invalid_kind", "Grup türü 'manual' ya da 'filter' olmalı.")
         updates["kind"] = kind
 
     if "jql" in payload or "kind" in payload:
         clean_jql = str(payload.get("jql", group["jql"]) or "").strip()
         if kind == KIND_FILTER and not clean_jql:
-            raise RepositoryError("invalid_jql", "Filtre grubu icin JQL zorunlu.")
+            raise RepositoryError("invalid_jql", "Filtre grubu için JQL zorunlu.")
         updates["jql"] = (clean_jql or None) if kind == KIND_FILTER else None
 
     if "color" in payload:
@@ -499,7 +499,7 @@ def reorder_groups(conn: sqlite3.Connection, ids: Sequence[int]) -> list[dict[st
         try:
             group_id = int(value)
         except (TypeError, ValueError) as exc:
-            raise RepositoryError("invalid_order", "Sira listesi yalnizca grup kimligi icerir.") from exc
+            raise RepositoryError("invalid_order", "Sıra listesi yalnızca grup kimliği içerir.") from exc
         if group_id not in known or group_id in ordered:
             continue
         ordered.append(group_id)
@@ -579,7 +579,7 @@ def remove_item(conn: sqlite3.Connection, group_id: int, key: str) -> bool:
             (int(group_id), str(key).strip().upper()),
         )
     if not cursor.rowcount:
-        raise RepositoryError("item_not_found", "Kayit bu grupta yok.", status=404)
+        raise RepositoryError("item_not_found", "Kayıt bu grupta yok.", status=404)
     return True
 
 
@@ -591,7 +591,7 @@ def toggle_pin(conn: sqlite3.Connection, group_id: int, key: str) -> bool:
         (int(group_id), clean_key),
     ).fetchone()
     if row is None:
-        raise RepositoryError("item_not_found", "Kayit bu grupta yok.", status=404)
+        raise RepositoryError("item_not_found", "Kayıt bu grupta yok.", status=404)
     new_state = 0 if row["pinned"] else 1
     with conn:
         conn.execute(
@@ -701,7 +701,7 @@ def get_local_field(conn: sqlite3.Connection, field_id: int) -> dict[str, Any] |
 def require_local_field(conn: sqlite3.Connection, field_id: int) -> dict[str, Any]:
     field = get_local_field(conn, field_id)
     if field is None:
-        raise RepositoryError("local_field_not_found", "Yerel alan bulunamadi.", status=404)
+        raise RepositoryError("local_field_not_found", "Yerel alan bulunamadı.", status=404)
     return field
 
 
@@ -747,7 +747,7 @@ def update_local_field(
     if "type" in payload and payload["type"] is not None:
         wanted = str(payload["type"]).strip().lower()
         if wanted != field["type"]:
-            raise RepositoryError("type_immutable", "Alan tipi sonradan degistirilemez.")
+            raise RepositoryError("type_immutable", "Alan tipi sonradan değiştirilemez.")
 
     updates: dict[str, Any] = {}
     if "name" in payload:
@@ -792,7 +792,7 @@ def reorder_local_fields(conn: sqlite3.Connection, ids: Sequence[int]) -> list[d
         try:
             local_id = int(value)
         except (TypeError, ValueError) as exc:
-            raise RepositoryError("invalid_order", "Sira listesi yalnizca alan kimligi icerir.") from exc
+            raise RepositoryError("invalid_order", "Sıra listesi yalnızca alan kimliği içerir.") from exc
         if local_id not in known or local_id in ordered:
             continue
         ordered.append(local_id)
@@ -917,7 +917,7 @@ def set_local_value(
     clean_key = str(key).strip().upper()
     field = require_local_field(conn, field_id)
     if not issue_is_known(conn, clean_key):
-        raise RepositoryError("issue_not_found", "Kayit bulunamadi.", status=404)
+        raise RepositoryError("issue_not_found", "Kayıt bulunamadı.", status=404)
     try:
         normalized = field_utils.normalize_local_value(field["type"], value, field["options"])
     except field_utils.LocalValueError as exc:
@@ -994,7 +994,7 @@ def delete_local_history_entry(
             (int(history_id), str(key).strip().upper(), int(field_id)),
         )
     if not cursor.rowcount:
-        raise RepositoryError("history_not_found", "Gecmis satiri bulunamadi.", status=404)
+        raise RepositoryError("history_not_found", "Geçmiş satırı bulunamadı.", status=404)
     return True
 
 
@@ -1047,18 +1047,18 @@ def _local_field_dict(row: sqlite3.Row, group_count: int) -> dict[str, Any]:
 def _clean_local_name(conn: sqlite3.Connection, name: Any, skip_id: int | None = None) -> str:
     text = str(name or "").strip()
     if not text:
-        raise RepositoryError("invalid_name", "Alan adi bos olamaz.")
+        raise RepositoryError("invalid_name", "Alan adı boş olamaz.")
     if len(text) > LOCAL_NAME_LIMIT:
-        raise RepositoryError("invalid_name", f"Alan adi en fazla {LOCAL_NAME_LIMIT} karakter.")
+        raise RepositoryError("invalid_name", f"Alan adı en fazla {LOCAL_NAME_LIMIT} karakter.")
     if text.startswith(LOCAL_PREFIX):
-        raise RepositoryError("invalid_name", "Alan adi 'local:' ile baslayamaz.")
+        raise RepositoryError("invalid_name", "Alan adı 'local:' ile başlayamaz.")
     marker = field_utils.fold(text)
     rows = conn.execute("SELECT id, name FROM local_fields").fetchall()
     for row in rows:
         if skip_id is not None and row["id"] == skip_id:
             continue
         if field_utils.fold(row["name"]) == marker:
-            raise RepositoryError("duplicate_name", f"'{text}' adinda bir alan zaten var.")
+            raise RepositoryError("duplicate_name", f"'{text}' adında bir alan zaten var.")
     return text
 
 
@@ -1094,7 +1094,7 @@ def _clean_color(color: Any) -> str:
     if not text:
         return DEFAULT_COLOR
     if text not in GROUP_COLORS:
-        raise RepositoryError("invalid_color", "Renk paletin disinda: " + ", ".join(GROUP_COLORS))
+        raise RepositoryError("invalid_color", "Renk paletin dışında: " + ", ".join(GROUP_COLORS))
     return text
 
 
@@ -1118,13 +1118,13 @@ def _dump_sort(sort: Any) -> str | None:
     if not sort:
         return None
     if not isinstance(sort, dict):
-        raise RepositoryError("invalid_sort", "Siralama {'field': ..., 'dir': ...} olmali.")
+        raise RepositoryError("invalid_sort", "Sıralama {'field': ..., 'dir': ...} olmalı.")
     field_id = str(sort.get("field") or "").strip()
     if not field_id:
         return None
     direction = str(sort.get("dir") or "asc").strip().lower()
     if direction not in SORT_DIRECTIONS:
-        raise RepositoryError("invalid_sort", "Siralama yonu 'asc' ya da 'desc' olmali.")
+        raise RepositoryError("invalid_sort", "Sıralama yönü 'asc' ya da 'desc' olmalı.")
     return json.dumps({"field": field_id, "dir": direction}, ensure_ascii=False)
 
 

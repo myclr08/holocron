@@ -32,15 +32,61 @@ class AppContext:
     client_factory: ClientFactory
     shutdown_hook: Callable[[], None] = field(default=lambda: None)
     refresh: RefreshManager = field(default_factory=RefreshManager)
-    # Arka plan Guncelle isi ile istek is parcaciklari ayni baglantiyi
-    # kullanir; yazma islemleri bu kilitle sirayla girer.
+    # Yazma islemleri bu kilitle sirayla girer (okumalar paralel kalabilir).
     db_lock: threading.RLock = field(default_factory=threading.RLock)
 
+    def __post_init__(self) -> None:
+        self._threads = threading.local()
+        self._threads.conn = self.conn
+        self._extra: list[sqlite3.Connection] = []
+        self._extra_lock = threading.Lock()
+        self._db_file = _database_file(self.conn)
+        # Ayar okumalari da is parcacigina ait baglantidan gecsin.
+        bind = getattr(self.settings, "bind", None)
+        if callable(bind):
+            bind(self.connection)
+
+    def connection(self) -> sqlite3.Connection:
+        """Bu is parcacigina ait sqlite baglantisi.
+
+        Tek baglantiyi es zamanli isteklerde paylasmak sqlite'i bozuyordu
+        ("bad parameter or other API misuse"): sayfa acilisinda paralel giden
+        `/api/settings` ve grid istekleri ayni baglanti uzerinde ust uste
+        biniyordu. Her is parcacigi artik kendi baglantisini aciyor; yazmalar
+        yine `db_lock` ile sirayla giriyor.
+        """
+        existing = getattr(self._threads, "conn", None)
+        if existing is not None:
+            return existing
+        if not self._db_file:
+            # Bellek ici veritabani baska baglantidan gorulemez; tek baglanti kalir.
+            return self.conn
+        fresh = db.connect(self._db_file)
+        self._threads.conn = fresh
+        with self._extra_lock:
+            self._extra.append(fresh)
+        return fresh
+
     def close(self) -> None:
-        try:
-            self.conn.close()
-        except sqlite3.Error:
-            pass
+        with self._extra_lock:
+            extra = list(self._extra)
+            self._extra.clear()
+        for connection in (*extra, self.conn):
+            try:
+                connection.close()
+            except sqlite3.Error:
+                pass
+
+
+def _database_file(conn: sqlite3.Connection) -> str:
+    """Baglantinin dosya yolu; bellek ici veritabaninda bos metin doner."""
+    try:
+        for row in conn.execute("PRAGMA database_list").fetchall():
+            if row["name"] == "main":
+                return str(row["file"] or "")
+    except sqlite3.Error:
+        return ""
+    return ""
 
 
 def default_client_factory(session: requests.Session | None = None) -> ClientFactory:

@@ -279,7 +279,7 @@ def test_cancel_stops_between_groups_and_keeps_progress(context, fake_jira, conn
 
     status = context.refresh.status()
     assert status["state"] == "cancelled"
-    assert status["stage"] == "Iptal edildi"
+    assert status["stage"] == "İptal edildi"
     # Iptalden once islenenler duruyor, sonraki gruba hic gecilmedi.
     assert repo.list_item_keys(conn, groups[0]["id"]) == ["BIR-1"]
     assert repo.list_item_keys(conn, groups[2]["id"]) == []

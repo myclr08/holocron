@@ -1,0 +1,378 @@
+"""Grup -> Excel (.xlsx) disa aktarimi.
+
+Satirlar ekrandaki grid ile ayni yerden gelir (`app/grid.py`), boylece Excel
+dosyasi ekranda gorunenin birebir karsiligidir. Tek fark: grid hucre metnini
+kirpar, burada tam metin yazilir ve tarih/sayi hucreleri gercek Excel tipinde
+olusur.
+"""
+
+from __future__ import annotations
+
+import io
+import re
+from datetime import date, datetime, tzinfo
+from decimal import Decimal, InvalidOperation
+from typing import Any
+from urllib.parse import quote
+
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.worksheet import Worksheet
+
+from . import __version__, fields as field_utils, grid, repository
+
+MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+EXCEL_DATE_FORMAT = "DD.MM.YYYY"
+EXCEL_DATETIME_FORMAT = "DD.MM.YYYY HH:MM"
+
+SHEET_NAME_LIMIT = 31
+COLUMN_WIDTH_LIMIT = 60
+COLUMN_WIDTH_MIN = 9
+
+HISTORY_SHEET = "Geçmiş"
+INFO_SHEET = "Bilgi"
+FALLBACK_SHEET = "Kayıtlar"
+NO_HISTORY_TEXT = "Geçmiş tutulan alan yok"
+
+HISTORY_HEADERS = ("Anahtar", "Alan", "Tarih", "Eski değer", "Yeni değer")
+
+KIND_LABELS = {repository.KIND_MANUAL: "Manuel", repository.KIND_FILTER: "JQL filtresi"}
+
+# Excel sayfa adinda yasak karakterler; tek tirnak da basta/sonda duramaz.
+_FORBIDDEN_SHEET = re.compile(r"[\\/*?:\[\]]")
+# Dosya adinda sorun cikaran karakterler (Windows dahil).
+_FORBIDDEN_FILE = re.compile(r"[\\/:*?\"<>|\x00-\x1f]")
+_SPACES = re.compile(r"\s+")
+_DASHES = re.compile(r"-{2,}")
+_NON_ASCII_NAME = re.compile(r"[^A-Za-z0-9._-]")
+
+# ASCII dosya adi yedegi icin: Turkce harfler karsiliklarina duser.
+_ASCII_MAP = str.maketrans(
+    {
+        "ç": "c", "Ç": "C", "ğ": "g", "Ğ": "G", "ı": "i", "İ": "I",
+        "ö": "o", "Ö": "O", "ş": "s", "Ş": "S", "ü": "u", "Ü": "U",
+    }
+)
+
+# Hucre tipleri: metin disindakiler gercek Excel hucresi olur.
+KIND_TEXT = "text"
+KIND_DATE = "date"
+KIND_DATETIME = "datetime"
+KIND_NUMBER = "number"
+KIND_DECIMAL = "decimal"
+
+
+def build_workbook(
+    context: Any,
+    group_id: int,
+    columns: list[str] | None = None,
+    include_history: bool = False,
+    q: str | None = None,
+    sort: str | None = None,
+    direction: str = "",
+    tz: tzinfo | None = None,
+    now: datetime | None = None,
+) -> bytes:
+    """Grubu .xlsx olarak uretir ve bellekteki baytlari dondurur."""
+    data = grid.build_grid(
+        context,
+        group_id,
+        columns=columns,
+        q=q or "",
+        sort=sort or "",
+        direction=direction,
+    )
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = sheet_title(data.group["name"])
+    _write_rows(sheet, data, tz)
+
+    if include_history:
+        _write_history(book, context, data, tz)
+
+    _write_info(book, data, tz, now)
+
+    buffer = io.BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
+
+
+# --- sayfa 1: kayitlar --------------------------------------------------
+
+
+def _write_rows(sheet: Worksheet, data: grid.GridData, tz: tzinfo | None) -> None:
+    headers = [head["name"] for head in data.heads]
+    kinds = [_cell_kind(head, data.schemas) for head in data.heads]
+    widths = [len(text) for text in headers]
+
+    sheet.append(headers)
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+
+    for line, row in enumerate(data.rows, start=2):
+        for index, cell in enumerate(row["cells"]):
+            target = sheet.cell(row=line, column=index + 1)
+            width = _write_cell(target, cell, kinds[index], data.heads[index], row, tz)
+            if width > widths[index]:
+                widths[index] = width
+
+    last_column = get_column_letter(max(len(headers), 1))
+    last_line = len(data.rows) + 1
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:{last_column}{last_line}"
+    for index, width in enumerate(widths):
+        letter = get_column_letter(index + 1)
+        sheet.column_dimensions[letter].width = min(
+            max(width + 2, COLUMN_WIDTH_MIN), COLUMN_WIDTH_LIMIT
+        )
+
+
+def _cell_kind(head: dict[str, Any], schemas: dict[str, dict[str, Any]]) -> str:
+    """Sutunun Excel'deki hucre tipi."""
+    local = head.get("local")
+    if local is not None:
+        derived = head.get("derived") or ""
+        if derived == field_utils.DERIVED_CHANGES:
+            return KIND_NUMBER
+        if derived == field_utils.DERIVED_CHANGED_AT:
+            return KIND_DATETIME
+        if local["type"] == field_utils.LOCAL_NUMBER:
+            return KIND_DECIMAL
+        if local["type"] == field_utils.LOCAL_DATE:
+            return KIND_DATE
+        return KIND_TEXT
+
+    kind = field_utils.schema_type(schemas.get(head["id"]))
+    if kind == "date":
+        return KIND_DATE
+    if kind == "datetime":
+        return KIND_DATETIME
+    if kind == "number":
+        return KIND_NUMBER
+    return KIND_TEXT
+
+
+def _write_cell(
+    target: Any,
+    cell: dict[str, Any],
+    kind: str,
+    head: dict[str, Any],
+    row: dict[str, Any],
+    tz: tzinfo | None,
+) -> int:
+    """Hucreyi yazar ve sutun genisligi icin gorunen uzunlugu dondurur."""
+    text = cell.get("text") or ""
+    raw = cell.get("raw")
+
+    if kind == KIND_DATE:
+        moment = field_utils.parse_moment(raw)
+        if moment is not None:
+            target.value = moment.date()
+            target.number_format = EXCEL_DATE_FORMAT
+            return len(EXCEL_DATE_FORMAT)
+    elif kind == KIND_DATETIME:
+        moment = field_utils.parse_moment(raw)
+        if moment is not None:
+            local = moment.astimezone(tz) if tz is not None else moment.astimezone()
+            # Excel zaman dilimi tasimaz; yerel saate cevrilip saf yazilir.
+            target.value = local.replace(tzinfo=None)
+            target.number_format = EXCEL_DATETIME_FORMAT
+            return len(EXCEL_DATETIME_FORMAT)
+    elif kind == KIND_NUMBER:
+        number = _as_int_or_float(raw)
+        if number is not None:
+            target.value = number
+            return len(str(number))
+    elif kind == KIND_DECIMAL:
+        number = _as_decimal(raw)
+        if number is not None:
+            target.value = number
+            return len(text or str(number))
+
+    if not text:
+        return 0
+    target.value = text
+    if head["id"] in ("issuekey", "key") and row.get("url"):
+        target.hyperlink = row["url"]
+        target.style = "Hyperlink"
+    return _display_width(text)
+
+
+def _display_width(text: str) -> int:
+    """Cok satirli metinde en uzun satir sutun genisligini belirler."""
+    return max((len(line) for line in text.splitlines()), default=0)
+
+
+def _as_int_or_float(value: Any) -> int | float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    number = field_utils.parse_number(value)
+    if number is None:
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def _as_decimal(value: Any) -> Decimal | None:
+    """Yerel sayi degeri metin olarak saklanir; kayipsiz Decimal'e cevrilir."""
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+# --- sayfa 2: gecmis ----------------------------------------------------
+
+
+def _write_history(
+    book: Workbook, context: Any, data: grid.GridData, tz: tzinfo | None
+) -> None:
+    sheet = book.create_sheet(HISTORY_SHEET)
+    conn = context.connection()
+    tracked = [field for field in repository.list_local_fields(conn) if field["track_history"]]
+    if not tracked:
+        sheet["A1"] = NO_HISTORY_TEXT
+        sheet.column_dimensions["A"].width = len(NO_HISTORY_TEXT) + 2
+        return
+
+    sheet.append(list(HISTORY_HEADERS))
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+
+    entries: list[tuple[str, str, str, str, str]] = []
+    for row in data.rows:
+        key = row["key"]
+        for field in tracked:
+            if not data.local_view.stat(key, field["id"]).get("changes"):
+                continue
+            for item in repository.list_local_history(conn, key, field["id"]):
+                entries.append(
+                    (
+                        item["changed_at"] or "",
+                        key,
+                        field["name"],
+                        item["old_text"],
+                        item["new_text"],
+                    )
+                )
+    # Yeniden eskiye: ayni anda dusen satirlarda kayit/alan sirasi korunur.
+    entries.sort(key=lambda item: item[0], reverse=True)
+
+    widths = [len(text) for text in HISTORY_HEADERS]
+    for line, entry in enumerate(entries, start=2):
+        changed_at, key, name, old_text, new_text = entry
+        values = [key, name, None, old_text, new_text]
+        for index, value in enumerate(values):
+            target = sheet.cell(row=line, column=index + 1)
+            if index == 2:
+                moment = field_utils.parse_moment(changed_at)
+                if moment is None:
+                    target.value = changed_at
+                    widths[2] = max(widths[2], len(changed_at))
+                    continue
+                local = moment.astimezone(tz) if tz is not None else moment.astimezone()
+                target.value = local.replace(tzinfo=None)
+                target.number_format = EXCEL_DATETIME_FORMAT
+                widths[2] = max(widths[2], len(EXCEL_DATETIME_FORMAT))
+                continue
+            if value:
+                target.value = value
+                widths[index] = max(widths[index], _display_width(value))
+
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:E{len(entries) + 1}"
+    for index, width in enumerate(widths):
+        letter = get_column_letter(index + 1)
+        sheet.column_dimensions[letter].width = min(
+            max(width + 2, COLUMN_WIDTH_MIN), COLUMN_WIDTH_LIMIT
+        )
+
+
+# --- sayfa 3: bilgi -----------------------------------------------------
+
+
+def _write_info(
+    book: Workbook, data: grid.GridData, tz: tzinfo | None, now: datetime | None
+) -> None:
+    sheet = book.create_sheet(INFO_SHEET)
+    group = data.group
+    moment = now or datetime.now(tz=tz)
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(tz).replace(tzinfo=None) if tz else moment.replace(tzinfo=None)
+    moment = moment.replace(microsecond=0)
+
+    lines: list[tuple[str, Any]] = [
+        ("Grup", group["name"]),
+        ("Tür", KIND_LABELS.get(group["kind"], group["kind"])),
+    ]
+    if group["kind"] == repository.KIND_FILTER:
+        lines.append(("JQL", group["jql"]))
+    lines.append(("Dışa aktarma", moment))
+    lines.append(("Kayıt sayısı", len(data.rows)))
+    lines.append(("Sürüm", __version__))
+
+    for line, (label, value) in enumerate(lines, start=1):
+        name_cell = sheet.cell(row=line, column=1, value=label)
+        name_cell.font = Font(bold=True)
+        value_cell = sheet.cell(row=line, column=2, value=value)
+        if isinstance(value, datetime):
+            value_cell.number_format = EXCEL_DATETIME_FORMAT
+
+    sheet.column_dimensions["A"].width = 16
+    sheet.column_dimensions["B"].width = min(
+        max((len(str(value)) for _, value in lines), default=20) + 2, COLUMN_WIDTH_LIMIT
+    )
+
+
+# --- adlandirma ---------------------------------------------------------
+
+
+def sheet_title(name: str) -> str:
+    """Excel sayfa adi: yasak karakter yok, 31 karakteri gecmez, bos kalmaz."""
+    text = _FORBIDDEN_SHEET.sub(" ", str(name or ""))
+    text = _SPACES.sub(" ", text).strip().strip("'")
+    text = text[:SHEET_NAME_LIMIT].strip()
+    return text or FALLBACK_SHEET
+
+
+def file_stem(name: str, when: date | None = None) -> str:
+    """Dosya adinin govdesi: <grup-adi>-<YYYY-AA-GG>."""
+    text = _FORBIDDEN_FILE.sub("", str(name or ""))
+    text = _SPACES.sub("-", text.strip())
+    text = _DASHES.sub("-", text).strip("-.")
+    stamp = (when or date.today()).isoformat()
+    return f"{text or 'grup'}-{stamp}"
+
+
+def ascii_stem(stem: str) -> str:
+    """Eski istemciler icin ASCII yedek ad."""
+    text = _NON_ASCII_NAME.sub("-", stem.translate(_ASCII_MAP))
+    text = _DASHES.sub("-", text).strip("-.")
+    return text or "holocron"
+
+
+def content_disposition(name: str, when: date | None = None) -> str:
+    """RFC 5987: UTF-8 ad + ASCII yedek."""
+    stem = file_stem(name, when)
+    return (
+        f'attachment; filename="{ascii_stem(stem)}.xlsx"; '
+        f"filename*=UTF-8''{quote(stem + '.xlsx')}"
+    )
+
+
+def parse_columns(text: str | None) -> list[str] | None:
+    """'a,b,c' -> ['a','b','c']; bos ise None (grubun secili sutunlari)."""
+    if not text:
+        return None
+    chosen = [part.strip() for part in str(text).split(",") if part.strip()]
+    return chosen or None
+
+
+def truthy(value: Any) -> bool:
+    return str(value or "").strip().lower() in ("1", "true", "evet", "yes", "on")

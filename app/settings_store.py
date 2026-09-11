@@ -7,6 +7,7 @@ arayuz yalnizca "ayarli / ayarsiz" bilgisini gorur.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,8 +60,24 @@ class JiraConfig:
 
 class SettingsStore:
     def __init__(self, conn: sqlite3.Connection, box: SecretBox | None = None) -> None:
-        self._conn = conn
+        self._source: Any = conn
         self._box = box or SecretBox()
+
+    def bind(self, provider: Callable[[], sqlite3.Connection]) -> None:
+        """Baglantiyi disaridan verilen saglayiciya devreder.
+
+        Uygulama baglami her is parcacigina ayri sqlite baglantisi verir; ayar
+        okumalari da o baglantidan gecsin diye kurulumda buraya baglanir.
+        """
+        self._source = provider
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        source = self._source
+        # sqlite3.Connection'in kendisi de cagrilabilir; tip kontrolu sart.
+        if isinstance(source, sqlite3.Connection):
+            return source
+        return source()
 
     # --- temel erisim -------------------------------------------------
 

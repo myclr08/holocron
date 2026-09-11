@@ -65,7 +65,7 @@ def test_settings_reject_invalid_mode(api_client):
     response = api_client.put("/api/settings", json={"jira.mode": "karanlik-taraf"})
     assert response.status_code == 400
     assert response.json() == {
-        "error": {"code": "invalid_mode", "message": "Mod yalnizca 'server' veya 'cloud' olabilir."}
+        "error": {"code": "invalid_mode", "message": "Mod yalnızca 'server' veya 'cloud' olabilir."}
     }
 
 
@@ -153,7 +153,7 @@ def test_pages_are_served(api_client):
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
     assert "HOLOCRON" in api_client.get("/").text
-    assert "Jira baglantisi" in api_client.get("/settings").text
+    assert "Jira bağlantısı" in api_client.get("/settings").text
 
 
 def test_static_assets_are_served(api_client):

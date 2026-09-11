@@ -103,17 +103,17 @@ class RefreshManager:
     def start(self, context: "AppContext", group_id: int | None = None) -> dict[str, Any]:
         """Isi baslatir. Zaten calisiyorsa hata verir (tek is kurali)."""
         if group_id is not None:
-            repository.require_group(context.conn, group_id)
+            repository.require_group(context.connection(), group_id)
 
         with self._lock:
             if self._state.state == STATE_RUNNING:
                 raise repository.RepositoryError(
-                    "refresh_running", "Guncelleme zaten suruyor.", status=409
+                    "refresh_running", "Güncelleme zaten sürüyor.", status=409
                 )
             self._cancel = threading.Event()
             self._state = RefreshState(
                 state=STATE_RUNNING,
-                stage="Hazirlaniyor",
+                stage="Hazırlanıyor",
                 started_at=self._now(),
                 group_id=group_id,
                 summary=empty_summary(),
@@ -135,7 +135,7 @@ class RefreshManager:
             if self._state.state != STATE_RUNNING:
                 return False
             self._cancel.set()
-            self._state.stage = "Iptal ediliyor"
+            self._state.stage = "İptal ediliyor"
             return True
 
     def join(self, timeout: float | None = None) -> None:
@@ -147,16 +147,16 @@ class RefreshManager:
     def run_blocking(self, context: "AppContext", group_id: int | None = None) -> dict[str, Any]:
         """Is parcacigi acmadan calistirir; testler icin deterministik yol."""
         if group_id is not None:
-            repository.require_group(context.conn, group_id)
+            repository.require_group(context.connection(), group_id)
         with self._lock:
             if self._state.state == STATE_RUNNING:
                 raise repository.RepositoryError(
-                    "refresh_running", "Guncelleme zaten suruyor.", status=409
+                    "refresh_running", "Güncelleme zaten sürüyor.", status=409
                 )
             self._cancel = threading.Event()
             self._state = RefreshState(
                 state=STATE_RUNNING,
-                stage="Hazirlaniyor",
+                stage="Hazırlanıyor",
                 started_at=self._now(),
                 group_id=group_id,
                 summary=empty_summary(),
@@ -167,7 +167,7 @@ class RefreshManager:
     # --- is govdesi ---------------------------------------------------
 
     def _run(self, context: "AppContext", group_id: int | None) -> None:
-        conn = context.conn
+        conn = context.connection()
         summary = empty_summary()
         report = repository.UpsertReport()
         try:
@@ -181,7 +181,7 @@ class RefreshManager:
             self._touch(total=len(filter_groups) + 1)
 
             if repository.field_count(conn) == 0:
-                self._touch(stage="Alan katalogu cekiliyor")
+                self._touch(stage="Alan kataloğu çekiliyor")
                 with context.db_lock:
                     repository.store_fields(conn, client.fetch_fields())
 
@@ -189,7 +189,7 @@ class RefreshManager:
             for index, group in enumerate(filter_groups, start=1):
                 if self._cancel.is_set():
                     return self._finish(STATE_CANCELLED, summary, report)
-                self._touch(stage=f"Filtre suzuluyor: {group['name']}", done=index - 1)
+                self._touch(stage=f"Filtre süzülüyor: {group['name']}", done=index - 1)
                 try:
                     issues = client.search(group["jql"], fields=selector)
                 except JiraError as exc:
@@ -228,7 +228,7 @@ class RefreshManager:
                 if self._cancel.is_set():
                     return self._finish(STATE_CANCELLED, summary, report)
                 self._touch(
-                    stage=f"Kayitlar cekiliyor ({index}/{len(chunks)})",
+                    stage=f"Kayıtlar çekiliyor ({index}/{len(chunks)})",
                     done=len(filter_groups) + index - 1,
                 )
                 batch = client.fetch_issues_by_keys(chunk, fields=selector)
@@ -237,7 +237,7 @@ class RefreshManager:
                 summary["not_found"].extend(key.upper() for key in batch.invalid_keys)
 
             self._touch(
-                stage="Tamamlandi",
+                stage="Tamamlandı",
                 done=len(filter_groups) + max(len(chunks), 1),
                 total=len(filter_groups) + max(len(chunks), 1),
             )
@@ -305,8 +305,8 @@ class RefreshManager:
             self._state.error = error
             self._state.finished_at = self._now()
             if state == STATE_DONE:
-                self._state.stage = "Tamamlandi"
+                self._state.stage = "Tamamlandı"
             elif state == STATE_CANCELLED:
-                self._state.stage = "Iptal edildi"
+                self._state.stage = "İptal edildi"
             elif state == STATE_ERROR:
                 self._state.stage = "Hata"

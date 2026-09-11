@@ -152,6 +152,19 @@ def sort_key(field_schema: dict[str, Any] | None, value: Any) -> tuple[int, floa
     return (0, 0.0, fold(text))
 
 
+def parse_moment(value: Any) -> datetime | None:
+    """Degeri zaman damgasina cevirir; cevrilemezse None.
+
+    Excel disa aktarimi gercek tarih hucresi yazabilmek icin bunu kullanir.
+    """
+    return _parse_datetime(value)
+
+
+def parse_number(value: Any) -> float | None:
+    """Degeri sayiya cevirir; cevrilemezse None."""
+    return _as_number(value)
+
+
 def truncate(text: str, limit: int = GRID_TEXT_LIMIT) -> str:
     """Grid hucresi icin kirpar; tam metin detay cekmecesinde kalir."""
     if len(text) <= limit:
@@ -294,7 +307,7 @@ def _format_number(value: Any) -> str:
 
 def _generic_text(value: Any, tz: tzinfo | None) -> str:
     if isinstance(value, bool):
-        return "Evet" if value else "Hayir"
+        return "Evet" if value else "Hayır"
     if isinstance(value, (int, float)):
         return _format_number(value)
     if isinstance(value, list):
@@ -396,9 +409,9 @@ LOCAL_TYPES: tuple[str, ...] = (LOCAL_TEXT, LOCAL_NUMBER, LOCAL_DATE, LOCAL_BOOL
 
 LOCAL_TYPE_LABELS: dict[str, str] = {
     LOCAL_TEXT: "Metin",
-    LOCAL_NUMBER: "Sayi",
+    LOCAL_NUMBER: "Sayı",
     LOCAL_DATE: "Tarih",
-    LOCAL_BOOL: "Evet/Hayir",
+    LOCAL_BOOL: "Evet/Hayır",
     LOCAL_SELECT: "Liste",
 }
 
@@ -407,12 +420,12 @@ DERIVED_CHANGED_AT = "changed_at"
 DERIVED_CHANGES = "changes"
 DERIVED_SUFFIXES: tuple[str, ...] = (DERIVED_CHANGED_AT, DERIVED_CHANGES)
 DERIVED_LABELS: dict[str, str] = {
-    DERIVED_CHANGED_AT: "son degisim",
-    DERIVED_CHANGES: "kac kez degisti",
+    DERIVED_CHANGED_AT: "son değişim",
+    DERIVED_CHANGES: "kaç kez değişti",
 }
 
 BOOL_TRUE_TEXT = "Evet"
-BOOL_FALSE_TEXT = "Hayir"
+BOOL_FALSE_TEXT = "Hayır"
 
 _TRUE_WORDS = frozenset({"1", "true", "evet", "yes", "on", "dogru", "e", "x", "✓"})
 _FALSE_WORDS = frozenset({"0", "false", "hayir", "no", "off", "yanlis", "h", "-"})
@@ -517,13 +530,13 @@ def normalize_options(field_type: str, options: Any) -> list[str]:
     if field_type != LOCAL_SELECT:
         return []
     if options is None:
-        raise LocalValueError("Liste tipinde en az bir secenek gerekli.")
+        raise LocalValueError("Liste tipinde en az bir seçenek gerekli.")
     if isinstance(options, str):
         candidates = [part for part in options.splitlines()]
     elif isinstance(options, (list, tuple)):
         candidates = [_plain_scalar(item) for item in options]
     else:
-        raise LocalValueError("Secenekler bir liste olmali.")
+        raise LocalValueError("Seçenekler bir liste olmalı.")
 
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -537,7 +550,7 @@ def normalize_options(field_type: str, options: Any) -> list[str]:
         seen.add(marker)
         cleaned.append(text)
     if not cleaned:
-        raise LocalValueError("Liste tipinde en az bir secenek gerekli.")
+        raise LocalValueError("Liste tipinde en az bir seçenek gerekli.")
     return cleaned
 
 
@@ -565,7 +578,7 @@ def _normalize_bool(value: Any) -> str:
         return "1"
     if marker in _FALSE_WORDS:
         return "0"
-    raise LocalValueError(f"Evet/Hayir bekleniyor, '{text}' anlasilmadi.")
+    raise LocalValueError(f"Evet/Hayır bekleniyor, '{text}' anlaşılmadı.")
 
 
 def _normalize_number_text(text: str) -> str:
@@ -576,9 +589,9 @@ def _normalize_number_text(text: str) -> str:
     try:
         number = Decimal(candidate)
     except (InvalidOperation, ValueError) as exc:
-        raise LocalValueError(f"Sayi bekleniyor, '{text}' anlasilmadi.") from exc
+        raise LocalValueError(f"Sayı bekleniyor, '{text}' anlaşılmadı.") from exc
     if not number.is_finite():
-        raise LocalValueError(f"Sayi bekleniyor, '{text}' anlasilmadi.")
+        raise LocalValueError(f"Sayı bekleniyor, '{text}' anlaşılmadı.")
     # normalize() 100 -> 1E+2 uretir; "f" bicimi her zaman duz yazar.
     return format(number.normalize(), "f")
 
@@ -590,22 +603,22 @@ def _normalize_date_text(text: str) -> str:
     else:
         local = _TR_DATE.match(text)
         if not local:
-            raise LocalValueError(f"Tarih bekleniyor (GG.AA.YYYY), '{text}' anlasilmadi.")
+            raise LocalValueError(f"Tarih bekleniyor (GG.AA.YYYY), '{text}' anlaşılmadı.")
         day, month, year = (int(part) for part in local.groups())
     try:
         return date(year, month, day).isoformat()
     except ValueError as exc:
-        raise LocalValueError(f"Gecersiz tarih: '{text}'.") from exc
+        raise LocalValueError(f"Geçersiz tarih: '{text}'.") from exc
 
 
 def _normalize_select_text(text: str, options: Any) -> str:
     choices = [str(item) for item in (options or [])]
     if not choices:
-        raise LocalValueError("Bu alanin secenek listesi bos.")
+        raise LocalValueError("Bu alanın seçenek listesi boş.")
     marker = fold(text)
     for choice in choices:
         if fold(choice) == marker:
             return choice
     raise LocalValueError(
-        f"'{text}' secenekler arasinda yok: " + ", ".join(choices)
+        f"'{text}' seçenekler arasında yok: " + ", ".join(choices)
     )

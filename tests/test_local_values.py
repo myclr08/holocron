@@ -83,7 +83,7 @@ def test_number_is_stored_as_plain_dot_decimal(girdi, beklenen):
 def test_number_rejects_nonsense(girdi):
     with pytest.raises(LocalValueError) as excinfo:
         norm("number", girdi)
-    assert "Sayi bekleniyor" in str(excinfo.value)
+    assert "Sayı bekleniyor" in str(excinfo.value)
 
 
 def test_number_sorts_numerically_not_as_text():
@@ -141,12 +141,12 @@ def test_bool_false_forms(girdi):
 def test_bool_rejects_other_words():
     with pytest.raises(LocalValueError) as excinfo:
         norm("bool", "belki")
-    assert "Evet/Hayir" in str(excinfo.value)
+    assert "Evet/Hayır" in str(excinfo.value)
 
 
 def test_bool_is_shown_in_turkish():
     assert format_local_value("bool", "1") == "Evet"
-    assert format_local_value("bool", "0") == "Hayir"
+    assert format_local_value("bool", "0") == "Hayır"
 
 
 def test_bool_sorts_false_before_true():
@@ -161,7 +161,7 @@ def test_select_accepts_only_known_options():
     assert norm("select", "bitti", SECENEKLER) == "bitti"
     with pytest.raises(LocalValueError) as excinfo:
         norm("select", "salatalik", SECENEKLER)
-    assert "secenekler arasinda yok" in str(excinfo.value)
+    assert "seçenekler arasında yok" in str(excinfo.value)
 
 
 def test_select_matches_case_insensitively_and_returns_canonical_text():

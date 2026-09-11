@@ -131,7 +131,7 @@ def test_invalid_value_returns_invalid_value_code(api_client, conn):
     assert response.status_code == 400
     body = response.json()["error"]
     assert body["code"] == "invalid_value"
-    assert "Sayi bekleniyor" in body["message"]
+    assert "Sayı bekleniyor" in body["message"]
 
 
 def test_value_for_unknown_issue_is_404(api_client, conn):
@@ -237,8 +237,8 @@ def test_derived_columns_are_returned_like_normal_cells(api_client, conn):
     assert [column["name"] for column in data["columns"]] == [
         "Anahtar",
         "Musteri durumu",
-        "Musteri durumu (son degisim)",
-        "Musteri durumu (kac kez degisti)",
+        "Musteri durumu (son değişim)",
+        "Musteri durumu (kaç kez değişti)",
     ]
     assert data["columns"][1]["editable"] is True
     assert data["columns"][2]["editable"] is False

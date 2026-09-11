@@ -71,7 +71,7 @@ class BaseJiraClient:
         timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         if not config.base_url:
-            raise JiraError("config_missing", "Jira adresi bos.")
+            raise JiraError("config_missing", "Jira adresi boş.")
         self.config = config
         self.session = session or requests.Session()
         self._sleep = sleep
@@ -134,17 +134,17 @@ class BaseJiraClient:
                     verify=self._verify(),
                 )
             except requests.exceptions.SSLError as exc:
-                raise JiraError("ssl_error", f"SSL dogrulamasi basarisiz: {exc}") from exc
+                raise JiraError("ssl_error", f"SSL doğrulaması başarısız: {exc}") from exc
             except requests.exceptions.ProxyError as exc:
-                raise JiraError("proxy_error", f"Vekil sunucuya ulasilamadi: {exc}") from exc
+                raise JiraError("proxy_error", f"Vekil sunucuya ulaşılamadı: {exc}") from exc
             except requests.exceptions.Timeout as exc:
-                last_error = JiraError("timeout", "Jira zaman asimina ugradi.")
+                last_error = JiraError("timeout", "Jira zaman aşımına uğradı.")
                 if attempt == MAX_ATTEMPTS:
                     raise last_error from exc
                 self._backoff(attempt, None)
                 continue
             except requests.exceptions.RequestException as exc:
-                raise JiraError("network_error", f"Baglanti kurulamadi: {exc}") from exc
+                raise JiraError("network_error", f"Bağlantı kurulamadı: {exc}") from exc
 
             status = response.status_code
             if status in allow_status or status < 400:
@@ -157,7 +157,7 @@ class BaseJiraClient:
             raise self._error_from_response(response)
 
         # Buraya yalnizca tum denemeler zaman asimiyla bittiyse gelinir.
-        raise last_error or JiraError("unknown", "Beklenmeyen istek hatasi.")
+        raise last_error or JiraError("unknown", "Beklenmeyen istek hatası.")
 
     def _backoff(self, attempt: int, response: requests.Response | None) -> None:
         delay = BACKOFF_BASE * (2 ** (attempt - 1))
@@ -178,16 +178,16 @@ class BaseJiraClient:
             message = detail or "Kimlik dogrulanamadi, kullanici veya token hatali."
         elif status == 404:
             code = "not_found"
-            message = detail or "Adres bulunamadi, temel URL yanlis olabilir."
+            message = detail or "Adres bulunamadı, temel URL yanlış olabilir."
         elif status == 400:
             code = "bad_request"
-            message = detail or "Istek reddedildi (JQL veya alan adi hatali olabilir)."
+            message = detail or "İstek reddedildi (JQL veya alan adı hatalı olabilir)."
         elif status == 429:
             code = "rate_limited"
-            message = detail or "Jira hiz siniri uyguladi."
+            message = detail or "Jira hız sınırı uyguladı."
         else:
             code = f"http_{status}"
-            message = detail or f"Jira {status} dondu."
+            message = detail or f"Jira {status} döndü."
         return JiraError(code, message, status=status)
 
     @staticmethod
@@ -195,9 +195,9 @@ class BaseJiraClient:
         try:
             data = response.json()
         except (ValueError, json.JSONDecodeError) as exc:
-            raise JiraError("bad_response", "Jira gecerli JSON dondurmedi.") from exc
+            raise JiraError("bad_response", "Jira geçerli JSON döndürmedi.") from exc
         if not isinstance(data, (dict, list)):
-            raise JiraError("bad_response", "Beklenmeyen cevap bicimi.")
+            raise JiraError("bad_response", "Beklenmeyen cevap biçimi.")
         return data  # type: ignore[return-value]
 
     # --- ortak arayuz --------------------------------------------------
@@ -222,7 +222,7 @@ class BaseJiraClient:
     def fetch_fields(self) -> list[dict[str, Any]]:
         data = self._json(self._request("GET", f"{self.api_root}/field"))
         if not isinstance(data, list):
-            raise JiraError("bad_response", "Alan katalogu liste degil.")
+            raise JiraError("bad_response", "Alan kataloğu liste değil.")
         return data
 
     def search(
@@ -280,7 +280,7 @@ class CloudJiraClient(BaseJiraClient):
 
     def _auth_header(self) -> str:
         if not self.config.email or not self.config.secret:
-            raise JiraError("config_missing", "Cloud icin e-posta ve API token gerekir.")
+            raise JiraError("config_missing", "Cloud için e-posta ve API token gerekir.")
         return _basic_header(self.config.email, self.config.secret)
 
     def search(
@@ -324,10 +324,10 @@ class ServerJiraClient(BaseJiraClient):
 
     def _auth_header(self) -> str:
         if not self.config.secret:
-            raise JiraError("config_missing", "Kisisel erisim anahtari (PAT) ya da parola gerekir.")
+            raise JiraError("config_missing", "Kişisel erişim anahtarı (PAT) ya da parola gerekir.")
         if self.config.auth_type == AUTH_BASIC:
             if not self.config.username:
-                raise JiraError("config_missing", "Basic kimlik icin kullanici adi gerekir.")
+                raise JiraError("config_missing", "Basic kimlik için kullanıcı adı gerekir.")
             return _basic_header(self.config.username, self.config.secret)
         return f"Bearer {self.config.secret}"
 

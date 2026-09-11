@@ -21,7 +21,7 @@ function applyModeVisibility() {
     ? "API token"
     : authType === "basic"
       ? "Parola"
-      : "Kisisel erisim anahtari (PAT)";
+      : "Kişisel erişim anahtarı (PAT)";
 }
 
 function fillForm(settings) {
@@ -31,11 +31,11 @@ function fillForm(settings) {
   });
   document.getElementById("verify-ssl").checked = settings.verify_ssl !== false;
   const badge = document.getElementById("secret-state");
-  badge.textContent = settings.secret_set ? "ayarli" : "ayarsiz";
+  badge.textContent = settings.secret_set ? "ayarlı" : "ayarsız";
   badge.className = "badge" + (settings.secret_set ? " on" : "");
   document.getElementById("secret").placeholder = settings.secret_set
-    ? "Degistirmek icin yeni deger yazin"
-    : "Deger girin";
+    ? "Değiştirmek için yeni değer yazın"
+    : "Değer girin";
   applyModeVisibility();
 }
 
@@ -73,33 +73,33 @@ async function saveSettings() {
 
 async function testConnection() {
   const status = document.getElementById("status");
-  setStatus(status, "Baglanti deneniyor...", null);
+  setStatus(status, "Bağlantı deneniyor...", null);
   try {
     await api("/api/settings", { method: "PUT", body: JSON.stringify(collectForm()) });
     document.getElementById("secret").value = "";
     const data = await api("/api/jira/test", { method: "POST" });
     const result = data.result || {};
     const lines = [
-      "Baglanti kuruldu.",
-      "Kullanici: " + (result.display_name || "-"),
+      "Bağlantı kuruldu.",
+      "Kullanıcı: " + (result.display_name || "-"),
       "Sunucu: " + (result.server_title || "-"),
     ];
-    if (result.version) lines.push("Surum: " + result.version);
+    if (result.version) lines.push("Sürüm: " + result.version);
     setStatus(status, lines.join("\n"), "ok");
     await loadSettings();
   } catch (err) {
-    setStatus(status, "Baglanti kurulamadi: " + err.message, "error");
+    setStatus(status, "Bağlantı kurulamadı: " + err.message, "error");
   }
 }
 
 async function refreshFields() {
   const status = document.getElementById("status");
-  setStatus(status, "Alan katalogu cekiliyor...", null);
+  setStatus(status, "Alan kataloğu çekiliyor...", null);
   try {
     const data = await api("/api/jira/fields/refresh", { method: "POST" });
     setStatus(status, data.count + " alan kaydedildi.", "ok");
   } catch (err) {
-    setStatus(status, "Alan katalogu alinamadi: " + err.message, "error");
+    setStatus(status, "Alan kataloğu alınamadı: " + err.message, "error");
   }
 }
 
@@ -112,11 +112,11 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("fields").addEventListener("click", refreshFields);
   document.getElementById("clear-secret").addEventListener("click", async () => {
     const status = document.getElementById("status");
-    if (!confirm("Kayitli sir silinsin mi?")) return;
+    if (!confirm("Kayıtlı sır silinsin mi?")) return;
     try {
       await api("/api/settings", { method: "PUT", body: JSON.stringify({ clear_secret: true }) });
       await loadSettings();
-      setStatus(status, "Kayitli sir silindi.", "ok");
+      setStatus(status, "Kayıtlı sır silindi.", "ok");
     } catch (err) {
       setStatus(status, err.message, "error");
     }

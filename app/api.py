@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
-from . import __version__, db, fields as field_utils, repository
+from . import __version__, db, export, fields as field_utils, grid, repository
 from .context import AppContext
 from .jira_client import JiraError
 from .lifecycle import BEAT_INTERVAL_SECONDS
@@ -35,7 +35,7 @@ def health(request: Request) -> dict[str, Any]:
         "status": "ok",
         "app": "holocron",
         "version": __version__,
-        "schema_version": db.current_version(context.conn),
+        "schema_version": db.current_version(context.connection()),
         "heartbeat": context.heartbeat.status(),
     }
 
@@ -52,7 +52,7 @@ def shutdown(request: Request) -> dict[str, Any]:
     context = get_context(request)
     context.heartbeat.request_stop()
     context.shutdown_hook()
-    return {"ok": True, "message": "Holocron kapatiliyor."}
+    return {"ok": True, "message": "Holocron kapatılıyor."}
 
 
 # --- ayarlar ------------------------------------------------------------
@@ -69,10 +69,10 @@ def write_settings(request: Request, payload: dict[str, Any] = Body(default_fact
     context = get_context(request)
     mode = payload.get("jira.mode")
     if mode is not None and mode not in (MODE_SERVER, MODE_CLOUD):
-        return error_response("invalid_mode", "Mod yalnizca 'server' veya 'cloud' olabilir.")
+        return error_response("invalid_mode", "Mod yalnızca 'server' veya 'cloud' olabilir.")
     base_url = payload.get("jira.base_url")
     if base_url and not str(base_url).startswith(("http://", "https://")):
-        return error_response("invalid_base_url", "Adres http:// veya https:// ile baslamali.")
+        return error_response("invalid_base_url", "Adres http:// veya https:// ile başlamalı.")
     context.settings.apply(payload)
     return {"settings": context.settings.public_view()}
 
@@ -80,7 +80,7 @@ def write_settings(request: Request, payload: dict[str, Any] = Body(default_fact
 @router.get("/settings/columns")
 def read_default_columns(request: Request) -> dict[str, Any]:
     context = get_context(request)
-    return {"columns": repository.default_columns(context.conn)}
+    return {"columns": repository.default_columns(context.connection())}
 
 
 @router.put("/settings/columns")
@@ -88,9 +88,9 @@ def write_default_columns(request: Request, payload: dict[str, Any] = Body(defau
     context = get_context(request)
     columns = payload.get("columns")
     if not isinstance(columns, list):
-        return error_response("invalid_columns", "columns bir liste olmali.")
+        return error_response("invalid_columns", "columns bir liste olmalı.")
     with context.db_lock:
-        saved = repository.set_default_columns(context.conn, columns)
+        saved = repository.set_default_columns(context.connection(), columns)
     return {"columns": saved}
 
 
@@ -102,7 +102,7 @@ def test_connection(request: Request):
     context = get_context(request)
     config = context.settings.jira_config()
     if not config.base_url:
-        return error_response("config_missing", "Once Jira adresini girin.")
+        return error_response("config_missing", "Önce Jira adresini girin.")
     try:
         client = context.client_factory(config)
         return {"result": client.test_connection()}
@@ -115,7 +115,7 @@ def refresh_fields(request: Request):
     context = get_context(request)
     config = context.settings.jira_config()
     if not config.base_url:
-        return error_response("config_missing", "Once Jira adresini girin.")
+        return error_response("config_missing", "Önce Jira adresini girin.")
     try:
         client = context.client_factory(config)
         catalog = client.fetch_fields()
@@ -123,21 +123,21 @@ def refresh_fields(request: Request):
         return error_response(exc.code, exc.message, status=400)
 
     with context.db_lock:
-        stored = repository.store_fields(context.conn, catalog)
+        stored = repository.store_fields(context.connection(), catalog)
     return {"count": stored, "fetched_at": repository.now_iso()}
 
 
 @router.get("/jira/fields")
 def list_jira_fields(request: Request) -> dict[str, Any]:
     context = get_context(request)
-    return {"fields": repository.list_fields(context.conn, include_virtual=False)}
+    return {"fields": repository.list_fields(context.connection(), include_virtual=False)}
 
 
 @router.get("/fields")
 def list_all_fields(request: Request) -> dict[str, Any]:
     """Katalog + sanal alanlar; sutun secici bu ucu kullanir."""
     context = get_context(request)
-    return {"fields": repository.list_fields(context.conn)}
+    return {"fields": repository.list_fields(context.connection())}
 
 
 # --- gruplar ------------------------------------------------------------
@@ -147,9 +147,9 @@ def list_all_fields(request: Request) -> dict[str, Any]:
 def list_groups(request: Request) -> dict[str, Any]:
     context = get_context(request)
     return {
-        "groups": repository.list_groups(context.conn),
+        "groups": repository.list_groups(context.connection()),
         "colors": list(repository.GROUP_COLORS),
-        "default_columns": repository.default_columns(context.conn),
+        "default_columns": repository.default_columns(context.connection()),
     }
 
 
@@ -158,7 +158,7 @@ def create_group(request: Request, payload: dict[str, Any] = Body(default_factor
     context = get_context(request)
     with context.db_lock:
         group = repository.create_group(
-            context.conn,
+            context.connection(),
             name=str(payload.get("name") or ""),
             kind=str(payload.get("kind") or repository.KIND_MANUAL),
             jql=payload.get("jql"),
@@ -174,24 +174,24 @@ def reorder_groups(request: Request, payload: dict[str, Any] = Body(default_fact
     context = get_context(request)
     ids = payload.get("ids")
     if not isinstance(ids, list):
-        return error_response("invalid_order", "ids bir liste olmali.")
+        return error_response("invalid_order", "ids bir liste olmalı.")
     with context.db_lock:
-        groups = repository.reorder_groups(context.conn, ids)
+        groups = repository.reorder_groups(context.connection(), ids)
     return {"groups": groups}
 
 
 @router.get("/groups/{group_id}")
 def read_group(request: Request, group_id: int) -> dict[str, Any]:
     context = get_context(request)
-    group = repository.require_group(context.conn, group_id)
-    return {"group": group, "columns": repository.group_columns(context.conn, group)}
+    group = repository.require_group(context.connection(), group_id)
+    return {"group": group, "columns": repository.group_columns(context.connection(), group)}
 
 
 @router.put("/groups/{group_id}")
 def write_group(request: Request, group_id: int, payload: dict[str, Any] = Body(default_factory=dict)):
     context = get_context(request)
     with context.db_lock:
-        group = repository.update_group(context.conn, group_id, payload)
+        group = repository.update_group(context.connection(), group_id, payload)
     return {"group": group}
 
 
@@ -199,7 +199,7 @@ def write_group(request: Request, group_id: int, payload: dict[str, Any] = Body(
 def drop_group(request: Request, group_id: int) -> dict[str, Any]:
     context = get_context(request)
     with context.db_lock:
-        repository.delete_group(context.conn, group_id)
+        repository.delete_group(context.connection(), group_id)
     return {"ok": True}
 
 
@@ -218,8 +218,8 @@ def add_group_items(
         text = " ".join(str(item) for item in payload["keys"])
     keys, invalid = repository.parse_keys_report(str(text or ""))
     with context.db_lock:
-        result = repository.add_items(context.conn, group_id, keys)
-        group = repository.require_group(context.conn, group_id)
+        result = repository.add_items(context.connection(), group_id, keys)
+        group = repository.require_group(context.connection(), group_id)
     return {
         "added": result["added"],
         "already": result["already"],
@@ -232,8 +232,8 @@ def add_group_items(
 def drop_group_item(request: Request, group_id: int, key: str) -> dict[str, Any]:
     context = get_context(request)
     with context.db_lock:
-        repository.remove_item(context.conn, group_id, key)
-        group = repository.require_group(context.conn, group_id)
+        repository.remove_item(context.connection(), group_id, key)
+        group = repository.require_group(context.connection(), group_id)
     return {"ok": True, "group": group}
 
 
@@ -241,7 +241,7 @@ def drop_group_item(request: Request, group_id: int, key: str) -> dict[str, Any]
 def pin_group_item(request: Request, group_id: int, key: str) -> dict[str, Any]:
     context = get_context(request)
     with context.db_lock:
-        pinned = repository.toggle_pin(context.conn, group_id, key)
+        pinned = repository.toggle_pin(context.connection(), group_id, key)
     return {"key": key.strip().upper(), "pinned": pinned}
 
 
@@ -257,59 +257,65 @@ def group_issues(
     dir: str = "",
 ) -> dict[str, Any]:
     context = get_context(request)
-    conn = context.conn
-    group = repository.require_group(conn, group_id)
-    columns = repository.group_columns(conn, group)
-    schemas = repository.field_schemas(conn)
+    data = grid.build_grid(context, group_id, q=q, sort=sort, direction=dir)
 
-    items = repository.list_items(conn, group_id)
-    keys = [item["key"] for item in items]
-    stored = repository.get_issues(conn, keys)
-    local_fields = repository.local_fields_by_id(conn)
-    local_values = repository.local_values_for(conn, keys)
-    local_stats = repository.history_stats(conn, keys)
-    local_view = _LocalView(local_fields, local_values, local_stats)
-
-    rows = [
-        _build_row(item, stored.get(item["key"]), columns, schemas, local_view) for item in items
-    ]
-    total = len(rows)
-
-    needle = field_utils.fold(q.strip()) if q else ""
-    if needle:
-        rows = [row for row in rows if _matches(row, needle)]
-
-    sort_field, direction = _sort_choice(group, sort, dir)
-    if sort_field:
-        rows = _sort_rows(rows, sort_field, direction, schemas, local_view)
-
-    base_url = (context.settings.get("jira.base_url", "") or "").rstrip("/")
+    rows = data.rows
     for row in rows:
-        row["url"] = f"{base_url}/browse/{row['key']}" if base_url else ""
         for cell in row["cells"]:
             cell["text"] = field_utils.truncate(cell["text"])
         row.pop("_raw", None)
         row.pop("_local_text", None)
 
     return {
-        "group": group,
-        "columns": [_column_head(column, schemas, local_view) for column in columns],
+        "group": data.group,
+        "columns": data.heads,
         "rows": rows,
-        "total": total,
+        "total": data.total,
         "shown": len(rows),
-        "sort": {"field": sort_field, "dir": direction} if sort_field else None,
-        "base_url": base_url,
+        "sort": {"field": data.sort_field, "dir": data.sort_dir} if data.sort_field else None,
+        "base_url": data.base_url,
+        # Katalog bosken basliklar ham alan kimligine duser; arayuz uyari gosterir.
+        "catalog_empty": repository.field_count(context.connection()) == 0,
     }
+
+
+@router.get("/groups/{group_id}/export.xlsx")
+def export_group(
+    request: Request,
+    group_id: int,
+    columns: str = "",
+    history: str = "",
+    q: str = "",
+    sort: str = "",
+    dir: str = "",
+):
+    """Grubu Excel dosyasi olarak indirir; satirlar grid ile birebir aynidir."""
+    context = get_context(request)
+    group = repository.require_group(context.connection(), group_id)
+    payload = export.build_workbook(
+        context,
+        group_id,
+        columns=export.parse_columns(columns),
+        include_history=export.truthy(history),
+        q=q,
+        sort=sort,
+        direction=dir,
+    )
+    return Response(
+        content=payload,
+        media_type=export.MEDIA_TYPE,
+        headers={"Content-Disposition": export.content_disposition(group["name"])},
+    )
 
 
 @router.get("/issues/{key}")
 def read_issue(request: Request, key: str) -> dict[str, Any]:
     context = get_context(request)
-    conn = context.conn
+    conn = context.connection()
     clean_key = str(key).strip().upper()
     record = repository.get_issue(conn, clean_key)
     if record is None and not repository.issue_is_known(conn, clean_key):
-        raise RepositoryError("issue_not_found", "Kayit henuz cekilmemis.", status=404)
+        raise RepositoryError("issue_not_found", "Kayıt henüz çekilmemiş.", status=404)
 
     # Henuz cekilmemis ama bir grupta duran kayit: Jira alanlari bos gelir,
     # yerel alanlar yine de okunup duzenlenebilir.
@@ -345,7 +351,7 @@ def read_issue(request: Request, key: str) -> dict[str, Any]:
 def list_local_fields(request: Request) -> dict[str, Any]:
     context = get_context(request)
     return {
-        "fields": repository.list_local_fields(context.conn),
+        "fields": repository.list_local_fields(context.connection()),
         "types": [
             {"id": name, "label": field_utils.LOCAL_TYPE_LABELS[name]}
             for name in field_utils.LOCAL_TYPES
@@ -358,7 +364,7 @@ def create_local_field(request: Request, payload: dict[str, Any] = Body(default_
     context = get_context(request)
     with context.db_lock:
         field = repository.create_local_field(
-            context.conn,
+            context.connection(),
             name=str(payload.get("name") or ""),
             type=str(payload.get("type") or field_utils.LOCAL_TEXT),
             options=payload.get("options"),
@@ -372,16 +378,16 @@ def reorder_local_fields(request: Request, payload: dict[str, Any] = Body(defaul
     context = get_context(request)
     ids = payload.get("ids")
     if not isinstance(ids, list):
-        return error_response("invalid_order", "ids bir liste olmali.")
+        return error_response("invalid_order", "ids bir liste olmalı.")
     with context.db_lock:
-        fields = repository.reorder_local_fields(context.conn, ids)
+        fields = repository.reorder_local_fields(context.connection(), ids)
     return {"fields": fields}
 
 
 @router.get("/local-fields/{field_id}")
 def read_local_field(request: Request, field_id: int) -> dict[str, Any]:
     context = get_context(request)
-    return {"field": repository.require_local_field(context.conn, field_id)}
+    return {"field": repository.require_local_field(context.connection(), field_id)}
 
 
 @router.put("/local-fields/{field_id}")
@@ -390,7 +396,7 @@ def write_local_field(
 ):
     context = get_context(request)
     with context.db_lock:
-        field = repository.update_local_field(context.conn, field_id, payload)
+        field = repository.update_local_field(context.connection(), field_id, payload)
     return {"field": field}
 
 
@@ -398,7 +404,7 @@ def write_local_field(
 def drop_local_field(request: Request, field_id: int) -> dict[str, Any]:
     context = get_context(request)
     with context.db_lock:
-        return repository.delete_local_field(context.conn, field_id)
+        return repository.delete_local_field(context.connection(), field_id)
 
 
 # --- kayit basina yerel deger ve gecmis ---------------------------------
@@ -413,13 +419,13 @@ def write_local_value(
 ) -> dict[str, Any]:
     context = get_context(request)
     with context.db_lock:
-        return repository.set_local_value(context.conn, key, field_id, payload.get("value"))
+        return repository.set_local_value(context.connection(), key, field_id, payload.get("value"))
 
 
 @router.get("/issues/{key}/local/{field_id}/history")
 def read_local_history(request: Request, key: str, field_id: int) -> dict[str, Any]:
     context = get_context(request)
-    conn = context.conn
+    conn = context.connection()
     field = repository.require_local_field(conn, field_id)
     entries = repository.list_local_history(conn, key, field_id)
     return {
@@ -436,7 +442,7 @@ def read_local_history(request: Request, key: str, field_id: int) -> dict[str, A
 def clear_local_history(request: Request, key: str, field_id: int) -> dict[str, Any]:
     context = get_context(request)
     with context.db_lock:
-        removed = repository.clear_local_history(context.conn, key, field_id)
+        removed = repository.clear_local_history(context.connection(), key, field_id)
     return {"ok": True, "removed": removed}
 
 
@@ -446,8 +452,8 @@ def drop_local_history_entry(
 ) -> dict[str, Any]:
     context = get_context(request)
     with context.db_lock:
-        repository.delete_local_history_entry(context.conn, key, field_id, history_id)
-        remaining = repository.list_local_history(context.conn, key, field_id)
+        repository.delete_local_history_entry(context.connection(), key, field_id, history_id)
+        remaining = repository.list_local_history(context.connection(), key, field_id)
     return {"ok": True, "changes": len(remaining)}
 
 
@@ -459,14 +465,14 @@ def start_refresh(request: Request, payload: dict[str, Any] = Body(default_facto
     context = get_context(request)
     config = context.settings.jira_config()
     if not config.base_url:
-        return error_response("config_missing", "Once Ayarlar ekranindan Jira adresini girin.")
+        return error_response("config_missing", "Önce Ayarlar ekranından Jira adresini girin.")
 
     group_id = payload.get("group_id")
     if group_id is not None:
         try:
             group_id = int(group_id)
         except (TypeError, ValueError):
-            return error_response("invalid_group", "group_id sayi olmali.")
+            return error_response("invalid_group", "group_id sayı olmalı.")
 
     return {"status": context.refresh.start(context, group_id)}
 
@@ -485,127 +491,9 @@ def cancel_refresh(request: Request) -> dict[str, Any]:
 
 
 # --- ic yardimcilar -----------------------------------------------------
-
-
-class _LocalView:
-    """Bir istek boyunca yerel alan/deger/gecmis okumalarini bir arada tutar."""
-
-    def __init__(
-        self,
-        fields: dict[int, dict[str, Any]],
-        values: dict[str, dict[int, dict[str, Any]]],
-        stats: dict[str, dict[int, dict[str, Any]]],
-    ) -> None:
-        self.fields = fields
-        self.values = values
-        self.stats = stats
-
-    def column(self, column: str) -> tuple[dict[str, Any], str] | None:
-        """Sutun kimligi yerel bir alana isaret ediyorsa (alan, turetilmis-ek)."""
-        parsed = repository.parse_local_column(column)
-        if parsed is None:
-            return None
-        field = self.fields.get(parsed[0])
-        return (field, parsed[1]) if field else None
-
-    def stat(self, key: str, field_id: int) -> dict[str, Any]:
-        return self.stats.get(key, {}).get(field_id, {})
-
-    def value(self, key: str, field_id: int) -> str:
-        return self.values.get(key, {}).get(field_id, {}).get("value", "")
-
-    def raw_for(self, key: str, field: dict[str, Any], suffix: str) -> Any:
-        if not suffix:
-            return self.value(key, field["id"])
-        stat = self.stat(key, field["id"])
-        if suffix == field_utils.DERIVED_CHANGES:
-            return int(stat.get("changes", 0))
-        return stat.get("changed_at")
-
-    def cell(self, key: str, column: str, field: dict[str, Any], suffix: str) -> dict[str, Any]:
-        raw = self.raw_for(key, field, suffix)
-        if suffix:
-            return {
-                "field": column,
-                "text": field_utils.format_derived_value(suffix, raw),
-                "raw": raw,
-                "derived": suffix,
-            }
-        stat = self.stat(key, field["id"])
-        cell: dict[str, Any] = {
-            "field": column,
-            "text": field_utils.format_local_value(field["type"], raw),
-            "raw": raw,
-            "editable": True,
-            "changes": int(stat.get("changes", 0)),
-            "changed_at": stat.get("changed_at"),
-        }
-        return cell
-
-    def sort_key(
-        self, key: str, field: dict[str, Any], suffix: str
-    ) -> tuple[int, float, str]:
-        raw = self.raw_for(key, field, suffix)
-        if suffix:
-            return field_utils.derived_sort_key(suffix, raw)
-        return field_utils.local_sort_key(field["type"], raw)
-
-    def search_text(self, key: str) -> str:
-        """Aramanin kapsadigi yerel metin: sutun secilmemis olsa da gorunur."""
-        parts = []
-        for field_id, entry in (self.values.get(key) or {}).items():
-            field = self.fields.get(field_id)
-            if field is None:
-                continue
-            parts.append(field_utils.format_local_value(field["type"], entry.get("value")))
-        return " ".join(part for part in parts if part)
-
-
-def _column_head(
-    column: str, schemas: dict[str, dict[str, Any]], local_view: _LocalView
-) -> dict[str, Any]:
-    head: dict[str, Any] = {"id": column, "name": repository.field_name(schemas, column)}
-    found = local_view.column(column)
-    if found is None:
-        return head
-    field, suffix = found
-    head["local"] = field
-    head["derived"] = suffix
-    head["editable"] = not suffix
-    return head
-
-
-def _build_row(
-    item: dict[str, Any],
-    record: dict[str, Any] | None,
-    columns: list[str],
-    schemas: dict[str, dict[str, Any]],
-    local_view: _LocalView,
-) -> dict[str, Any]:
-    raw = record["raw"] if record else {"key": item["key"], "fields": {}}
-    cells = []
-    for column in columns:
-        found = local_view.column(column)
-        if found is not None:
-            cells.append(local_view.cell(item["key"], column, found[0], found[1]))
-            continue
-        value = field_utils.issue_value(raw, column)
-        cells.append(
-            {
-                "field": column,
-                "text": field_utils.format_field_value(schemas.get(column), value),
-                "raw": _jsonable(value),
-            }
-        )
-    return {
-        "key": item["key"],
-        "pinned": item["pinned"],
-        "missing": record is None,
-        "fetched_at": record["fetched_at"] if record else None,
-        "cells": cells,
-        "_raw": raw,
-        "_local_text": local_view.search_text(item["key"]),
-    }
+#
+# Grid satirlarini kuran yardimcilar app/grid.py icinde; Excel disa aktarimi
+# da ayni yerden besleniyor.
 
 
 def _detail_cell(
@@ -617,7 +505,7 @@ def _detail_cell(
         "field": field_id,
         "name": repository.field_name(schemas, field_id),
         "text": text,
-        "raw": _jsonable(value),
+        "raw": grid.jsonable(value),
         "empty": text == "",
     }
 
@@ -657,51 +545,3 @@ def _local_detail(conn: Any, key: str) -> list[dict[str, Any]]:
             }
         )
     return entries
-
-
-def _matches(row: dict[str, Any], needle: str) -> bool:
-    if needle in field_utils.fold(row["key"]):
-        return True
-    if any(needle in field_utils.fold(cell["text"]) for cell in row["cells"]):
-        return True
-    # Yerel degerler sutun secili olmasa da aranir: kullanicinin kendi notu.
-    return needle in field_utils.fold(row.get("_local_text", ""))
-
-
-def _sort_choice(group: dict[str, Any], sort: str, direction: str) -> tuple[str, str]:
-    field_id = (sort or "").strip()
-    chosen_dir = (direction or "").strip().lower()
-    if not field_id:
-        group_sort = group.get("sort") or {}
-        field_id = str(group_sort.get("field") or "").strip()
-        chosen_dir = chosen_dir or str(group_sort.get("dir") or "").lower()
-    if chosen_dir not in repository.SORT_DIRECTIONS:
-        chosen_dir = "asc"
-    return field_id, chosen_dir
-
-
-def _sort_rows(
-    rows: list[dict[str, Any]],
-    field_id: str,
-    direction: str,
-    schemas: dict[str, dict[str, Any]],
-    local_view: _LocalView,
-) -> list[dict[str, Any]]:
-    schema = schemas.get(field_id)
-    local = local_view.column(field_id)
-
-    def key(row: dict[str, Any]) -> tuple[Any, ...]:
-        if local is not None:
-            base = local_view.sort_key(row["key"], local[0], local[1])
-        else:
-            value = field_utils.issue_value(row["_raw"], field_id)
-            base = field_utils.sort_key(schema, value)
-        return (*base, field_utils.fold(row["key"]))
-
-    return sorted(rows, key=key, reverse=direction == "desc")
-
-
-def _jsonable(value: Any) -> Any:
-    if value is None or isinstance(value, (str, int, float, bool, list, dict)):
-        return value
-    return str(value)
