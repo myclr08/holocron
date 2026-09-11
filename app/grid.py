@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from . import fields as field_utils, repository
+from . import fields as field_utils, repository, teams
 
 
 class LocalView:
@@ -95,6 +95,8 @@ class GridData:
     schemas: dict[str, dict[str, Any]]
     local_view: LocalView
     rows: list[dict[str, Any]]
+    # Kayit basina Teams kisi metni; "teams:contacts" sutunu ve siralama buradan okur.
+    teams_text: dict[str, str]
     total: int
     sort_field: str
     sort_dir: str
@@ -132,7 +134,20 @@ def build_grid(
         repository.history_stats(conn, keys),
     )
 
-    rows = [build_row(item, stored.get(item["key"]), chosen, schemas, local_view) for item in items]
+    contacts = repository.contacts_for(conn, keys)
+    teams_text = {key: teams.contacts_text(contacts.get(key)) for key in keys}
+
+    rows = [
+        build_row(
+            item,
+            stored.get(item["key"]),
+            chosen,
+            schemas,
+            local_view,
+            teams_text.get(item["key"], ""),
+        )
+        for item in items
+    ]
     total = len(rows)
 
     needle = field_utils.fold(q.strip()) if q else ""
@@ -141,7 +156,7 @@ def build_grid(
 
     sort_field, sort_dir = sort_choice(group, sort, direction)
     if sort_field:
-        rows = sort_rows(rows, sort_field, sort_dir, schemas, local_view)
+        rows = sort_rows(rows, sort_field, sort_dir, schemas, local_view, teams_text)
 
     base_url = (context.settings.get("jira.base_url", "") or "").rstrip("/")
     for row in rows:
@@ -154,6 +169,7 @@ def build_grid(
         schemas=schemas,
         local_view=local_view,
         rows=rows,
+        teams_text=teams_text,
         total=total,
         sort_field=sort_field,
         sort_dir=sort_dir,
@@ -181,6 +197,7 @@ def build_row(
     columns: list[str],
     schemas: dict[str, dict[str, Any]],
     local_view: LocalView,
+    teams_text: str = "",
 ) -> dict[str, Any]:
     raw = record["raw"] if record else {"key": item["key"], "fields": {}}
     cells = []
@@ -188,6 +205,9 @@ def build_row(
         found = local_view.column(column)
         if found is not None:
             cells.append(local_view.cell(item["key"], column, found[0], found[1]))
+            continue
+        if column == teams.CONTACTS_COLUMN:
+            cells.append({"field": column, "text": teams_text, "raw": teams_text})
             continue
         value = field_utils.issue_value(raw, column)
         cells.append(
@@ -235,6 +255,7 @@ def sort_rows(
     direction: str,
     schemas: dict[str, dict[str, Any]],
     local_view: LocalView,
+    teams_text: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     schema = schemas.get(field_id)
     local = local_view.column(field_id)
@@ -242,6 +263,10 @@ def sort_rows(
     def key(row: dict[str, Any]) -> tuple[Any, ...]:
         if local is not None:
             base = local_view.sort_key(row["key"], local[0], local[1])
+        elif field_id == teams.CONTACTS_COLUMN:
+            base = field_utils.sort_key(
+                {"type": "string"}, (teams_text or {}).get(row["key"], "")
+            )
         else:
             value = field_utils.issue_value(row["_raw"], field_id)
             base = field_utils.sort_key(schema, value)

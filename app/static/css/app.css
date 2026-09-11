@@ -1141,6 +1141,107 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .drawer-local .label { display: flex; align-items: center; gap: 8px; }
 .drawer-local .history-inline { margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--line); }
 
+/* --- cekmecedeki Teams bolumu ------------------------------------------ */
+
+.drawer-teams { margin-bottom: 14px; }
+
+.drawer-teams h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  letter-spacing: .12em;
+  color: var(--saber-blue);
+}
+
+.drawer-teams h4 {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.drawer-teams .hint { margin: 4px 0; }
+
+.teams-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+
+.teams-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-size: 12px;
+}
+
+.teams-chip button {
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.teams-chip button:hover { background: none; border: 0; color: var(--saber-red); }
+
+.teams-add-row { display: flex; gap: 6px; }
+.teams-add-row input { flex: 1; min-width: 0; }
+.teams-name { margin-top: 6px; }
+.teams-name input { width: 100%; }
+
+.teams-target { margin-top: 10px; }
+.teams-target .choice-group { flex-direction: row; gap: 14px; margin-bottom: 6px; }
+.teams-channel-row { display: flex; gap: 6px; align-items: center; }
+.teams-channel-row select { flex: 1; min-width: 0; }
+
+.teams-message { margin-top: 10px; }
+.teams-message-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.teams-message-head .label { color: var(--muted); font-size: 12px; }
+.teams-message-head select { flex: 1; min-width: 0; }
+.teams-body { width: 100%; font-size: 12px; }
+.teams-message button { margin-top: 6px; }
+
+.teams-sent { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+
+.sent-line {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.sent-line .when { color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+.sent-line .who { color: var(--saber-blue); white-space: nowrap; }
+.sent-line .what { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Kanban kartindaki "son durumu sor" dugmesi. */
+.task-ask {
+  padding: 0 4px;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.task-ask:hover { background: none; border: 0; color: var(--saber-blue); }
+
+/* --- Ayarlar: Teams karti ---------------------------------------------- */
+
+.teams-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+
+.teams-entry {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: var(--panel-2);
+}
+
+.teams-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.teams-row input { flex: 1; min-width: 140px; }
+.teams-row .checkbox { margin: 0; white-space: nowrap; }
+.teams-entry textarea { width: 100%; margin-top: 6px; font-size: 12px; }
+
 /* --- acilis (opening crawl) -------------------------------------------- */
 
 .crawl {

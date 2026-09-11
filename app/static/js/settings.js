@@ -419,6 +419,270 @@ async function scanMail() {
   }
 }
 
+// --- Teams --------------------------------------------------------------
+//
+// Sablonlar, kayitli kanallar ve adres defteri burada yonetilir. Mesajin
+// kendisi kayit cekmecesinden gonderilir; buradaki ayarlar oraya beslenir.
+
+const teamsState = { templates: [], channels: [], contacts: [], placeholders: [] };
+
+function teamsRow(children) {
+  const row = document.createElement("div");
+  row.className = "teams-row";
+  children.forEach((child) => row.appendChild(child));
+  return row;
+}
+
+function textBox(value, placeholder) {
+  const box = document.createElement("input");
+  box.type = "text";
+  box.value = value || "";
+  if (placeholder) box.placeholder = placeholder;
+  return box;
+}
+
+function smallButton(label, kind, onClick) {
+  const button = document.createElement("button");
+  button.className = "small" + (kind ? " " + kind : "");
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+async function loadTeamsLists() {
+  const [templates, channels, contacts] = await Promise.all([
+    api("/api/templates"),
+    api("/api/teams/channels"),
+    api("/api/contacts?limit=50"),
+  ]);
+  teamsState.templates = templates.templates || [];
+  teamsState.placeholders = templates.placeholders || [];
+  teamsState.channels = channels.channels || [];
+  teamsState.contacts = contacts.contacts || [];
+  document.getElementById("teams-topic").value = templates.topic_format || "{key}";
+  renderTemplates();
+  renderChannels();
+  renderContacts();
+}
+
+function renderTemplates() {
+  const box = document.getElementById("teams-templates");
+  box.textContent = "";
+  if (!teamsState.templates.length) {
+    box.appendChild(emptyNote("Henüz şablon yok."));
+  }
+  teamsState.templates.forEach((template, index) => {
+    const nameBox = textBox(template.name, "Şablon adı");
+    const bodyBox = document.createElement("textarea");
+    bodyBox.rows = 2;
+    bodyBox.value = template.body;
+
+    const mark = document.createElement("label");
+    mark.className = "checkbox";
+    const check = document.createElement("input");
+    check.type = "radio";
+    check.name = "template-default";
+    check.checked = !!template.is_default;
+    check.addEventListener("change", () => saveTemplate(template.id, { is_default: true }));
+    const markText = document.createElement("span");
+    markText.textContent = "Varsayılan";
+    mark.appendChild(check);
+    mark.appendChild(markText);
+
+    const row = teamsRow([
+      nameBox,
+      mark,
+      smallButton("↑", "", () => moveTemplate(index, -1)),
+      smallButton("↓", "", () => moveTemplate(index, 1)),
+      smallButton("Kaydet", "", () =>
+        saveTemplate(template.id, { name: nameBox.value, body: bodyBox.value })
+      ),
+      smallButton("Sil", "danger", () => dropTemplate(template)),
+    ]);
+    const wrap = document.createElement("div");
+    wrap.className = "teams-entry";
+    wrap.appendChild(row);
+    wrap.appendChild(bodyBox);
+    box.appendChild(wrap);
+  });
+
+  const hint = document.getElementById("teams-placeholders");
+  hint.textContent =
+    "Yer tutucular: " +
+    teamsState.placeholders.map((item) => `${item.token} (${item.label})`).join(", ") +
+    ". Bilinmeyen yer tutucu boş kalır.";
+}
+
+function renderChannels() {
+  const box = document.getElementById("teams-channels");
+  box.textContent = "";
+  if (!teamsState.channels.length) {
+    box.appendChild(emptyNote("Kayıtlı kanal yok."));
+    return;
+  }
+  teamsState.channels.forEach((channel) => {
+    const nameBox = textBox(channel.name, "Kanal adı");
+    const urlBox = textBox(channel.url, "https://teams.microsoft.com/l/channel/...");
+    box.appendChild(
+      teamsRow([
+        nameBox,
+        urlBox,
+        smallButton("Kaydet", "", () =>
+          saveChannel(channel.id, { name: nameBox.value, url: urlBox.value })
+        ),
+        smallButton("Sil", "danger", () => dropChannel(channel)),
+      ])
+    );
+  });
+}
+
+function renderContacts() {
+  const box = document.getElementById("teams-contacts");
+  box.textContent = "";
+  if (!teamsState.contacts.length) {
+    box.appendChild(emptyNote("Adres defteri boş: kayıtlara kişi ekledikçe dolar."));
+    return;
+  }
+  teamsState.contacts.forEach((contact) => {
+    const nameBox = textBox(contact.name, "Ad");
+    const emailBox = textBox(contact.email, "ornek@example.com");
+    box.appendChild(
+      teamsRow([
+        nameBox,
+        emailBox,
+        smallButton("Kaydet", "", () =>
+          saveContact(contact.email, { name: nameBox.value, email: emailBox.value })
+        ),
+        smallButton("Sil", "danger", () => dropContact(contact)),
+      ])
+    );
+  });
+}
+
+function emptyNote(text) {
+  const note = document.createElement("p");
+  note.className = "hint";
+  note.textContent = text;
+  return note;
+}
+
+function teamsStatus() {
+  return document.getElementById("teams-status");
+}
+
+async function teamsAction(run, message) {
+  try {
+    await run();
+    await loadTeamsLists();
+    setStatus(teamsStatus(), message, "ok");
+  } catch (err) {
+    setStatus(teamsStatus(), err.message, "error");
+  }
+}
+
+function saveTemplate(id, payload) {
+  return teamsAction(
+    () => api(`/api/templates/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+    "Şablon kaydedildi."
+  );
+}
+
+function moveTemplate(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= teamsState.templates.length) return;
+  const moved = teamsState.templates[index];
+  const other = teamsState.templates[target];
+  return teamsAction(async () => {
+    await api(`/api/templates/${moved.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ position: other.position }),
+    });
+    await api(`/api/templates/${other.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ position: moved.position }),
+    });
+  }, "Şablon sırası değişti.");
+}
+
+function dropTemplate(template) {
+  if (!confirm(`"${template.name}" şablonu silinsin mi?`)) return;
+  teamsAction(
+    () => api(`/api/templates/${template.id}`, { method: "DELETE" }),
+    "Şablon silindi."
+  );
+}
+
+function addTemplate() {
+  const name = document.getElementById("template-name");
+  const body = document.getElementById("template-body");
+  teamsAction(async () => {
+    await api("/api/templates", {
+      method: "POST",
+      body: JSON.stringify({ name: name.value, body: body.value }),
+    });
+    name.value = "";
+    body.value = "";
+  }, "Şablon eklendi.");
+}
+
+function saveChannel(id, payload) {
+  return teamsAction(
+    () => api(`/api/teams/channels/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+    "Kanal kaydedildi."
+  );
+}
+
+function dropChannel(channel) {
+  if (!confirm(`"${channel.name}" kanalı silinsin mi?`)) return;
+  teamsAction(async () => {
+    const data = await api(`/api/teams/channels/${channel.id}`, { method: "DELETE" });
+    if (data.issues) {
+      setStatus(teamsStatus(), `${data.issues} kaydın hedefi kişilere döndü.`, "ok");
+    }
+  }, "Kanal silindi.");
+}
+
+function addChannel() {
+  const name = document.getElementById("channel-name");
+  const url = document.getElementById("channel-url");
+  teamsAction(async () => {
+    await api("/api/teams/channels", {
+      method: "POST",
+      body: JSON.stringify({ name: name.value, url: url.value }),
+    });
+    name.value = "";
+    url.value = "";
+  }, "Kanal eklendi.");
+}
+
+function saveContact(email, payload) {
+  return teamsAction(
+    () =>
+      api(`/api/contacts/${encodeURIComponent(email)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      }),
+    "Kişi kaydedildi."
+  );
+}
+
+function dropContact(contact) {
+  const label = contact.name || contact.email;
+  if (!confirm(`"${label}" adres defterinden ve bütün kayıtlardan silinsin mi?`)) return;
+  teamsAction(
+    () => api(`/api/contacts/${encodeURIComponent(contact.email)}`, { method: "DELETE" }),
+    "Kişi silindi."
+  );
+}
+
+function saveTeams() {
+  const topic = document.getElementById("teams-topic").value.trim() || "{key}";
+  teamsAction(
+    () => saveSetting("teams.topic_format", topic),
+    "Teams ayarları kaydedildi."
+  );
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   bindShell();
   document.getElementById("mode").addEventListener("change", applyModeVisibility);
@@ -442,6 +706,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("mail-folders-fetch").addEventListener("click", fetchFolders);
   document.getElementById("mail-test").addEventListener("click", testMail);
   document.getElementById("mail-scan").addEventListener("click", scanMail);
+  document.getElementById("template-add").addEventListener("click", addTemplate);
+  document.getElementById("channel-add").addEventListener("click", addChannel);
+  document.getElementById("teams-save").addEventListener("click", saveTeams);
   document.getElementById("clear-secret").addEventListener("click", async () => {
     const status = document.getElementById("status");
     if (!confirm("Kayıtlı sır silinsin mi?")) return;
@@ -454,4 +721,5 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   loadSettings().catch((err) => setStatus(document.getElementById("status"), err.message, "error"));
+  loadTeamsLists().catch((err) => setStatus(teamsStatus(), err.message, "error"));
 });

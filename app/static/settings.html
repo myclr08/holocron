@@ -213,6 +213,78 @@
         <div class="status" id="mail-status" hidden></div>
       </div>
 
+      <div class="card" id="teams-card">
+        <h2>Teams</h2>
+        <p class="hint">
+          Kayıtlara Teams kişileri iliştirip tek tıkla "bu kaydın son durumu ne?" mesajı
+          hazırlayabilirsiniz. Tek kişide doğrudan sohbet, birden fazla kişide grup sohbeti
+          açılır; kayda bir kanal seçilmişse mesaj panoya kopyalanır ve kanal açılır.
+          <strong>Mesaj Teams'te hazır açılır, göndermek için Gönder'e basmanız gerekir.</strong>
+        </p>
+
+        <div class="field">
+          <span class="label-text">Mesaj şablonları</span>
+          <div class="teams-list" id="teams-templates"></div>
+          <p class="hint" id="teams-placeholders"></p>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="template-name">Yeni şablon adı</label>
+            <input type="text" id="template-name" placeholder="Son durum" />
+          </div>
+          <div class="field">
+            <label for="teams-topic">Konu adı biçimi</label>
+            <input type="text" id="teams-topic" placeholder="{key}" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="template-body">Yeni şablon gövdesi</label>
+          <textarea id="template-body" rows="3"
+            placeholder="{key} için kısa bir güncelleme rica ederim. {url}"></textarea>
+        </div>
+        <div class="actions">
+          <button id="template-add">Şablon ekle</button>
+        </div>
+
+        <div class="field">
+          <span class="label-text">Kayıtlı kanallar</span>
+          <div class="teams-list" id="teams-channels"></div>
+          <p class="hint">
+            Teams'te kanalın ya da grup sohbetinin ⋯ menüsünden "Bağlantı kopyala" deyip
+            buraya yapıştırın.
+          </p>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="channel-name">Yeni kanal adı</label>
+            <input type="text" id="channel-name" placeholder="Destek kanalı" />
+          </div>
+          <div class="field">
+            <label for="channel-url">Bağlantı</label>
+            <input type="text" id="channel-url"
+              placeholder="https://teams.microsoft.com/l/channel/..." />
+          </div>
+        </div>
+        <div class="actions">
+          <button id="channel-add">Kanal ekle</button>
+        </div>
+
+        <div class="field">
+          <span class="label-text">Adres defteri</span>
+          <div class="teams-list" id="teams-contacts"></div>
+          <p class="hint">
+            Kayıtlara girdiğiniz kişiler buraya düşer ve bir daha yazarken tamamlanır.
+            Buradan silinen kişi bütün kayıtlardan da çıkar.
+          </p>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="teams-save">Kaydet</button>
+        </div>
+        <div class="status" id="teams-status" hidden></div>
+      </div>
+
       <div class="card" id="appearance">
         <h2>Görünüm</h2>
         <p class="hint">

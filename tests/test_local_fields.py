@@ -417,7 +417,8 @@ def test_field_catalog_lists_local_fields_after_jira_fields(conn):
     field = make_field(conn, "Not", type="text", track_history=False)
     catalog = repo.list_fields(conn)
     kinds = [item["kind"] for item in catalog]
-    assert kinds == ["virtual", "jira", "local"]
+    # "teams": kayda ilistirilen Teams kisileri de bir sutun olarak secilebilir.
+    assert kinds == ["virtual", "teams", "jira", "local"]
     assert catalog[-1]["id"] == field["column_id"]
     assert catalog[-1]["local"]["type"] == "text"
 

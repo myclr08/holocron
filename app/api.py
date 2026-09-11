@@ -15,6 +15,7 @@ from . import (
     grid,
     repository,
     tasks as task_utils,
+    teams,
 )
 from .context import AppContext
 from .diagnose import run_diagnostics
@@ -559,6 +560,290 @@ def open_task_mail(request: Request, task_id: int) -> dict[str, Any]:
     source = mail_source(context)
     source.open_message(task["mail_entry_id"], task["mail_store_id"])
     return {"ok": True}
+
+
+# --- Teams (derin baglanti) ---------------------------------------------
+#
+# Graph API yok, IT izni yok: mesaj `https://teams.microsoft.com/l/chat/...`
+# baglantisiyla Teams'in yazma kutusuna konur, **Gonder'e kullanici basar**.
+# Bu yuzden `sent_messages` satirlari "gonderildi" degil "acildi" demektir.
+
+
+@router.get("/contacts")
+def search_contacts(request: Request, q: str = "", limit: int = 20) -> dict[str, Any]:
+    """Adres defteri: kisi kutusundaki otomatik tamamlama bunu kullanir."""
+    context = get_context(request)
+    capped = max(1, min(int(limit or repository.CONTACT_SEARCH_LIMIT), 50))
+    return {"contacts": repository.list_contacts(context.connection(), q, capped)}
+
+
+@router.put("/contacts/{email}")
+def write_contact(
+    request: Request, email: str, payload: dict[str, Any] = Body(default_factory=dict)
+):
+    """Defterdeki kisiyi duzenler (Ayarlar -> Teams kartindaki liste)."""
+    context = get_context(request)
+    with context.db_lock:
+        contact = repository.update_contact(context.connection(), email, payload)
+    return {"contact": contact}
+
+
+@router.delete("/contacts/{email}")
+def drop_contact(request: Request, email: str) -> dict[str, Any]:
+    """Kisiyi defterden ve butun kayitlardan siler."""
+    context = get_context(request)
+    with context.db_lock:
+        return repository.delete_contact(context.connection(), email)
+
+
+@router.get("/issues/{key}/contacts")
+def read_issue_contacts(request: Request, key: str) -> dict[str, Any]:
+    context = get_context(request)
+    return {"contacts": repository.list_issue_contacts(context.connection(), key)}
+
+
+@router.put("/issues/{key}/contacts")
+def write_issue_contacts(
+    request: Request, key: str, payload: dict[str, Any] = Body(default_factory=dict)
+):
+    """Tam liste yazilir; ayni cagri adres defterini de gunceller."""
+    context = get_context(request)
+    entries = payload.get("contacts")
+    if not isinstance(entries, list):
+        return error_response("invalid_contacts", "contacts bir liste olmalı.")
+    with context.db_lock:
+        contacts = repository.set_issue_contacts(context.connection(), key, entries)
+    return {"contacts": contacts}
+
+
+@router.get("/teams/channels")
+def list_channels(request: Request) -> dict[str, Any]:
+    context = get_context(request)
+    return {"channels": repository.list_teams_channels(context.connection())}
+
+
+@router.post("/teams/channels")
+def create_channel(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
+    context = get_context(request)
+    with context.db_lock:
+        channel = repository.create_teams_channel(
+            context.connection(), payload.get("name"), payload.get("url")
+        )
+    return {"channel": channel}
+
+
+@router.put("/teams/channels/{channel_id}")
+def write_channel(
+    request: Request, channel_id: int, payload: dict[str, Any] = Body(default_factory=dict)
+):
+    context = get_context(request)
+    with context.db_lock:
+        channel = repository.update_teams_channel(context.connection(), channel_id, payload)
+    return {"channel": channel}
+
+
+@router.delete("/teams/channels/{channel_id}")
+def drop_channel(request: Request, channel_id: int) -> dict[str, Any]:
+    context = get_context(request)
+    with context.db_lock:
+        return repository.delete_teams_channel(context.connection(), channel_id)
+
+
+@router.get("/issues/{key}/channel")
+def read_issue_channel(request: Request, key: str) -> dict[str, Any]:
+    context = get_context(request)
+    return {"channel": repository.get_issue_channel(context.connection(), key)}
+
+
+@router.put("/issues/{key}/channel")
+def write_issue_channel(
+    request: Request, key: str, payload: dict[str, Any] = Body(default_factory=dict)
+):
+    context = get_context(request)
+    channel_id = payload.get("channel_id")
+    if channel_id is None:
+        return error_response("invalid_channel", "channel_id zorunlu.")
+    with context.db_lock:
+        channel = repository.set_issue_channel(context.connection(), key, channel_id)
+    return {"channel": channel}
+
+
+@router.delete("/issues/{key}/channel")
+def drop_issue_channel(request: Request, key: str) -> dict[str, Any]:
+    context = get_context(request)
+    with context.db_lock:
+        repository.clear_issue_channel(context.connection(), key)
+    return {"ok": True}
+
+
+@router.get("/templates")
+def list_message_templates(request: Request) -> dict[str, Any]:
+    context = get_context(request)
+    return {
+        "templates": repository.list_templates(context.connection()),
+        "placeholders": [{"token": token, "label": label} for token, label in teams.PLACEHOLDERS],
+        "topic_format": context.settings.get("teams.topic_format", teams.DEFAULT_TOPIC_FORMAT),
+    }
+
+
+@router.post("/templates")
+def create_message_template(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
+    context = get_context(request)
+    with context.db_lock:
+        template = repository.create_template(
+            context.connection(),
+            payload.get("name"),
+            payload.get("body"),
+            is_default=bool(payload.get("is_default")),
+        )
+    return {"template": template}
+
+
+@router.put("/templates/{template_id}")
+def write_message_template(
+    request: Request, template_id: int, payload: dict[str, Any] = Body(default_factory=dict)
+):
+    context = get_context(request)
+    with context.db_lock:
+        template = repository.update_template(context.connection(), template_id, payload)
+    return {"template": template}
+
+
+@router.delete("/templates/{template_id}")
+def drop_message_template(request: Request, template_id: int) -> dict[str, Any]:
+    context = get_context(request)
+    with context.db_lock:
+        return repository.delete_template(context.connection(), template_id)
+
+
+@router.post("/issues/{key}/message-preview")
+def preview_message(
+    request: Request, key: str, payload: dict[str, Any] = Body(default_factory=dict)
+):
+    """Yer tutuculari cozulmus mesaj; hicbir sey kaydedilmez.
+
+    Cekmecedeki metin kutusu sablon secilince bununla dolar: `teams-link`
+    her cagrisinda "acildi" satiri yazdigi icin onizleme icin kullanilamaz.
+    """
+    context = get_context(request)
+    conn = context.connection()
+    body = _template_body(conn, payload)
+    if isinstance(body, JSONResponse):
+        return body
+    return {"message": _render_issue_message(context, conn, key, body)}
+
+
+@router.post("/issues/{key}/teams-link")
+def build_teams_link(
+    request: Request, key: str, payload: dict[str, Any] = Body(default_factory=dict)
+):
+    """Teams baglantisini kurar ve "acildi" kaydini duser."""
+    context = get_context(request)
+    conn = context.connection()
+    clean_key = str(key).strip().upper()
+    if not repository.issue_is_known(conn, clean_key):
+        raise RepositoryError("issue_not_found", "Kayıt bulunamadı.", status=404)
+
+    body = _template_body(conn, payload)
+    if isinstance(body, JSONResponse):
+        return body
+    message = _render_issue_message(context, conn, clean_key, body)
+
+    if payload.get("channel"):
+        channel = repository.get_issue_channel(conn, clean_key)
+        if channel is None:
+            return error_response(
+                "channel_missing", "Bu kayıt için kayıtlı bir kanal seçilmemiş."
+            )
+        opened = teams.build_channel_open(channel["url"], message)
+        with context.db_lock:
+            repository.record_sent_message(
+                conn, clean_key, teams.TARGET_CHANNEL, channel["name"], message
+            )
+        return {
+            "kind": teams.TARGET_CHANNEL,
+            "url": opened["url"],
+            "message": message,
+            "clipboard": opened["clipboard"],
+            "truncated": False,
+            "target": channel["name"],
+        }
+
+    contacts = repository.list_issue_contacts(conn, clean_key)
+    if not contacts:
+        return error_response("no_contacts", "Önce bu kayda bir Teams kişisi ekleyin.")
+    emails = [item["email"] for item in contacts]
+    topic = _render_issue_message(
+        context,
+        conn,
+        clean_key,
+        context.settings.get("teams.topic_format", teams.DEFAULT_TOPIC_FORMAT)
+        or teams.DEFAULT_TOPIC_FORMAT,
+    )
+    link = teams.build_chat_link(emails, message, topic)
+    with context.db_lock:
+        repository.record_sent_message(
+            conn, clean_key, teams.TARGET_PEOPLE, ", ".join(emails), message
+        )
+    result: dict[str, Any] = {
+        "kind": teams.TARGET_PEOPLE,
+        "url": link["url"],
+        "message": link["message"],
+        "truncated": link["truncated"],
+        "target": ", ".join(emails),
+    }
+    if link["truncated"]:
+        # Adres uzunlugu yuzunden kirpildi: tam metin panodan yapistirilir.
+        result["clipboard"] = message
+    return result
+
+
+@router.get("/issues/{key}/messages")
+def read_sent_messages(request: Request, key: str, limit: int = 20) -> dict[str, Any]:
+    context = get_context(request)
+    capped = max(1, min(int(limit or 20), 100))
+    return {"messages": repository.list_sent_messages(context.connection(), key, capped)}
+
+
+def _template_body(conn: Any, payload: dict[str, Any]) -> Any:
+    """Govde: elle yazilan metin, secilen sablon, yoksa varsayilan sablon."""
+    body = payload.get("body")
+    if body is not None and str(body).strip():
+        return str(body)
+    if payload.get("template_id") is not None:
+        return repository.require_template(conn, payload["template_id"])["body"]
+    template = repository.default_template(conn)
+    if template is None:
+        return error_response(
+            "template_missing", "Önce Ayarlar → Teams altından bir şablon tanımlayın."
+        )
+    return template["body"]
+
+
+def _render_issue_message(context: AppContext, conn: Any, key: str, body: str) -> str:
+    """Sablonu kaydin degerleriyle doldurur (Jira alanlari + yerel alanlar)."""
+    clean_key = str(key).strip().upper()
+    record = repository.get_issue(conn, clean_key) or {
+        "key": clean_key,
+        "raw": {"key": clean_key, "fields": {}},
+    }
+    definitions = repository.local_fields_by_id(conn)
+    stored = repository.local_values_for(conn, [clean_key]).get(clean_key, {})
+    local_values = {
+        field_id: field_utils.format_local_value(
+            definitions[field_id]["type"], entry.get("value")
+        )
+        for field_id, entry in stored.items()
+        if field_id in definitions
+    }
+    base_url = (context.settings.get("jira.base_url", "") or "").rstrip("/")
+    return teams.render_template(
+        body,
+        record,
+        local_values,
+        base_url,
+        schemas=repository.field_schemas(conn),
+    )
 
 
 # --- yerel alanlar ------------------------------------------------------

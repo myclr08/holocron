@@ -218,6 +218,92 @@ def _migration_0005_mail_address_lists(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM settings WHERE key = 'mail.addresses'")
 
 
+# Sablon tohumunun bir kez atildigini soyleyen ic isaret (arayuze gosterilmez).
+TEMPLATE_SEED_KEY = "teams.templates_seeded"
+
+
+def _migration_0006_teams(conn: sqlite3.Connection) -> None:
+    """Asama 8: kayittan Teams'e mesaj (derin baglanti, Graph API yok).
+
+    `contacts` adres defteridir: kayda kisi eklenince buraya da duser, bir
+    sonraki kayitta otomatik tamamlamada cikar. `issue_channel` bir kayda
+    kayitli kanal secildiyse onu tutar; doluysa mesaj kisiler yerine oraya
+    gider. `sent_messages` yalnizca "acildi" kaydidir: Gonder'e kullanici
+    basar, uygulama gonderildigini DOGRULAYAMAZ.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS contacts (
+            email      TEXT PRIMARY KEY,
+            name       TEXT,
+            created_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS issue_contacts (
+            issue_key TEXT NOT NULL,
+            email     TEXT NOT NULL,
+            position  INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (issue_key, email)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_issue_contacts_email ON issue_contacts(email);
+
+        CREATE TABLE IF NOT EXISTS teams_channels (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            url        TEXT NOT NULL,
+            created_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS issue_channel (
+            issue_key  TEXT PRIMARY KEY,
+            channel_id INTEGER NOT NULL,
+            FOREIGN KEY (channel_id) REFERENCES teams_channels(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS message_templates (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            body       TEXT NOT NULL,
+            position   INTEGER NOT NULL DEFAULT 0,
+            is_default INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS sent_messages (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            issue_key   TEXT NOT NULL,
+            target_kind TEXT NOT NULL CHECK (target_kind IN ('people', 'channel')),
+            target_text TEXT,
+            body        TEXT,
+            opened_at   TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sent_messages_issue ON sent_messages(issue_key, id);
+        """
+    )
+    # Tohum bir kez atilir ve `settings` icinde isaretlenir: kullanici
+    # sablonlari sildiyse yarim kalmis bir yukseltme onlari geri getirmemeli.
+    from .teams import SEED_TEMPLATES
+
+    seeded = conn.execute(
+        "SELECT value FROM settings WHERE key = ?", (TEMPLATE_SEED_KEY,)
+    ).fetchone()
+    if seeded is None:
+        conn.executemany(
+            "INSERT INTO message_templates (name, body, position, is_default) "
+            "VALUES (?, ?, ?, ?)",
+            [
+                (name, body, index, 1 if is_default else 0)
+                for index, (name, body, is_default) in enumerate(SEED_TEMPLATES)
+            ],
+        )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, '1') "
+            "ON CONFLICT(key) DO NOTHING",
+            (TEMPLATE_SEED_KEY,),
+        )
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
@@ -225,6 +311,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (3, "personal tasks", _migration_0003_tasks),
     (4, "mail intake", _migration_0004_mail),
     (5, "mail address lists", _migration_0005_mail_address_lists),
+    (6, "teams messages", _migration_0006_teams),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

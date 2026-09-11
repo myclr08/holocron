@@ -15,6 +15,10 @@ const ICON_SHAPES = {
     ["rect", { x: "1.8", y: "3.4", width: "12.4", height: "9.2", rx: "1.8" }],
     ["path", { d: "m2.6 4.8 5.4 3.9 5.4-3.9" }],
   ],
+  chat: [
+    ["rect", { x: "2.2", y: "2.6", width: "11.6", height: "8.4", rx: "2.2" }],
+    ["path", { d: "M5.4 11v2.7L8.5 11" }],
+  ],
   pin: [
     ["path", { d: "M9.7 1.9 14.1 6.3l-2 .4-1 1a4.5 4.5 0 0 0-1.2 3.1l-.1 1.1-4.7-4.7 1.1-.1a4.5 4.5 0 0 0 3.1-1.2l1-1z" }],
     ["path", { d: "M5.1 10.9 1.9 14.1" }],
@@ -32,6 +36,38 @@ function icon(name) {
     svg.appendChild(shape);
   });
   return svg;
+}
+
+/** Metni panoya kopyalar; basarisiz olursa false doner (balon onu soyler).
+ *
+ * 127.0.0.1 guvenli baglam sayilir, bu yuzden `navigator.clipboard` normalde
+ * calisir; eski tarayici ya da izin reddinde gizli bir textarea ile denenir.
+ */
+async function copyText(text) {
+  const value = String(text || "");
+  if (!value) return false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch (err) {
+    // Izin verilmedi; asagidaki yedek yol denenir.
+  }
+  try {
+    const box = document.createElement("textarea");
+    box.value = value;
+    box.setAttribute("readonly", "");
+    box.style.position = "fixed";
+    box.style.top = "-1000px";
+    document.body.appendChild(box);
+    box.select();
+    const ok = document.execCommand("copy");
+    box.remove();
+    return !!ok;
+  } catch (err) {
+    return false;
+  }
 }
 
 function reducedMotion() {

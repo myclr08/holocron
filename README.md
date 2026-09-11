@@ -13,7 +13,8 @@ uygulamanın yanındaki `holocron.db` dosyasında kalır, hiçbir yere gönderil
 Gruplar (manuel ve JQL filtresi), kayıt listesi, sütun seçici, arama, arka
 planda çalışan **Güncelle** işi, kendi tanımladığınız **yerel alanlar** (alan
 başına değişim geçmişiyle), kişisel kanban panosu (**Görevlerim**), **Outlook e-postalarından görev
-üretme** (yalnız Windows), **Excel'e aktarma** ve tam tema kullanılabilir durumda. Taşınabilir Windows/Linux paketleri etiket itildiğinde üretilir.
+üretme** (yalnız Windows), **kayıttan Teams'e mesaj**, **Excel'e aktarma** ve tam tema
+kullanılabilir durumda. Taşınabilir Windows/Linux paketleri etiket itildiğinde üretilir.
 
 ## Gereksinimler
 
@@ -354,6 +355,56 @@ Açıklama, Not, Son tarih (gerçek tarih hücresi), Jira kaydı (köprü), Jira
 Jira durumu, Oluşturma, Tamamlanma. Dosya eski biten kartları da kapsar.
 Doğrudan da indirilebilir: `GET /api/tasks/export.xlsx?status=all|todo|doing|done`
 
+### Teams'e mesaj (kayıttan tek tıkla)
+
+Bir kaydın peşine düşmek için Jira'yı, Teams'i ve kime soracağınızı ayrı ayrı
+hatırlamanız gerekmesin diye: kayda **Teams kişileri** iliştirirsiniz, satırdaki
+sohbet balonu düğmesi ("Son durumu sor") mesajı Teams'te hazır açar.
+
+> **Gönder'e siz basarsınız.** Holocron mesajı yalnızca Teams'in yazma kutusuna
+> koyar; gönderildiğini göremez, doğrulayamaz. "Gönderilenler" listesi bu yüzden
+> *gönderildi* değil **açıldı** kaydıdır.
+
+Nasıl çalışır:
+
+- **Kurulum gerekmez.** Graph API, uygulama kaydı, IT izni yok. Kullanılan tek
+  şey derin bağlantıdır: `https://teams.microsoft.com/l/chat/0/0?users=...&message=...`
+  Tarayıcı bunu kurulu Teams uygulamasına devreder, Teams yoksa web arayüzü açılır.
+- **Kişiler.** Detay çekmecesindeki **Teams** bölümünde kişi eklersiniz (e-posta ya
+  da adres defterinden ad). Tek kişi varsa doğrudan sohbet, birden fazlaysa **grup
+  sohbeti** açılır; grup sohbetinin adı **Ayarlar → Teams → Konu adı biçimi** ile
+  belirlenir (varsayılan `{key}`).
+- **Adres defteri.** Kayda girdiğiniz her kişi defterinize düşer ve bir dahaki
+  yazışta tamamlanır. Arama ad **ve** e-posta üzerinde çalışır, büyük/küçük harf ve
+  Türkçe `İ/ı` ayrımı gözetilmez, önce baştan eşleşenler gelir. Defter
+  **Ayarlar → Teams** altında listelenir: ad ve adres düzenlenir, silinen kişi
+  bütün kayıtlardan da çıkar.
+- **Kanal.** Var olan bir kanala ya da grup sohbetine yazmak isterseniz Teams'te
+  ⋯ menüsünden **Bağlantı kopyala** deyip Holocron'a kaydedin, sonra kayıt için
+  o kanalı seçin. Teams kanal bağlantıları mesaj ön doldurmayı kabul etmiyor:
+  metin **panoya kopyalanır**, kanal açılır, siz yapıştırırsınız.
+- **Şablonlar.** İki şablonla gelir — *Son durum* ve *Güncelleme rica*. Yenisini
+  **Ayarlar → Teams** altında yazarsınız. Yer tutucular:
+
+  | Yer tutucu | Karşılığı |
+  | --- | --- |
+  | `{key}` `{summary}` `{status}` `{assignee}` `{priority}` | Kaydın alanları |
+  | `{url}` | Jira bağlantısı |
+  | `{field:customfield_10016}` | Herhangi bir alan kimliği |
+  | `{local:3}` | Yerel alan (kimliğiyle) |
+
+  Bilinmeyen yer tutucu **boş kalır**: yanlış yazılmış bir ad mesajın içinde
+  `{musteri}` diye görünmez. Şablon seçince metin kutusu çözülmüş haliyle dolar
+  ve göndermeden önce elle düzenlenebilir.
+- **Uzun mesaj.** Adres uzunluğu 2.000 karakteri aşarsa mesaj kırpılır ve tamamı
+  panoya kopyalanır; balon bunu söyler.
+- **Sütun.** Sütun seçicide **Teams kişileri** sanal sütunu vardır: kayda bağlı
+  adları virgülle gösterir, Excel'e de aynı şekilde girer.
+- **Kanban.** Bir görev Jira kaydına bağlıysa kartta da aynı düğme durur.
+
+Kayıtta kişi de kanal da yoksa düğme mesaj açmaz, çekmeceyi açıp önce kişi
+eklemenizi ister.
+
 ### E-posta (yalnız Windows)
 
 **Ayarlar → E-posta**, Outlook'taki postalarınızdan görev üretir. Sizin
@@ -519,6 +570,7 @@ değiştirilir (`tests/fake_jira.py`).
 | `app/fields.py` | Alan değerlerini metne çeviren saf formatlayıcı |
 | `app/grid.py` | Grid satırlarının kurulması (ekran ve Excel ortak kaynağı) |
 | `app/tasks.py` | Görev panosunun kurulması (sütunlar, son tarih durumu) |
+| `app/teams.py` | Teams derin bağlantısı ve şablon çözümü (saf mantık) |
 | `app/export.py` | Grup → Excel (.xlsx) dosyası |
 | `app/refresh.py` | Arka planda çalışan Güncelle işi |
 | `app/mail/` | Outlook'tan görev üretme (kaynak sözleşmesi, COM sarmalayıcı, iş mantığı) |

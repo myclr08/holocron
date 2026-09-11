@@ -43,6 +43,7 @@ const state = {
   doneTimer: null,
   crawlTimer: null,
   view: "groups",
+  teams: null,
   tasks: {
     columns: [],
     oldDone: 0,
@@ -397,6 +398,17 @@ function renderRow(row) {
     h(
       "button",
       {
+        title: "Son durumu sor: Teams'te mesajı hazırla",
+        onclick: (event) => {
+          event.stopPropagation();
+          askStatus(row.key);
+        },
+      },
+      [icon("chat")]
+    ),
+    h(
+      "button",
+      {
         title: "Bu kayıt için görev oluştur",
         onclick: (event) => {
           event.stopPropagation();
@@ -485,10 +497,15 @@ async function openDrawer(key) {
     state.drawerFields = data.fields;
     state.drawerLocal = data.local || [];
     state.drawerFetchedAt = data.fetched_at;
+    state.teams = emptyTeams(key);
     renderDrawerBody();
+    // Teams bolumu ayri okunur: gecikirse kaydin alanlari beklemez.
+    await loadTeams(key);
+    if (state.drawerKey === key) renderDrawerBody();
   } catch (err) {
     state.drawerFields = [];
     state.drawerLocal = [];
+    state.teams = null;
     clear(body);
     body.appendChild(h("p", { class: "hint", text: err.message }));
     el("drawer-link").hidden = true;
@@ -506,6 +523,7 @@ function renderDrawerBody() {
     );
   }
   renderDrawerLocal(body);
+  renderDrawerTeams(body);
   (state.drawerFields || [])
     .filter((item) => state.drawerShowEmpty || !item.empty)
     .forEach((item) => {
@@ -864,6 +882,431 @@ function renderDrawerLocal(body) {
   });
 
   body.appendChild(section);
+}
+
+// --- Teams (derin baglanti) ---------------------------------------------
+//
+// Mesaj Teams'in yazma kutusuna KONUR, Gonder'e kullanici basar: uygulama
+// gonderimi ne yapar ne de dogrulayabilir. Kanal kipinde on doldurma yoktur
+// (Teams kanal baglantilari mesaj parametresi kabul etmiyor): metin panoya
+// kopyalanir, kanal acilir, kullanici yapistirir.
+
+const TEAMS_PEOPLE = "people";
+const TEAMS_CHANNEL = "channel";
+const CONTACT_SUGGEST_MS = 200;
+
+function emptyTeams(key) {
+  return {
+    key: key || null,
+    contacts: [],
+    channel: null,
+    channels: [],
+    templates: [],
+    messages: [],
+    book: [],
+    templateId: null,
+    body: "",
+    target: TEAMS_PEOPLE,
+    ready: false,
+  };
+}
+
+/** Cekmecenin Teams bolumu icin gereken her sey tek turda okunur. */
+async function loadTeams(key) {
+  const path = `/api/issues/${encodeURIComponent(key)}`;
+  const quiet = (promise, fallback) => promise.catch(() => fallback);
+  const [contacts, channel, channels, templates, messages, preview] = await Promise.all([
+    quiet(api(`${path}/contacts`), { contacts: [] }),
+    quiet(api(`${path}/channel`), { channel: null }),
+    quiet(api("/api/teams/channels"), { channels: [] }),
+    quiet(api("/api/templates"), { templates: [] }),
+    quiet(api(`${path}/messages`), { messages: [] }),
+    quiet(api(`${path}/message-preview`, { method: "POST", body: "{}" }), { message: "" }),
+  ]);
+  const list = templates.templates || [];
+  const chosen = list.find((item) => item.is_default) || list[0] || null;
+  state.teams = {
+    key: key,
+    contacts: contacts.contacts || [],
+    channel: channel.channel || null,
+    channels: channels.channels || [],
+    templates: list,
+    messages: messages.messages || [],
+    book: [],
+    templateId: chosen ? chosen.id : null,
+    body: preview.message || "",
+    // Kayda kanal secilmisse varsayilan hedef odur.
+    target: channel.channel ? TEAMS_CHANNEL : TEAMS_PEOPLE,
+    ready: true,
+  };
+}
+
+function renderDrawerTeams(parent) {
+  const data = state.teams;
+  if (!data || !data.ready || data.key !== state.drawerKey) return;
+
+  const section = h("section", { class: "drawer-teams" }, [h("h3", { text: "Teams" })]);
+  section.appendChild(teamsChips(data));
+  section.appendChild(teamsAddBox(data));
+  section.appendChild(teamsTargetBox(data));
+  section.appendChild(teamsMessageBox(data));
+  section.appendChild(
+    h("p", {
+      class: "hint",
+      text: "Mesaj Teams'te hazır açılır, göndermek için Gönder'e basmanız gerekir.",
+    })
+  );
+  section.appendChild(teamsSentBox(data));
+  parent.appendChild(section);
+}
+
+function teamsChips(data) {
+  const chips = h("div", { class: "teams-chips" }, []);
+  if (!data.contacts.length) {
+    chips.appendChild(h("span", { class: "hint", text: "Bu kayda henüz kişi eklenmedi." }));
+    return chips;
+  }
+  data.contacts.forEach((contact) => {
+    chips.appendChild(
+      h("span", { class: "teams-chip", title: contact.email }, [
+        h("span", { class: "chip-name", text: contact.name || contact.email }),
+        h("button", {
+          text: "×",
+          title: "Kişiyi kaldır",
+          onclick: () => writeTeamsContacts(data.contacts.filter((item) => item.email !== contact.email)),
+        }),
+      ])
+    );
+  });
+  return chips;
+}
+
+function teamsAddBox(data) {
+  const emailInput = h("input", {
+    type: "text",
+    placeholder: "E-posta ya da ad",
+    autocomplete: "off",
+    list: "teams-contact-book",
+  });
+  const book = h("datalist", { id: "teams-contact-book" }, []);
+  const nameInput = h("input", { type: "text", placeholder: "Ad (isteğe bağlı)" });
+  const nameBox = h("div", { class: "teams-name" }, [nameInput]);
+  nameBox.hidden = true;
+  const note = h("p", { class: "hint", text: "" });
+
+  const known = (typed) => {
+    const marker = typed.trim().toLowerCase();
+    return (data.book || []).find(
+      (item) => item.email === marker || (item.name || "").toLowerCase() === marker
+    );
+  };
+
+  let timer = null;
+  const suggest = async () => {
+    const typed = emailInput.value.trim();
+    try {
+      const found = await api(`/api/contacts?q=${encodeURIComponent(typed)}`);
+      data.book = found.contacts || [];
+    } catch (err) {
+      data.book = [];
+    }
+    clear(book);
+    data.book.forEach((item) =>
+      book.appendChild(h("option", { value: item.email, label: item.name || item.email }))
+    );
+    // Defterde olmayan yeni bir adres: ad sorulur, zorunlu degildir.
+    nameBox.hidden = !typed || !!known(typed);
+    note.textContent =
+      !typed || known(typed) ? "" : "Bu kişi adres defterinde yok; ad yazarsanız deftere de düşer.";
+  };
+  emailInput.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(suggest, CONTACT_SUGGEST_MS);
+  });
+  suggest();
+
+  const add = () => {
+    const typed = emailInput.value.trim();
+    if (!typed) return;
+    const found = known(typed);
+    const email = (found ? found.email : typed).toLowerCase();
+    const name = nameInput.value.trim() || (found ? found.name : "");
+    const next = data.contacts.filter((item) => item.email !== email);
+    next.push({ email: email, name: name });
+    writeTeamsContacts(next);
+  };
+  emailInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      add();
+    }
+  });
+  nameInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      add();
+    }
+  });
+
+  return h("div", { class: "teams-add" }, [
+    h("div", { class: "teams-add-row" }, [
+      emailInput,
+      book,
+      h("button", { class: "small", text: "Ekle", onclick: add }),
+    ]),
+    nameBox,
+    note,
+  ]);
+}
+
+function teamsTargetBox(data) {
+  const picked = (value) => {
+    data.target = value;
+    renderDrawerBody();
+  };
+  const people = h("label", { class: "checkbox" }, [
+    h("input", {
+      type: "radio",
+      name: "teams-target",
+      checked: data.target === TEAMS_PEOPLE,
+      onchange: () => picked(TEAMS_PEOPLE),
+    }),
+    h("span", { text: "Kişilere" }),
+  ]);
+  const channel = h("label", { class: "checkbox" }, [
+    h("input", {
+      type: "radio",
+      name: "teams-target",
+      checked: data.target === TEAMS_CHANNEL,
+      onchange: () => picked(TEAMS_CHANNEL),
+    }),
+    h("span", { text: "Kanala" }),
+  ]);
+
+  const select = h("select", {
+    onchange: (event) => setIssueChannel(event.target.value),
+  });
+  select.appendChild(h("option", { value: "", text: "— kanal seçilmedi —" }));
+  (data.channels || []).forEach((item) =>
+    select.appendChild(h("option", { value: String(item.id), text: item.name }))
+  );
+  select.value = data.channel ? String(data.channel.id) : "";
+
+  return h("div", { class: "teams-target" }, [
+    h("div", { class: "choice-group" }, [people, channel]),
+    h("div", { class: "teams-channel-row" }, [
+      select,
+      h("button", { class: "small", text: "Yeni kanal bağlantısı", onclick: channelModal }),
+    ]),
+  ]);
+}
+
+function teamsMessageBox(data) {
+  const select = h("select", {
+    onchange: (event) => pickTemplate(event.target.value),
+  });
+  (data.templates || []).forEach((item) =>
+    select.appendChild(h("option", { value: String(item.id), text: item.name }))
+  );
+  if (!data.templates.length) {
+    select.appendChild(h("option", { value: "", text: "— şablon yok —" }));
+  }
+  select.value = data.templateId ? String(data.templateId) : "";
+
+  const area = h("textarea", { class: "teams-body", rows: "4" });
+  area.value = data.body || "";
+  area.addEventListener("input", () => {
+    data.body = area.value;
+  });
+
+  return h("div", { class: "teams-message" }, [
+    h("div", { class: "teams-message-head" }, [
+      h("span", { class: "label", text: "Şablon" }),
+      select,
+    ]),
+    area,
+    h("button", {
+      class: "primary",
+      text: "Teams'te aç",
+      onclick: () =>
+        sendTeamsLink(data.key, {
+          body: area.value,
+          channel: data.target === TEAMS_CHANNEL,
+        }),
+    }),
+  ]);
+}
+
+function teamsSentBox(data) {
+  const box = h("div", { class: "teams-sent" }, [h("h4", { text: "Gönderilenler" })]);
+  if (!data.messages.length) {
+    box.appendChild(h("p", { class: "hint", text: "Henüz mesaj açılmadı." }));
+    return box;
+  }
+  data.messages.forEach((item) => {
+    box.appendChild(
+      h("div", { class: "sent-line", title: item.body }, [
+        h("span", { class: "when", text: stamp(item.opened_at) }),
+        h("span", {
+          class: "who",
+          text: item.target_text,
+          title: item.target_kind === TEAMS_CHANNEL ? "Kanal" : "Kişiler",
+        }),
+        h("span", { class: "what", text: item.first_line }),
+      ])
+    );
+  });
+  return box;
+}
+
+async function writeTeamsContacts(contacts) {
+  const key = state.drawerKey;
+  try {
+    const data = await api(`/api/issues/${encodeURIComponent(key)}/contacts`, {
+      method: "PUT",
+      body: JSON.stringify({ contacts: contacts }),
+    });
+    state.teams.contacts = data.contacts || [];
+    renderDrawerBody();
+    // Sanal sutun secili olabilir: grid de tazelensin.
+    if (state.group) loadIssues();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function setIssueChannel(value) {
+  const key = state.drawerKey;
+  try {
+    if (!value) {
+      await api(`/api/issues/${encodeURIComponent(key)}/channel`, { method: "DELETE" });
+      state.teams.channel = null;
+      state.teams.target = TEAMS_PEOPLE;
+    } else {
+      const data = await api(`/api/issues/${encodeURIComponent(key)}/channel`, {
+        method: "PUT",
+        body: JSON.stringify({ channel_id: Number(value) }),
+      });
+      state.teams.channel = data.channel;
+      state.teams.target = TEAMS_CHANNEL;
+    }
+    renderDrawerBody();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function pickTemplate(value) {
+  const key = state.drawerKey;
+  state.teams.templateId = value ? Number(value) : null;
+  try {
+    const data = await api(`/api/issues/${encodeURIComponent(key)}/message-preview`, {
+      method: "POST",
+      body: JSON.stringify({ template_id: state.teams.templateId }),
+    });
+    state.teams.body = data.message || "";
+  } catch (err) {
+    fail(err);
+  }
+  renderDrawerBody();
+}
+
+/** Kayitli kanal ekleme penceresi: Teams'te "Bağlantı kopyala" ile alinir. */
+function channelModal() {
+  const nameInput = h("input", { type: "text", placeholder: "Destek kanalı" });
+  const urlInput = h("input", {
+    type: "text",
+    placeholder: "https://teams.microsoft.com/l/channel/...",
+  });
+  const body = h("div", {}, [
+    field("Kanal adı", nameInput),
+    field("Bağlantı", urlInput),
+    h("p", {
+      class: "hint",
+      text:
+        "Teams'te kanalın ya da grup sohbetinin yanındaki ⋯ menüsünden " +
+        "\"Bağlantı kopyala\" deyip buraya yapıştırın.",
+    }),
+  ]);
+  const save = async () => {
+    try {
+      const data = await api("/api/teams/channels", {
+        method: "POST",
+        body: JSON.stringify({ name: nameInput.value, url: urlInput.value }),
+      });
+      closeModal();
+      state.teams.channels = (state.teams.channels || []).concat([data.channel]);
+      await setIssueChannel(String(data.channel.id));
+    } catch (err) {
+      fail(err);
+    }
+  };
+  openModal("Yeni kanal bağlantısı", body, [
+    { label: "Vazgeç", onClick: closeModal },
+    { label: "Kaydet", kind: "primary", onClick: save },
+  ]);
+}
+
+/** Baglantiyi kurar, gerekirse panoya kopyalar, Teams'i acar. */
+async function sendTeamsLink(key, payload) {
+  try {
+    const data = await api(`/api/issues/${encodeURIComponent(key)}/teams-link`, {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+    });
+    const clip = data.clipboard || (data.kind === TEAMS_CHANNEL ? data.message : "");
+    const copied = clip ? await copyText(clip) : false;
+    window.open(data.url, "_blank", "noopener");
+
+    if (data.kind === TEAMS_CHANNEL) {
+      toast(
+        "Kanal açılıyor",
+        copied
+          ? "Mesaj panoya kopyalandı, kanalda yapıştırın."
+          : "Mesaj panoya kopyalanamadı; metni çekmeceden kopyalayın.",
+        copied ? "ok" : ""
+      );
+    } else if (data.truncated) {
+      toast(
+        "Teams açılıyor",
+        "Mesaj adres sınırına sığmadı ve kısaltıldı; tamamı panoya kopyalandı.",
+        ""
+      );
+    } else {
+      toast("Teams açılıyor", "Göndermek için Teams'te Gönder'e basın.", "ok");
+    }
+
+    if (state.drawerKey === key && state.teams && state.teams.ready) {
+      const fresh = await api(`/api/issues/${encodeURIComponent(key)}/messages`);
+      state.teams.messages = fresh.messages || [];
+      renderDrawerBody();
+    }
+    return data;
+  } catch (err) {
+    fail(err);
+    return null;
+  }
+}
+
+/** Grid satiri ve kanban karti: tek tikla "son durumu sor". */
+async function askStatus(key) {
+  try {
+    const channel = (await api(`/api/issues/${encodeURIComponent(key)}/channel`)).channel;
+    if (channel) {
+      await sendTeamsLink(key, { channel: true });
+      return;
+    }
+    const contacts = (await api(`/api/issues/${encodeURIComponent(key)}/contacts`)).contacts || [];
+    if (contacts.length) {
+      await sendTeamsLink(key, {});
+      return;
+    }
+    // Hedef yok: kullanici once kisi eklesin, cekmecenin Teams bolumu acilir.
+    await openDrawer(key);
+    toast("Teams hedefi yok", "Bu kayda önce bir kişi ekleyin ya da kanal seçin.", "");
+  } catch (err) {
+    fail(err);
+  }
 }
 
 // --- Alanlar ekrani -----------------------------------------------------
@@ -1678,6 +2121,20 @@ function taskIssueLine(issue) {
       })
     );
   }
+  line.appendChild(
+    h(
+      "button",
+      {
+        class: "task-ask",
+        title: "Son durumu sor: Teams'te mesajı hazırla",
+        onclick: (event) => {
+          event.stopPropagation();
+          askStatus(issue.key);
+        },
+      },
+      [icon("chat")]
+    )
+  );
   if (issue.summary) {
     line.appendChild(h("span", { class: "task-summary", text: issue.summary }));
   }

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field as dataclass_field
 from datetime import datetime, timezone
 from typing import Any, Iterable, Sequence
 
-from . import fields as field_utils
+from . import fields as field_utils, teams
 
 # Isin kilici paleti; grup renk seridi ve rozetler bu adlari kullanir.
 GROUP_COLORS: tuple[str, ...] = ("blue", "green", "purple", "red", "yellow", "white")
@@ -180,8 +180,20 @@ def list_fields(
         for field_id, spec in field_utils.VIRTUAL_FIELDS.items()
         if field_id not in known
     ]
+    # Teams kisileri: kayit basina tutulan adres listesi, sutun gibi gorunur.
+    teams_column = [
+        {
+            "id": teams.CONTACTS_COLUMN,
+            "name": teams.CONTACTS_COLUMN_NAME,
+            "schema_type": "string",
+            "custom": False,
+            "virtual": True,
+            "kind": "teams",
+            "fetched_at": None,
+        }
+    ]
     local = local_field_columns(conn) if include_local else []
-    return virtual + catalog + local
+    return virtual + teams_column + catalog + local
 
 
 def local_field_columns(
@@ -231,6 +243,11 @@ def field_schemas(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {
         field_id: {"id": field_id, "name": spec["name"], "schema": dict(spec["schema"])}
         for field_id, spec in field_utils.VIRTUAL_FIELDS.items()
+    }
+    result[teams.CONTACTS_COLUMN] = {
+        "id": teams.CONTACTS_COLUMN,
+        "name": teams.CONTACTS_COLUMN_NAME,
+        "schema": {"type": "string"},
     }
     for row in conn.execute("SELECT id, name, raw_json, schema_type FROM jira_fields").fetchall():
         raw = _loads(row["raw_json"]) or {}
@@ -367,6 +384,12 @@ def purge_orphan_issues(conn: sqlite3.Connection) -> int:
         conn.execute(
             "DELETE FROM local_value_history "
             "WHERE issue_key NOT IN (SELECT issue_key FROM group_items)"
+        )
+        conn.execute(
+            "DELETE FROM issue_contacts WHERE issue_key NOT IN (SELECT issue_key FROM group_items)"
+        )
+        conn.execute(
+            "DELETE FROM issue_channel WHERE issue_key NOT IN (SELECT issue_key FROM group_items)"
         )
     return removed
 
@@ -1579,6 +1602,520 @@ def task_by_conversation(
         (str(conversation_id or ""),),
     ).fetchone()
     return _task_dict(row) if row else None
+
+
+# --- Teams: kisiler, kanallar, sablonlar, gonderilenler -----------------
+#
+# Kayda Teams kisisi eklemek adres defterine (`contacts`) de yazar: bir
+# sonraki kayitta ayni kisi otomatik tamamlamada cikar. Bir kayda kayitli
+# kanal secildiyse mesaj kisiler yerine oraya gider (`issue_channel`).
+
+CONTACT_NAME_LIMIT = 120
+CHANNEL_NAME_LIMIT = 80
+TEMPLATE_NAME_LIMIT = 60
+TEMPLATE_BODY_LIMIT = 4000
+
+
+def clean_contact_email(value: Any) -> str:
+    email = teams.clean_email(value)
+    if not email:
+        raise RepositoryError("invalid_email", "E-posta adresi boş olamaz.")
+    if not teams.valid_email(email):
+        raise RepositoryError("invalid_email", f"'{value}' geçerli bir e-posta adresi değil.")
+    return email
+
+
+def clean_contact_name(value: Any) -> str:
+    text = str(value or "").strip()
+    if len(text) > CONTACT_NAME_LIMIT:
+        raise RepositoryError("invalid_name", f"Ad en fazla {CONTACT_NAME_LIMIT} karakter.")
+    return text
+
+
+def upsert_contact(conn: sqlite3.Connection, email: str, name: Any = None) -> dict[str, Any]:
+    """Adres defterine yazar. Bos ad mevcut adi SILMEZ."""
+    clean_email = clean_contact_email(email)
+    clean_name = clean_contact_name(name)
+    with conn:
+        conn.execute(
+            "INSERT INTO contacts (email, name, created_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(email) DO UPDATE SET name = "
+            "CASE WHEN excluded.name <> '' THEN excluded.name ELSE contacts.name END",
+            (clean_email, clean_name, now_iso()),
+        )
+    return get_contact(conn, clean_email) or {"email": clean_email, "name": clean_name}
+
+
+def get_contact(conn: sqlite3.Connection, email: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT email, name FROM contacts WHERE email = ?", (teams.clean_email(email),)
+    ).fetchone()
+    return {"email": row["email"], "name": row["name"] or ""} if row else None
+
+
+CONTACT_SEARCH_LIMIT = 20
+
+
+def list_contacts(
+    conn: sqlite3.Connection, q: str = "", limit: int = CONTACT_SEARCH_LIMIT
+) -> list[dict[str, Any]]:
+    """Adres defteri araması: ad VE e-posta uzerinde, Turkce katlamali.
+
+    Once onek eslesmeleri, sonra iceren eslesmeler doner ("ali" yazan once
+    Ali'yi gorsun, "...ali..." gecen baskasini degil). Katlama `fold` ile
+    yapilir: `İ/ı` ayrimi gozetilmez.
+    """
+    rows = conn.execute("SELECT email, name FROM contacts").fetchall()
+    entries = [{"email": row["email"], "name": row["name"] or ""} for row in rows]
+    entries.sort(key=lambda item: (field_utils.fold(item["name"] or item["email"]), item["email"]))
+
+    needle = field_utils.fold(str(q or "").strip())
+    if needle:
+        prefixed: list[dict[str, Any]] = []
+        contained: list[dict[str, Any]] = []
+        for entry in entries:
+            name = field_utils.fold(entry["name"])
+            email = field_utils.fold(entry["email"])
+            if name.startswith(needle) or email.startswith(needle):
+                prefixed.append(entry)
+            elif needle in name or needle in email:
+                contained.append(entry)
+        entries = prefixed + contained
+
+    capped = max(0, int(limit))
+    return entries[:capped] if capped else entries
+
+
+def update_contact(
+    conn: sqlite3.Connection, email: str, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Defterdeki bir kisiyi duzenler; adres degisirse kayitlara da yansir."""
+    current = teams.clean_email(email)
+    if get_contact(conn, current) is None:
+        raise RepositoryError("contact_not_found", "Kişi adres defterinde yok.", status=404)
+
+    target = current
+    if "email" in payload and payload["email"] is not None:
+        target = clean_contact_email(payload["email"])
+    name = (
+        clean_contact_name(payload["name"])
+        if "name" in payload
+        else (get_contact(conn, current) or {}).get("name", "")
+    )
+
+    with conn:
+        if target != current:
+            if get_contact(conn, target) is not None:
+                raise RepositoryError(
+                    "duplicate_email", f"'{target}' zaten adres defterinde var."
+                )
+            conn.execute("UPDATE contacts SET email = ? WHERE email = ?", (target, current))
+            conn.execute(
+                "UPDATE OR IGNORE issue_contacts SET email = ? WHERE email = ?", (target, current)
+            )
+            conn.execute("DELETE FROM issue_contacts WHERE email = ?", (current,))
+        conn.execute("UPDATE contacts SET name = ? WHERE email = ?", (name, target))
+    return get_contact(conn, target) or {"email": target, "name": name}
+
+
+def delete_contact(conn: sqlite3.Connection, email: str) -> dict[str, Any]:
+    """Kisiyi defterden ve butun kayitlardan siler."""
+    current = teams.clean_email(email)
+    if get_contact(conn, current) is None:
+        raise RepositoryError("contact_not_found", "Kişi adres defterinde yok.", status=404)
+    used = int(
+        conn.execute(
+            "SELECT COUNT(*) AS c FROM issue_contacts WHERE email = ?", (current,)
+        ).fetchone()["c"]
+    )
+    with conn:
+        conn.execute("DELETE FROM issue_contacts WHERE email = ?", (current,))
+        conn.execute("DELETE FROM contacts WHERE email = ?", (current,))
+    return {"ok": True, "issues": used}
+
+
+def list_issue_contacts(conn: sqlite3.Connection, key: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT c.email AS email, COALESCE(b.name, '') AS name FROM issue_contacts c "
+        "LEFT JOIN contacts b ON b.email = c.email "
+        "WHERE c.issue_key = ? ORDER BY c.position, c.email",
+        (str(key).strip().upper(),),
+    ).fetchall()
+    return [{"email": row["email"], "name": row["name"] or ""} for row in rows]
+
+
+def set_issue_contacts(
+    conn: sqlite3.Connection, key: str, entries: Sequence[Any]
+) -> list[dict[str, Any]]:
+    """Kaydin kisi listesini tamamen degistirir; adres defterini de besler."""
+    clean_key = str(key).strip().upper()
+    if not issue_is_known(conn, clean_key):
+        raise RepositoryError("issue_not_found", "Kayıt bulunamadı.", status=404)
+    if not isinstance(entries, (list, tuple)):
+        raise RepositoryError("invalid_contacts", "contacts bir liste olmalı.")
+
+    wanted: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if isinstance(entry, dict):
+            email = clean_contact_email(entry.get("email"))
+            name = clean_contact_name(entry.get("name"))
+        else:
+            email = clean_contact_email(entry)
+            name = ""
+        if email in seen:
+            continue
+        seen.add(email)
+        wanted.append((email, name))
+
+    for email, name in wanted:
+        upsert_contact(conn, email, name)
+    with conn:
+        conn.execute("DELETE FROM issue_contacts WHERE issue_key = ?", (clean_key,))
+        for position, (email, _name) in enumerate(wanted):
+            conn.execute(
+                "INSERT INTO issue_contacts (issue_key, email, position) VALUES (?, ?, ?)",
+                (clean_key, email, position),
+            )
+    return list_issue_contacts(conn, clean_key)
+
+
+def contacts_for(
+    conn: sqlite3.Connection, keys: Sequence[str]
+) -> dict[str, list[dict[str, Any]]]:
+    """Coklu okuma (grid ve Excel icin): {KAYIT: [{email, name}, ...]}."""
+    wanted = [str(key).strip().upper() for key in keys if str(key).strip()]
+    result: dict[str, list[dict[str, Any]]] = {}
+    for start in range(0, len(wanted), 400):
+        chunk = wanted[start : start + 400]
+        placeholders = ",".join("?" for _ in chunk)
+        rows = conn.execute(
+            f"SELECT c.issue_key AS issue_key, c.email AS email, COALESCE(b.name, '') AS name "
+            f"FROM issue_contacts c LEFT JOIN contacts b ON b.email = c.email "
+            f"WHERE c.issue_key IN ({placeholders}) ORDER BY c.position, c.email",
+            chunk,
+        ).fetchall()
+        for row in rows:
+            bucket = result.setdefault(row["issue_key"], [])
+            bucket.append({"email": row["email"], "name": row["name"] or ""})
+    return result
+
+
+# --- kayitli kanallar ---------------------------------------------------
+
+
+def _channel_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "url": row["url"],
+        "created_at": row["created_at"],
+    }
+
+
+def clean_channel_name(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise RepositoryError("invalid_name", "Kanal adı boş olamaz.")
+    if len(text) > CHANNEL_NAME_LIMIT:
+        raise RepositoryError("invalid_name", f"Kanal adı en fazla {CHANNEL_NAME_LIMIT} karakter.")
+    return text
+
+
+def clean_channel_url(value: Any) -> str:
+    """Teams'teki 'Bağlantı kopyala' https adresi verir; baskasini kabul etmeyiz."""
+    text = str(value or "").strip()
+    if not text:
+        raise RepositoryError("invalid_url", "Kanal bağlantısı boş olamaz.")
+    if not text.startswith(("http://", "https://")):
+        raise RepositoryError("invalid_url", "Kanal bağlantısı http:// veya https:// ile başlamalı.")
+    return text
+
+
+def list_teams_channels(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT * FROM teams_channels ORDER BY name COLLATE NOCASE, id"
+    ).fetchall()
+    return [_channel_dict(row) for row in rows]
+
+
+def get_teams_channel(conn: sqlite3.Connection, channel_id: Any) -> dict[str, Any] | None:
+    try:
+        wanted = int(channel_id)
+    except (TypeError, ValueError):
+        return None
+    row = conn.execute("SELECT * FROM teams_channels WHERE id = ?", (wanted,)).fetchone()
+    return _channel_dict(row) if row else None
+
+
+def require_teams_channel(conn: sqlite3.Connection, channel_id: Any) -> dict[str, Any]:
+    channel = get_teams_channel(conn, channel_id)
+    if channel is None:
+        raise RepositoryError("channel_not_found", "Kayıtlı kanal bulunamadı.", status=404)
+    return channel
+
+
+def create_teams_channel(conn: sqlite3.Connection, name: Any, url: Any) -> dict[str, Any]:
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO teams_channels (name, url, created_at) VALUES (?, ?, ?)",
+            (clean_channel_name(name), clean_channel_url(url), now_iso()),
+        )
+    return require_teams_channel(conn, int(cursor.lastrowid))  # type: ignore[arg-type]
+
+
+def update_teams_channel(
+    conn: sqlite3.Connection, channel_id: Any, payload: dict[str, Any]
+) -> dict[str, Any]:
+    channel = require_teams_channel(conn, channel_id)
+    updates: dict[str, Any] = {}
+    if "name" in payload:
+        updates["name"] = clean_channel_name(payload["name"])
+    if "url" in payload:
+        updates["url"] = clean_channel_url(payload["url"])
+    if updates:
+        assignments = ", ".join(f"{column} = ?" for column in updates)
+        with conn:
+            conn.execute(
+                f"UPDATE teams_channels SET {assignments} WHERE id = ?",
+                (*updates.values(), channel["id"]),
+            )
+    return require_teams_channel(conn, channel["id"])
+
+
+def delete_teams_channel(conn: sqlite3.Connection, channel_id: Any) -> dict[str, Any]:
+    """Kanali siler; o kanali secmis kayitlar kisilere geri duser."""
+    channel = require_teams_channel(conn, channel_id)
+    used = int(
+        conn.execute(
+            "SELECT COUNT(*) AS c FROM issue_channel WHERE channel_id = ?", (channel["id"],)
+        ).fetchone()["c"]
+    )
+    with conn:
+        conn.execute("DELETE FROM issue_channel WHERE channel_id = ?", (channel["id"],))
+        conn.execute("DELETE FROM teams_channels WHERE id = ?", (channel["id"],))
+    return {"ok": True, "issues": used}
+
+
+def get_issue_channel(conn: sqlite3.Connection, key: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT t.* FROM issue_channel c JOIN teams_channels t ON t.id = c.channel_id "
+        "WHERE c.issue_key = ?",
+        (str(key).strip().upper(),),
+    ).fetchone()
+    return _channel_dict(row) if row else None
+
+
+def set_issue_channel(
+    conn: sqlite3.Connection, key: str, channel_id: Any
+) -> dict[str, Any]:
+    clean_key = str(key).strip().upper()
+    if not issue_is_known(conn, clean_key):
+        raise RepositoryError("issue_not_found", "Kayıt bulunamadı.", status=404)
+    channel = require_teams_channel(conn, channel_id)
+    with conn:
+        conn.execute(
+            "INSERT INTO issue_channel (issue_key, channel_id) VALUES (?, ?) "
+            "ON CONFLICT(issue_key) DO UPDATE SET channel_id = excluded.channel_id",
+            (clean_key, channel["id"]),
+        )
+    return channel
+
+
+def clear_issue_channel(conn: sqlite3.Connection, key: str) -> bool:
+    with conn:
+        conn.execute(
+            "DELETE FROM issue_channel WHERE issue_key = ?", (str(key).strip().upper(),)
+        )
+    return True
+
+
+# --- mesaj sablonlari ---------------------------------------------------
+
+
+def _template_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "body": row["body"],
+        "position": row["position"],
+        "is_default": bool(row["is_default"]),
+    }
+
+
+def clean_template_name(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise RepositoryError("invalid_name", "Şablon adı boş olamaz.")
+    if len(text) > TEMPLATE_NAME_LIMIT:
+        raise RepositoryError("invalid_name", f"Şablon adı en fazla {TEMPLATE_NAME_LIMIT} karakter.")
+    return text
+
+
+def clean_template_body(value: Any) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        raise RepositoryError("invalid_body", "Şablon gövdesi boş olamaz.")
+    if len(text) > TEMPLATE_BODY_LIMIT:
+        raise RepositoryError(
+            "invalid_body", f"Şablon gövdesi en fazla {TEMPLATE_BODY_LIMIT} karakter."
+        )
+    return text
+
+
+def list_templates(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT * FROM message_templates ORDER BY position, id"
+    ).fetchall()
+    return [_template_dict(row) for row in rows]
+
+
+def get_template(conn: sqlite3.Connection, template_id: Any) -> dict[str, Any] | None:
+    try:
+        wanted = int(template_id)
+    except (TypeError, ValueError):
+        return None
+    row = conn.execute("SELECT * FROM message_templates WHERE id = ?", (wanted,)).fetchone()
+    return _template_dict(row) if row else None
+
+
+def require_template(conn: sqlite3.Connection, template_id: Any) -> dict[str, Any]:
+    template = get_template(conn, template_id)
+    if template is None:
+        raise RepositoryError("template_not_found", "Şablon bulunamadı.", status=404)
+    return template
+
+
+def default_template(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """Varsayilan sablon; isaretli yoksa listenin ilki."""
+    templates = list_templates(conn)
+    for template in templates:
+        if template["is_default"]:
+            return template
+    return templates[0] if templates else None
+
+
+def _set_default_template(conn: sqlite3.Connection, template_id: int) -> None:
+    """Varsayilan tektir: isaret baskasina gecince eskisi duser."""
+    conn.execute(
+        "UPDATE message_templates SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END",
+        (int(template_id),),
+    )
+
+
+def create_template(
+    conn: sqlite3.Connection, name: Any, body: Any, is_default: bool = False
+) -> dict[str, Any]:
+    position = conn.execute(
+        "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM message_templates"
+    ).fetchone()["p"]
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO message_templates (name, body, position, is_default) "
+            "VALUES (?, ?, ?, 0)",
+            (clean_template_name(name), clean_template_body(body), int(position)),
+        )
+        if is_default:
+            _set_default_template(conn, int(cursor.lastrowid))  # type: ignore[arg-type]
+    return require_template(conn, int(cursor.lastrowid))  # type: ignore[arg-type]
+
+
+def update_template(
+    conn: sqlite3.Connection, template_id: Any, payload: dict[str, Any]
+) -> dict[str, Any]:
+    template = require_template(conn, template_id)
+    updates: dict[str, Any] = {}
+    if "name" in payload:
+        updates["name"] = clean_template_name(payload["name"])
+    if "body" in payload:
+        updates["body"] = clean_template_body(payload["body"])
+    if "position" in payload and payload["position"] is not None:
+        try:
+            updates["position"] = int(payload["position"])
+        except (TypeError, ValueError) as exc:
+            raise RepositoryError("invalid_position", "position sayı olmalı.") from exc
+
+    with conn:
+        if updates:
+            assignments = ", ".join(f"{column} = ?" for column in updates)
+            conn.execute(
+                f"UPDATE message_templates SET {assignments} WHERE id = ?",
+                (*updates.values(), template["id"]),
+            )
+        if payload.get("is_default"):
+            _set_default_template(conn, template["id"])
+    return require_template(conn, template["id"])
+
+
+def delete_template(conn: sqlite3.Connection, template_id: Any) -> dict[str, Any]:
+    template = require_template(conn, template_id)
+    with conn:
+        conn.execute("DELETE FROM message_templates WHERE id = ?", (template["id"],))
+    # Varsayilan silindiyse isaret listenin ilkine gecer; arayuz hep bir
+    # sablonla acilsin.
+    if template["is_default"]:
+        remaining = list_templates(conn)
+        if remaining:
+            with conn:
+                _set_default_template(conn, remaining[0]["id"])
+    return {"ok": True}
+
+
+# --- "acildi" kayitlari -------------------------------------------------
+
+
+def record_sent_message(
+    conn: sqlite3.Connection,
+    key: str,
+    target_kind: str,
+    target_text: str,
+    body: str,
+) -> dict[str, Any]:
+    """Teams'te acilan mesaji kaydeder.
+
+    Gonderimi DOGRULAYAMAYIZ: derin baglanti mesaji yalnizca yazma kutusuna
+    koyar. Satir bu yuzden "gonderildi" degil "acildi" kaydidir.
+    """
+    kind = str(target_kind or "").strip().lower()
+    if kind not in teams.TARGET_KINDS:
+        raise RepositoryError("invalid_target", "Hedef 'people' ya da 'channel' olmalı.")
+    stamp = now_iso()
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO sent_messages (issue_key, target_kind, target_text, body, opened_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (str(key).strip().upper(), kind, str(target_text or ""), str(body or ""), stamp),
+        )
+    return {
+        "id": int(cursor.lastrowid),  # type: ignore[arg-type]
+        "issue_key": str(key).strip().upper(),
+        "target_kind": kind,
+        "target_text": str(target_text or ""),
+        "body": str(body or ""),
+        "opened_at": stamp,
+    }
+
+
+def list_sent_messages(
+    conn: sqlite3.Connection, key: str, limit: int = 20
+) -> list[dict[str, Any]]:
+    """Gonderilenler listesi: yeniden eskiye."""
+    rows = conn.execute(
+        "SELECT * FROM sent_messages WHERE issue_key = ? ORDER BY id DESC LIMIT ?",
+        (str(key).strip().upper(), max(1, int(limit))),
+    ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "issue_key": row["issue_key"],
+            "target_kind": row["target_kind"],
+            "target_text": row["target_text"] or "",
+            "body": row["body"] or "",
+            "first_line": (row["body"] or "").splitlines()[0] if row["body"] else "",
+            "opened_at": row["opened_at"],
+        }
+        for row in rows
+    ]
 
 
 # --- ic yardimcilar -----------------------------------------------------
