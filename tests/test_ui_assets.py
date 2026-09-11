@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app import repository as repo
 
 STATIC = Path(__file__).resolve().parent.parent / "app" / "static"
@@ -109,3 +111,189 @@ def test_grid_reports_whether_the_field_catalog_is_empty(api_client, conn):
 
     repo.store_fields(conn, [{"id": "summary", "name": "Özet", "schema": {"type": "string"}}])
     assert api_client.get(f"/api/groups/{group['id']}/issues").json()["catalog_empty"] is False
+
+
+# --- Asama 5: tema, fontlar, yildiz alani -------------------------------
+
+FONTS = STATIC / "fonts"
+
+FONT_FILES = (
+    "inter-latin.woff2",
+    "inter-latin-ext.woff2",
+    "inter-arrows.woff2",
+    "pathway-gothic-one-latin.woff2",
+    "pathway-gothic-one-latin-ext.woff2",
+)
+
+LICENSE_FILES = ("inter-OFL.txt", "pathway-gothic-one-OFL.txt")
+
+# Tema bu degiskenler uzerine kurulu; biri kaybolursa ekran renksiz kalir.
+CSS_VARIABLES = (
+    "--bg:", "--panel:", "--panel-2:", "--line:", "--line-strong:",
+    "--text:", "--muted:", "--mono:", "--accent:", "--accent-2:", "--accent-ink:",
+    "--saber-blue:", "--saber-green:", "--saber-purple:", "--saber-red:",
+    "--saber-yellow:", "--saber-white:",
+    "--saber-blue-glow:", "--saber-green-glow:", "--saber-purple-glow:",
+    "--saber-red-glow:", "--saber-yellow-glow:", "--saber-white-glow:",
+    "--font:", "--display:",
+)
+
+SCRIPTS = ("common.js", "app.js", "settings.js", "starfield.js")
+
+
+def test_fonts_and_their_licenses_ship_with_the_app():
+    for name in FONT_FILES:
+        path = FONTS / name
+        assert path.exists(), name
+        assert path.read_bytes()[:4] == b"wOF2", name
+    for name in LICENSE_FILES:
+        text = (FONTS / name).read_text(encoding="utf-8")
+        assert "SIL Open Font License" in text, name
+
+
+def test_fonts_are_served_over_http(api_client):
+    for name in FONT_FILES + LICENSE_FILES:
+        response = api_client.get(f"/static/fonts/{name}")
+        assert response.status_code == 200, name
+
+
+def test_font_faces_are_declared_locally_with_swap(api_client):
+    css = api_client.get("/static/css/app.css").text
+    assert css.count("@font-face") >= len(FONT_FILES)
+    assert css.count("font-display: swap") >= len(FONT_FILES)
+    assert 'font-family: "Inter"' in css
+    assert 'font-family: "Pathway Gothic One"' in css
+    for name in FONT_FILES:
+        assert f"../fonts/{name}" in css, name
+    # Turkce icin latin-ext alt kumesi sart: s g I S G oradan gelir.
+    assert "U+0100-02BA" in css
+
+
+def test_theme_variables_are_defined(api_client):
+    css = api_client.get("/static/css/app.css").text
+    for name in CSS_VARIABLES:
+        assert name in css, name
+
+
+def test_pages_declare_turkish(api_client):
+    for path in ("/", "/settings"):
+        assert '<html lang="tr">' in api_client.get(path).text, path
+
+
+def test_pages_never_reach_outside(api_client):
+    """CDN yok, dis kaynak yok: sayfalardaki her src/href yerel olmali."""
+    import re
+
+    for path in ("/", "/settings"):
+        page = api_client.get(path).text
+        for match in re.findall(r'(?:src|href)="([^"]+)"', page):
+            assert match.startswith("/") or match.startswith("#"), (path, match)
+    css = api_client.get("/static/css/app.css").text
+    assert "url(http" not in css
+    assert "@import" not in css
+    for name in SCRIPTS:
+        script = api_client.get(f"/static/js/{name}").text
+        assert "cdn." not in script, name
+    # Tek istisna: Jira kaydina giden baglanti sablonu.
+    app_js = api_client.get("/static/js/app.js").text
+    assert "/browse/" in app_js
+
+
+def test_javascript_files_parse(api_client):
+    """node --check: sozdizimi hatasi sessizce bos ekrana donusmesin."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node yok")
+    for name in SCRIPTS:
+        path = STATIC / "js" / name
+        result = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+        assert result.returncode == 0, f"{name}: {result.stderr}"
+
+
+def test_starfield_respects_the_motion_preference(api_client):
+    script = api_client.get("/static/js/starfield.js").text
+    assert "prefers-reduced-motion: reduce" in script
+    assert "visibilitychange" in script
+    assert "requestAnimationFrame" in script
+    assert "cancelAnimationFrame" in script
+    assert "MAX_DPR = 2" in script
+    css = api_client.get("/static/css/app.css").text
+    assert "@media (prefers-reduced-motion: reduce)" in css
+    assert "html.no-motion" in css
+
+
+def test_appearance_settings_round_trip(api_client):
+    settings = api_client.get("/api/settings").json()["settings"]
+    assert settings["ui.starfield"] == "1"
+    assert settings["ui.motion"] == "1"
+    assert settings["ui.crawl_seen"] == ""
+
+    saved = api_client.put(
+        "/api/settings", json={"ui.starfield": "0", "ui.motion": "0", "ui.crawl_seen": "1"}
+    ).json()["settings"]
+    assert saved["ui.starfield"] == "0"
+    assert saved["ui.motion"] == "0"
+    assert saved["ui.crawl_seen"] == "1"
+
+
+def test_opening_crawl_is_on_the_page_and_can_be_skipped(api_client):
+    page = api_client.get("/").text
+    assert 'id="crawl"' in page
+    assert "Bölüm I" in page
+    assert "Bir daha gösterme" in page
+    script = api_client.get("/static/js/app.js").text
+    assert "ui.crawl_seen" in script
+    assert "reducedMotion()" in script
+
+
+def test_appearance_section_is_on_the_settings_page(api_client):
+    page = api_client.get("/settings").text
+    for marker in ("Görünüm", 'id="ui-starfield"', 'id="ui-motion"', "Açılışı tekrar göster"):
+        assert marker in page, marker
+    script = api_client.get("/static/js/settings.js").text
+    assert "ui.starfield" in script
+    assert "ui.motion" in script
+
+
+def test_progress_ring_replaces_the_bar(api_client):
+    page = api_client.get("/").text
+    assert 'class="death-star"' in page
+    assert 'id="progress-ring"' in page
+    assert 'id="progress-count"' in page
+    assert "progress-fill" not in page
+    script = api_client.get("/static/js/app.js").text
+    assert "strokeDasharray" in script
+    assert "strokeDashoffset" in script
+    css = api_client.get("/static/css/app.css").text
+    assert ".death-star .ds-progress" in css
+    assert ".death-star.is-done .ds-progress" in css
+
+
+def test_empty_state_draws_our_own_xwing(api_client):
+    page = api_client.get("/").text
+    assert 'class="xwing"' in page
+    assert "Bu sektörde kayıt yok" in page
+    css = api_client.get("/static/css/app.css").text
+    assert ".xwing .tip" in css
+    script = api_client.get("/static/js/app.js").text
+    assert "JQL henüz sonuç getirmedi" in script
+    assert "Bilinen galakside bulunamadı" in script
+
+
+def test_status_pills_follow_the_jira_status_category(api_client):
+    css = api_client.get("/static/css/app.css").text
+    for name in (".status-pill.status-new", ".status-pill.status-indeterminate",
+                 ".status-pill.status-done"):
+        assert name in css, name
+    script = api_client.get("/static/js/app.js").text
+    assert "statusCategory" in script
+
+
+def test_favicon_is_our_own_drawing(api_client):
+    svg = api_client.get("/static/favicon.svg").text
+    assert svg.startswith("<svg")
+    assert "#ffe81f" in svg.lower()
+    assert "2e9bff" in svg.lower()

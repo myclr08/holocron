@@ -1,12 +1,15 @@
 name: release
 
+# Etiket itildiginde calisir; elle de tetiklenebilir (yalnizca zip uretir,
+# etiket olmadan release'e bir sey eklenmez).
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 env:
-  PYTHON_VERSION: "3.12"
-  EMBED_VERSION: "3.12.8"
+  PYTHON_VERSION: "3.13"
+  EMBED_VERSION: "3.13.8"
 
 jobs:
   linux:
@@ -18,24 +21,23 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Wheel'leri topla
+      - name: Tekerlekleri indir (manylinux2014 / cp313)
         run: |
-          python -m pip install --upgrade pip wheel
-          pip wheel -r requirements.txt -w wheels
+          python -m pip install --upgrade pip
+          pip download --only-binary=:all: \
+            --python-version ${{ env.PYTHON_VERSION }} \
+            --platform manylinux2014_x86_64 \
+            --implementation cp \
+            -r requirements.txt -d wheels
+          ls -1 wheels
 
-      - name: Paketi hazirla
-        run: |
-          mkdir -p dist/holocron
-          cp -r app holocron.sh requirements.txt README.md LICENSE dist/holocron/
-          cp -r wheels dist/holocron/wheels
-          find dist/holocron -name '__pycache__' -type d -prune -exec rm -rf {} +
-          chmod +x dist/holocron/holocron.sh
-          cd dist && zip -qr "holocron-linux-${GITHUB_REF_NAME}.zip" holocron
+      - name: Paketi uret
+        run: python tools/build_portable.py --target linux --wheels wheels --version ${{ github.ref_name }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: holocron-linux
-          path: dist/*.zip
+          path: dist/holocron-linux-x64.zip
 
   windows:
     runs-on: windows-latest
@@ -46,10 +48,11 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Wheel'leri topla
+      - name: Tekerlekleri indir (win_amd64 / cp313)
         run: |
-          python -m pip install --upgrade pip wheel
-          pip wheel -r requirements.txt -w wheels
+          python -m pip install --upgrade pip
+          pip download --only-binary=:all: --python-version ${{ env.PYTHON_VERSION }} --platform win_amd64 --implementation cp -r requirements.txt -d wheels
+          dir wheels
 
       - name: Embed dagitimini indir
         shell: pwsh
@@ -57,9 +60,10 @@ jobs:
           $url = "https://www.python.org/ftp/python/$env:EMBED_VERSION/python-$env:EMBED_VERSION-embed-amd64.zip"
           Invoke-WebRequest -Uri $url -OutFile python-embed.zip
 
-      - name: Tasinabilir paketi uret
+      - name: Paketi uret
         run: >
           python tools/build_portable.py
+          --target windows
           --embed-zip python-embed.zip
           --wheels wheels
           --version ${{ github.ref_name }}
@@ -68,10 +72,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: holocron-windows
-          path: dist/*.zip
+          path: dist/holocron-windows-x64.zip
 
   publish:
     needs: [linux, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write

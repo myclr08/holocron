@@ -8,6 +8,8 @@
   <link rel="stylesheet" href="/static/css/app.css" />
 </head>
 <body>
+  <canvas class="starfield" id="starfield" aria-hidden="true"></canvas>
+
   <div class="layout no-sidebar">
     <div class="brand">HOLOCRON</div>
 
@@ -101,8 +103,29 @@
         </div>
         <div class="status" id="status" hidden></div>
       </div>
+
+      <div class="card" id="appearance">
+        <h2>Görünüm</h2>
+        <p class="hint">
+          Atmosfer ayarları anında uygulanır ve bu bilgisayarda saklanır. İşletim sisteminizde
+          "hareketi azalt" açıksa yıldızlar zaten durur.
+        </p>
+        <label class="checkbox">
+          <input type="checkbox" id="ui-starfield" checked />
+          Yıldız alanı
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="ui-motion" checked />
+          Hareketler
+        </label>
+        <div class="actions">
+          <button id="replay-crawl">Açılışı tekrar göster</button>
+        </div>
+        <div class="status" id="appearance-status" hidden></div>
+      </div>
     </main>
   </div>
+  <script src="/static/js/starfield.js"></script>
   <script src="/static/js/common.js"></script>
   <script src="/static/js/settings.js"></script>
 </body>

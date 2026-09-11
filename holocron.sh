@@ -17,7 +17,11 @@ if [ ! -x "$VENV_PY" ]; then
   if [ -d "wheels" ]; then
     # Cevrimdisi kurulum: paketler yanimizda geldiyse agi hic kullanma.
     echo "[holocron] Bagimliliklar wheels/ klasorunden kuruluyor..."
-    "$VENV_PY" -m pip install --no-index --find-links wheels -r requirements.txt
+    if ! "$VENV_PY" -m pip install --no-index --find-links wheels -r requirements.txt; then
+      # Tekerlekler baska bir Python surumu icin olabilir; agdan denenir.
+      echo "[holocron] Cevrimdisi kurulum olmadi, agdan deneniyor..."
+      "$VENV_PY" -m pip install -r requirements.txt
+    fi
   else
     echo "[holocron] Bagimliliklar indiriliyor..."
     "$VENV_PY" -m pip install -r requirements.txt

@@ -40,6 +40,13 @@ goto run_venv
 :offline_install
 echo [holocron] Bagimliliklar wheels klasorunden kuruluyor...
 "%VENV_PY%" -m pip install --no-index --find-links wheels -r requirements.txt
+if errorlevel 1 goto online_install
+goto run_venv
+
+:online_install
+rem Tekerlekler baska bir Python surumu icin olabilir; agdan denenir.
+echo [holocron] Cevrimdisi kurulum olmadi, agdan deneniyor...
+"%VENV_PY%" -m pip install -r requirements.txt
 if errorlevel 1 goto deps_failed
 goto run_venv
 

@@ -51,9 +51,44 @@ function collectForm() {
   return payload;
 }
 
+function fillAppearance(settings) {
+  const prefs = applyAppearance(settings);
+  document.getElementById("ui-starfield").checked = prefs.starfield;
+  document.getElementById("ui-motion").checked = prefs.motion;
+}
+
 async function loadSettings() {
   const data = await api("/api/settings");
-  fillForm(data.settings || {});
+  const settings = data.settings || {};
+  fillForm(settings);
+  fillAppearance(settings);
+}
+
+/** Gorunum kutulari aninda kaydedilir; Kaydet dugmesini beklemez. */
+async function toggleAppearance(key, checked) {
+  const status = document.getElementById("appearance-status");
+  try {
+    const data = await saveSetting(key, checked ? "1" : "0");
+    fillAppearance(data.settings || {});
+    setStatus(status, "Görünüm kaydedildi.", "ok");
+  } catch (err) {
+    setStatus(status, err.message, "error");
+  }
+}
+
+async function replayCrawl() {
+  const status = document.getElementById("appearance-status");
+  try {
+    await saveSetting("ui.crawl_seen", "");
+    setStatus(
+      status,
+      "Açılış bir sonraki ana ekran ziyaretinde tekrar oynatılacak. " +
+        "Hareketler kapalıyken açılış hiç gösterilmez.",
+      "ok"
+    );
+  } catch (err) {
+    setStatus(status, err.message, "error");
+  }
 }
 
 async function saveSettings() {
@@ -110,6 +145,13 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("save").addEventListener("click", saveSettings);
   document.getElementById("test").addEventListener("click", testConnection);
   document.getElementById("fields").addEventListener("click", refreshFields);
+  document
+    .getElementById("ui-starfield")
+    .addEventListener("change", (event) => toggleAppearance("ui.starfield", event.target.checked));
+  document
+    .getElementById("ui-motion")
+    .addEventListener("change", (event) => toggleAppearance("ui.motion", event.target.checked));
+  document.getElementById("replay-crawl").addEventListener("click", replayCrawl);
   document.getElementById("clear-secret").addEventListener("click", async () => {
     const status = document.getElementById("status");
     if (!confirm("Kayıtlı sır silinsin mi?")) return;

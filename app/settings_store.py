@@ -32,6 +32,10 @@ DEFAULTS: dict[str, str] = {
     "net.proxy_https": "",
     "net.ca_file": "",
     "net.verify_ssl": "1",
+    # Gorunum: yildiz alani ve hareketler acik/kapali, acilis gorulmus mu.
+    "ui.starfield": "1",
+    "ui.motion": "1",
+    "ui.crawl_seen": "",
 }
 
 # Arayuzun gonderebilecegi duz ayarlar; buradaki liste beyaz listedir.

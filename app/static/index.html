@@ -8,6 +8,8 @@
   <link rel="stylesheet" href="/static/css/app.css" />
 </head>
 <body>
+  <canvas class="starfield" id="starfield" aria-hidden="true"></canvas>
+
   <div class="layout">
     <div class="brand">HOLOCRON <span class="badge" id="version"></span></div>
 
@@ -16,8 +18,24 @@
         <button class="primary" id="refresh-all" title="Tüm grupları Jira'dan tazeler">Güncelle</button>
         <button class="danger" id="refresh-cancel" hidden>İptal</button>
         <div class="progress" id="progress" hidden>
-          <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+          <!-- Ölüm Yıldızı halkası: ilerleme saat yönünde sarı dolar. -->
+          <svg class="death-star" id="progress-ring-box" width="28" height="28" viewBox="0 0 32 32"
+               role="img" aria-label="Güncelleme ilerlemesi">
+            <defs>
+              <clipPath id="ds-clip"><circle cx="16" cy="16" r="14.2" /></clipPath>
+            </defs>
+            <circle class="ds-body" cx="16" cy="16" r="14.2" />
+            <g clip-path="url(#ds-clip)">
+              <line class="ds-trench" x1="1" y1="18.4" x2="31" y2="18.4" />
+              <circle class="ds-dish" cx="11" cy="10.6" r="3.2" />
+              <circle class="ds-dish-in" cx="11" cy="10.6" r="1.5" />
+            </g>
+            <circle class="ds-edge" cx="16" cy="16" r="14.2" />
+            <circle class="ds-progress" id="progress-ring" cx="16" cy="16" r="14.2"
+                    transform="rotate(-90 16 16)" />
+          </svg>
           <span class="progress-stage" id="progress-stage"></span>
+          <span class="progress-count" id="progress-count"></span>
         </div>
       </div>
       <div class="topbar-actions">
@@ -30,7 +48,7 @@
     <aside class="sidebar">
       <div class="sidebar-head">
         <h2>Hangar</h2>
-        <button id="new-group" title="Yeni grup oluştur">+ Yeni Filo</button>
+        <button class="ghost-accent small" id="new-group" title="Yeni grup oluştur">+ Yeni Filo</button>
       </div>
       <div id="group-list"></div>
     </aside>
@@ -78,8 +96,29 @@
             <tbody id="grid-body"></tbody>
           </table>
           <div class="empty" id="grid-empty" hidden>
-            <p>Bu sektörde kayıt yok.</p>
-            <button id="empty-add">Kayıt ekle</button>
+            <!-- Kendi cizdigimiz X-wing siluet: govde, dort kanat, kanat ucunda sari nokta. -->
+            <!-- Kendi cizdigimiz X-wing siluet: dort kanat X kurar,
+                 uclarinda dort kucuk sari nokta (toplar). -->
+            <svg class="xwing" viewBox="0 0 160 100" role="img" aria-label="Boş sektör">
+              <g class="hull">
+                <path d="M68 44 L22 16" />
+                <path d="M68 56 L22 84" />
+                <path d="M92 44 L138 16" />
+                <path d="M92 56 L138 84" />
+                <path d="M22 16 L12 10" />
+                <path d="M22 84 L12 90" />
+                <path d="M138 16 L148 10" />
+                <path d="M138 84 L148 90" />
+                <path d="M80 26 L92 44 L92 62 L80 74 L68 62 L68 44 Z" />
+                <path d="M72 47 L88 47" />
+              </g>
+              <circle class="tip" cx="12" cy="10" r="3.4" />
+              <circle class="tip" cx="12" cy="90" r="3.4" />
+              <circle class="tip" cx="148" cy="10" r="3.4" />
+              <circle class="tip" cx="148" cy="90" r="3.4" />
+            </svg>
+            <p id="grid-empty-text">Bu sektörde kayıt yok.</p>
+            <button class="primary" id="empty-add">Kayıt ekle</button>
           </div>
         </div>
       </section>
@@ -125,6 +164,34 @@
 
   <div class="toast" id="toast" hidden></div>
 
+  <!-- Açılış: yalnızca ilk çalıştırmada, hareket tercihi açıkken. -->
+  <div class="crawl" id="crawl" hidden>
+    <div class="crawl-stage">
+      <div class="crawl-text">
+        <h1>Bölüm I<br />Dağınık Kayıtlar</h1>
+        <p>
+          Galaksinin uzak bir kolunda, iş kayıtları onlarca ekranın arasında kaybolur;
+          kimse hangi kaydın kimde beklediğini bilmez.
+        </p>
+        <p>
+          Holocron bu kayıtları tek bir masaya toplar, kendi tuttuğun notları yanlarına
+          iliştirir ve her değişimi hatırlar.
+        </p>
+        <p>
+          Her şey senin makinende kalır. Şimdi hangara in, filonu kur ve Güncelle'ye bas...
+        </p>
+      </div>
+    </div>
+    <div class="crawl-skip">
+      <label class="checkbox" id="crawl-remember-box">
+        <input type="checkbox" id="crawl-remember" checked />
+        Bir daha gösterme
+      </label>
+      <button class="small" id="crawl-skip">Geç (Esc)</button>
+    </div>
+  </div>
+
+  <script src="/static/js/starfield.js"></script>
   <script src="/static/js/common.js"></script>
   <script src="/static/js/app.js"></script>
 </body>

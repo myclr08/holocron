@@ -1,5 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="5" fill="#0b0d10"/>
-  <path d="M16 5l9 5.5v11L16 27l-9-5.5v-11L16 5z" fill="none" stroke="#FFE81F" stroke-width="2"/>
-  <circle cx="16" cy="16" r="3" fill="#FFE81F"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Holocron">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2e9bff" stop-opacity=".55"/>
+      <stop offset="100%" stop-color="#2e9bff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7cc4ff"/>
+      <stop offset="100%" stop-color="#2e9bff"/>
+    </linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2278d6"/>
+      <stop offset="100%" stop-color="#124a8c"/>
+    </linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a5fae"/>
+      <stop offset="100%" stop-color="#0c3568"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="6" fill="#050810"/>
+  <circle cx="16" cy="16" r="14" fill="url(#glow)"/>
+  <!-- Izometrik kup: ust, sol ve sag yuz -->
+  <path d="M16 4 27 10.5 16 17 5 10.5z" fill="url(#top)"/>
+  <path d="M5 10.5 16 17v11L5 21.5z" fill="url(#left)"/>
+  <path d="M27 10.5 27 21.5 16 28V17z" fill="url(#right)"/>
+  <path d="M16 4 27 10.5 27 21.5 16 28 5 21.5 5 10.5z" fill="none" stroke="#8fd0ff" stroke-opacity=".5" stroke-width="1"/>
+  <!-- Koseler sari -->
+  <circle cx="16" cy="4" r="1.9" fill="#ffe81f"/>
+  <circle cx="27" cy="10.5" r="1.9" fill="#ffe81f"/>
+  <circle cx="27" cy="21.5" r="1.9" fill="#ffe81f"/>
+  <circle cx="16" cy="28" r="1.9" fill="#ffe81f"/>
+  <circle cx="5" cy="21.5" r="1.9" fill="#ffe81f"/>
+  <circle cx="5" cy="10.5" r="1.9" fill="#ffe81f"/>
 </svg>

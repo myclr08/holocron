@@ -10,38 +10,84 @@ uygulamanın yanındaki `holocron.db` dosyasında kalır, hiçbir yere gönderil
 
 ## Durum
 
-Aşama 4 tamam: gruplar (manuel ve JQL filtresi), kayıt listesi, sütun seçici,
-arama, arka planda çalışan **Güncelle** işi, kendi tanımladığınız **yerel
-alanlar** (alan başına değişim geçmişiyle) ve **Excel'e aktarma** kullanılabilir
-durumda. Tam tema sonraki aşamada gelecek.
+Gruplar (manuel ve JQL filtresi), kayıt listesi, sütun seçici, arama, arka
+planda çalışan **Güncelle** işi, kendi tanımladığınız **yerel alanlar** (alan
+başına değişim geçmişiyle), **Excel'e aktarma** ve tam tema kullanılabilir
+durumda. Taşınabilir Windows/Linux paketleri etiket itildiğinde üretilir.
 
 ## Gereksinimler
 
 - Python 3.11 veya üstü (Windows taşınabilir paketi kendi Python'ını getirir)
 - Jira Server / Data Center (kişisel erişim anahtarı destekleyen sürümler) veya Jira Cloud
 
-## Çalıştırma
+## Kurulum
 
-### Linux / macOS
+Üç yol var; en kolayından en zoruna.
+
+### 1. Hazır paket (önerilen)
+
+[Releases](https://github.com/myclr08/holocron/releases) sayfasından
+işletim sisteminize uygun zip'i indirin:
+
+| Dosya | İçerik |
+| --- | --- |
+| `holocron-windows-x64.zip` | `python-embed/` ile birlikte gelir, Python kurmanız gerekmez |
+| `holocron-linux-x64.zip` | `wheels/` ile gelir, ilk çalıştırmada çevrimdışı kurulum yapar |
+
+Zip'i boş bir klasöre açın, sonra:
+
+- **Windows**: `holocron.bat` dosyasına çift tıklayın. Konsol penceresi açılmaz.
+- **Linux**: `./holocron.sh` çalıştırın. İlk seferde `.venv` yanınızdaki
+  `wheels/` klasöründen kurulur; tekerlekler sizin Python sürümünüze uymazsa
+  betik ağdan indirmeyi dener.
+
+Veritabanı (`holocron.db`) ve şifreleme anahtarı (`holocron.key`) bu klasörde
+oluşur. Klasörü taşırsanız verileriniz de gelir.
+
+### 2. Kaynaktan, Python kuruluysa
 
 ```bash
-./holocron.sh
+git clone https://github.com/myclr08/holocron.git
+cd holocron
+./holocron.sh          # Windows'ta: holocron.bat
 ```
 
-İlk çalıştırmada `.venv` kurulur ve bağımlılıklar yüklenir. Ağa çıkışın kapalı
-olduğu ortamlarda paketleri `wheels/` klasörüne koyun; betik onları görürse
-kurulumu çevrimdışı yapar.
+İlk çalıştırmada `.venv` kurulur ve bağımlılıklar PyPI'dan indirilir. Ağa
+çıkışın kapalı olduğu ortamlarda paketleri `wheels/` klasörüne koyun; betikler
+onları görürse kurulumu çevrimdışı yapar.
 
-### Windows
+### 3. Geliştirici
 
-`holocron.bat` dosyasına çift tıklayın. Taşınabilir pakette `python-embed`
-klasörü hazır gelir, hiçbir kurulum gerekmez.
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pytest -q
+.venv/bin/python -m app --no-browser --port 8765
+```
+
+Taşınabilir paketi elle üretmek için:
+
+```bash
+# Windows paketi (embed dağıtımını önce indirin)
+python tools/build_portable.py --target windows --embed-zip python-embed.zip --wheels wheels
+# Linux paketi
+python tools/build_portable.py --target linux --wheels wheels
+# Ne yapacağını yazsın, dosyaya dokunmasın
+python tools/build_portable.py --target linux --wheels wheels --dry-run
+```
+
+Tekerlekler şöyle toplanır:
+
+```bash
+pip download --only-binary=:all: --python-version 3.13 \
+  --platform win_amd64 --implementation cp -r requirements.txt -d wheels
+```
+
+### Çalıştırma seçenekleri
 
 Uygulama boş bir port bulur (tercihen 8765), varsayılan tarayıcıyı açar ve
 adresi konsola yazar. Sekme kapatılıp beş dakika nabız gelmezse süreç kendini
 kapatır; arayüzdeki **Kapat** düğmesi de aynı işi anında yapar.
-
-Faydalı seçenekler:
 
 ```bash
 ./holocron.sh --port 8765     # sabit port
@@ -179,6 +225,22 @@ Vekil sunucu, özel CA sertifikası ve SSL doğrulamayı kapatma seçenekleri
 Ayarlar ekranındadır. SSL doğrulamayı kapatmak güvenliği düşürür; mümkünse
 kurumun kök sertifikasını CA dosyası olarak verin.
 
+## Görünüm
+
+Arayüz koyu temalıdır ve açık tema seçeneği yoktur. Arka plandaki yıldız alanı
+tek bir canvas'tır; **Ayarlar → Görünüm** altından kapatılabilir. "Hareketler"
+kapatıldığında yıldızlar durur, geçiş animasyonları kaybolur ve açılış
+gösterilmez. İşletim sisteminizde "hareketi azalt" açıksa aynısı kendiliğinden
+olur.
+
+İlk açılışta kısa bir tanıtım akar; tıklayarak ya da `Esc` ile geçilir.
+"Bir daha gösterme" işaretliyken geçerseniz bir daha çıkmaz;
+**Ayarlar → Görünüm → Açılışı tekrar göster** onu geri getirir.
+
+Yazı tipleri (Inter ve Pathway Gothic One) uygulamanın içinde gelir, SIL Open
+Font License ile dağıtılır ve lisans metinleri `app/static/fonts/` altındadır.
+Arayüz hiçbir CDN'e, hiçbir dış adrese istek atmaz.
+
 ## Geliştirme
 
 ```bash
@@ -201,8 +263,10 @@ değiştirilir (`tests/fake_jira.py`).
 | `app/export.py` | Grup → Excel (.xlsx) dosyası |
 | `app/refresh.py` | Arka planda çalışan Güncelle işi |
 | `app/static/` | Vanilla HTML/CSS/JS arayüz, dış bağımlılık yok |
+| `app/static/fonts/` | Gömülü OFL yazı tipleri ve lisans metinleri |
+| `app/static/js/starfield.js` | Arka plandaki yıldız alanı (canvas) |
 | `tests/` | pytest testleri ve sahte Jira sunucusu |
-| `tools/build_portable.py` | Windows taşınabilir paketini üretir |
+| `tools/build_portable.py` | Taşınabilir Windows/Linux paketlerini üretir |
 | `holocron.db` | Yerel veritabanı (depoya girmez) |
 | `holocron.key` | Şifreleme anahtarı (depoya girmez, yedekleyin) |
 

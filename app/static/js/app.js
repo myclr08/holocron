@@ -5,6 +5,13 @@ const KIND_LABEL = { manual: "Manuel", filter: "JQL filtresi" };
 const SABER_COLORS = ["blue", "green", "purple", "red", "yellow", "white"];
 const POLL_MS = 700;
 const CHANGED_MS = 5000;
+const TOAST_MS = 6000;
+// Is bitince halkanin yesil parladigi sure; sonra ozet balonu gelir.
+const DONE_MS = 1500;
+// Acilis animasyonu 9 sn; biraz pay birakilir.
+const CRAWL_MS = 9600;
+// Olum Yildizi halkasinin cevresi (r = 14.2, viewBox 32).
+const RING_LENGTH = 2 * Math.PI * 14.2;
 
 const state = {
   groups: [],
@@ -31,6 +38,9 @@ const state = {
   catalogEmpty: false,
   editing: null,
   popover: null,
+  toastTimer: null,
+  doneTimer: null,
+  crawlTimer: null,
 };
 
 // --- kucuk yardimcilar --------------------------------------------------
@@ -64,17 +74,27 @@ function toast(title, message, kind, items) {
   const box = el("toast");
   clear(box);
   box.className = "toast" + (kind ? " " + kind : "");
+  clearTimeout(state.toastTimer);
+  state.toastTimer = setTimeout(() => {
+    box.hidden = true;
+  }, TOAST_MS);
   box.appendChild(
     h("div", { class: "toast-head" }, [
       h("strong", { text: title }),
-      h("button", { text: "✕", title: "Kapat", onclick: () => (box.hidden = true) }),
+      h("button", { text: "×", title: "Kapat", onclick: () => (box.hidden = true) }),
     ])
   );
   if (message) box.appendChild(h("div", { text: message }));
   if (items && items.length) {
     const list = h("ul", {}, []);
-    items.forEach((item) => list.appendChild(h("li", {}, [item])));
-    box.appendChild(list);
+    const notes = [];
+    items.forEach((item) => {
+      // Alt metin madde isareti almaz; listenin altina duz satir olarak duser.
+      if (item.classList && item.classList.contains("toast-sub")) notes.push(item);
+      else list.appendChild(h("li", {}, [item]));
+    });
+    if (list.childNodes.length) box.appendChild(list);
+    notes.forEach((note) => box.appendChild(note));
   }
   box.hidden = false;
 }
@@ -147,7 +167,7 @@ function renderGroups() {
         h("span", {}, [
           h("button", {
             class: "move",
-            text: "▲",
+            text: "↑",
             title: "Yukarı taşı",
             disabled: index === 0,
             onclick: (event) => {
@@ -157,7 +177,7 @@ function renderGroups() {
           }),
           h("button", {
             class: "move",
-            text: "▼",
+            text: "↓",
             title: "Aşağı taşı",
             disabled: index === state.groups.length - 1,
             onclick: (event) => {
@@ -257,7 +277,7 @@ function renderGrid() {
   clear(head);
   state.columns.forEach((column) => {
     const sorted = state.sort && state.sort.field === column.id;
-    const arrow = sorted ? (state.sort.dir === "asc" ? " ▲" : " ▼") : "";
+    const arrow = sorted ? (state.sort.dir === "asc" ? " ↑" : " ↓") : "";
     head.appendChild(
       h("th", {
         class: sorted ? "sorted" : "",
@@ -275,11 +295,38 @@ function renderGrid() {
 
   el("grid-empty").hidden = state.rows.length > 0;
   el("grid").hidden = state.rows.length === 0;
+  // Filtre grubu bossa suc kayitta degil sorguda; metin onu soyler.
+  el("grid-empty-text").textContent =
+    state.group && state.group.kind === "filter"
+      ? "JQL henüz sonuç getirmedi, Güncelle'yi dene"
+      : "Bu sektörde kayıt yok.";
   // Bos grupta disa aktaracak bir sey yok.
   el("export-xlsx").disabled = state.total === 0;
   el("catalog-warning").hidden = !state.catalogEmpty;
   el("row-count").textContent =
     state.shown === state.total ? `${state.total} kayıt` : `${state.shown} / ${state.total} kayıt`;
+}
+
+/** Jira durum alani mi? Kapsulu yalnizca statusCategory tasiyan hucre alir. */
+function isStatusCell(cell) {
+  const raw = cell.raw;
+  return !!(
+    cell.text &&
+    raw &&
+    typeof raw === "object" &&
+    !Array.isArray(raw) &&
+    raw.statusCategory
+  );
+}
+
+function statusPill(cell) {
+  const category = cell.raw.statusCategory || {};
+  const known = ["new", "indeterminate", "done"].indexOf(category.key) >= 0;
+  // Kategori yoksa ya da tanimadigimiz bir anahtarsa notr kapsul.
+  return h("span", {
+    class: "status-pill" + (known ? " status-" + category.key : ""),
+    text: cell.text,
+  });
 }
 
 function renderRow(row) {
@@ -303,7 +350,10 @@ function renderRow(row) {
       return;
     }
     if (cell.field === "issuekey") {
-      if (row.pinned) td.appendChild(h("span", { class: "pin-mark", text: "📌", title: "İğnelenmiş" }));
+      if (row.pinned) {
+        const mark = h("span", { class: "pin-mark", title: "İğnelenmiş" }, [icon("pin")]);
+        td.appendChild(mark);
+      }
       if (row.url) {
         td.appendChild(
           h("a", {
@@ -317,6 +367,8 @@ function renderRow(row) {
       } else {
         td.appendChild(document.createTextNode(cell.text || row.key));
       }
+    } else if (isStatusCell(cell)) {
+      td.appendChild(statusPill(cell));
     } else {
       td.textContent = cell.text;
     }
@@ -326,18 +378,21 @@ function renderRow(row) {
   const isFilter = state.group && state.group.kind === "filter";
   const actions = h("div", { class: "row-actions" }, [
     isFilter
-      ? h("button", {
-          class: row.pinned ? "on" : "",
-          text: "📌",
-          title: row.pinned ? "İğneyi kaldır" : "İğnele: güncellemede düşmesin",
-          onclick: (event) => {
-            event.stopPropagation();
-            togglePin(row.key);
+      ? h(
+          "button",
+          {
+            class: row.pinned ? "on" : "",
+            title: row.pinned ? "İğneyi kaldır" : "İğnele: güncellemede düşmesin",
+            onclick: (event) => {
+              event.stopPropagation();
+              togglePin(row.key);
+            },
           },
-        })
+          [icon("pin")]
+        )
       : null,
     h("button", {
-      text: "✕",
+      text: "×",
       title: "Gruptan çıkar",
       onclick: (event) => {
         event.stopPropagation();
@@ -416,7 +471,7 @@ function renderDrawerBody() {
   const body = el("drawer-body");
   clear(body);
   if (state.drawerFetchedAt) {
-    body.appendChild(h("p", { class: "hint", text: "Çekilme: " + state.drawerFetchedAt }));
+    body.appendChild(h("p", { class: "hint", text: "Çekilme: " + stamp(state.drawerFetchedAt) }));
   } else {
     body.appendChild(
       h("p", { class: "hint", text: "Bu kayıt henüz Jira'dan çekilmedi." })
@@ -470,18 +525,22 @@ function renderLocalCell(td, row, cell, column) {
 
   const tracked = column.local.track_history || cell.changes > 0;
   if (tracked) {
-    const badge = cell.changes ? String(cell.changes) : "";
-    td.appendChild(
-      h("button", {
+    const button = h(
+      "button",
+      {
         class: "clock" + (cell.changes ? " on" : ""),
-        text: "🕘" + badge,
         title: cell.changes ? `${cell.changes} değişim` : "Henüz değişim yok",
         onclick: (event) => {
           event.stopPropagation();
           openHistory(event.currentTarget, row.key, column.local);
         },
-      })
+      },
+      [icon("clock")]
     );
+    if (cell.changes) {
+      button.appendChild(h("span", { class: "count", text: String(cell.changes) }));
+    }
+    td.appendChild(button);
   }
 
   td.addEventListener("click", (event) => {
@@ -657,7 +716,7 @@ function historyLine(entry) {
     ]),
     h("button", {
       class: "drop",
-      text: "✕",
+      text: "×",
       title: "Bu satırı sil",
       onclick: () => dropHistoryEntry(entry.id),
     }),
@@ -814,13 +873,13 @@ async function localFieldsModal() {
           }),
           h("span", { class: "id", text: `${field.group_count} grup` }),
           h("button", {
-            text: "▲",
+            text: "↑",
             title: "Yukarı",
             disabled: index === 0,
             onclick: () => reorderFields(index, -1),
           }),
           h("button", {
-            text: "▼",
+            text: "↓",
             title: "Aşağı",
             disabled: index === fields.length - 1,
             onclick: () => reorderFields(index, 1),
@@ -1117,7 +1176,7 @@ async function columnsModal() {
             h("span", { class: "id", text: id }),
           ]),
           h("button", {
-            text: "▲",
+            text: "↑",
             title: "Yukarı",
             disabled: index === 0,
             onclick: () => {
@@ -1128,7 +1187,7 @@ async function columnsModal() {
             },
           }),
           h("button", {
-            text: "▼",
+            text: "↓",
             title: "Aşağı",
             disabled: index === chosen.length - 1,
             onclick: () => {
@@ -1139,7 +1198,7 @@ async function columnsModal() {
             },
           }),
           h("button", {
-            text: "✕",
+            text: "×",
             title: "Çıkar",
             onclick: () => {
               chosen = chosen.filter((item) => item !== id);
@@ -1323,7 +1382,19 @@ function exportModal() {
 
 // --- Guncelle -----------------------------------------------------------
 
+/** Halkayi doldurur: 0..1 arasi oran saat yonunde sari yay olur. */
+function setRingProgress(ratio) {
+  const ring = el("progress-ring");
+  if (!ring) return;
+  ring.style.strokeDasharray = RING_LENGTH.toFixed(2);
+  ring.style.strokeDashoffset = (RING_LENGTH * (1 - ratio)).toFixed(2);
+}
+
 async function startRefresh(groupId) {
+  // Onceki isin yesil parlamasi surerken yeni is baslarsa halka sifirlanir.
+  clearTimeout(state.doneTimer);
+  el("progress-ring-box").classList.remove("is-done");
+  setRingProgress(0);
   try {
     const payload = groupId ? { group_id: groupId } : {};
     const data = await api("/api/refresh", { method: "POST", body: JSON.stringify(payload) });
@@ -1356,10 +1427,13 @@ function applyRefreshStatus(status) {
   el("refresh-all").disabled = running;
   el("refresh-group").disabled = running;
   el("progress-stage").textContent = status.stage || "";
-  const ratio = status.total ? Math.min(100, Math.round((status.done / status.total) * 100)) : 0;
-  el("progress-fill").style.width = ratio + "%";
+  const total = status.total || 0;
+  const done = status.done || 0;
+  el("progress-count").textContent = total ? `${done}/${total}` : "";
+  setRingProgress(total ? Math.min(1, done / total) : 0);
 
   if (running) {
+    if (state.lastRefreshState !== "running") Starfield.hyperspace(true);
     state.lastRefreshState = "running";
     return;
   }
@@ -1372,6 +1446,32 @@ function applyRefreshStatus(status) {
 }
 
 function finishRefresh(status) {
+  Starfield.hyperspace(false);
+  const clean = status.state !== "error" && status.state !== "cancelled";
+  if (clean) {
+    // Halka bir buçuk saniye yeşil parlar, sonra özet balonuna geçilir.
+    el("progress").hidden = false;
+    el("progress-ring-box").classList.add("is-done");
+    setRingProgress(1);
+    clearTimeout(state.doneTimer);
+    state.doneTimer = setTimeout(() => {
+      el("progress-ring-box").classList.remove("is-done");
+      el("progress").hidden = true;
+      refreshToast(status);
+    }, DONE_MS);
+  } else {
+    refreshToast(status);
+  }
+
+  state.changed = status.changed || {};
+  clearTimeout(state.changedTimer);
+  state.changedTimer = setTimeout(() => {
+    state.changed = {};
+  }, CHANGED_MS);
+  loadGroups(state.activeId).catch(fail);
+}
+
+function refreshToast(status) {
   if (status.state === "error") {
     const message = (status.error && status.error.message) || "Bilinmeyen hata";
     toast("Güncelleme başarısız", message, "error");
@@ -1404,17 +1504,11 @@ function finishRefresh(status) {
         );
       });
       items.push(line);
+      items.push(h("span", { class: "toast-sub", text: "Bilinen galakside bulunamadı." }));
     }
     const kind = status.errors && status.errors.length ? "" : "ok";
     toast("Güncelleme bitti", parts.join(" · "), kind, items);
   }
-
-  state.changed = status.changed || {};
-  clearTimeout(state.changedTimer);
-  state.changedTimer = setTimeout(() => {
-    state.changed = {};
-  }, CHANGED_MS);
-  loadGroups(state.activeId).catch(fail);
 }
 
 async function cancelRefresh() {
@@ -1423,6 +1517,36 @@ async function cancelRefresh() {
     schedulePoll();
   } catch (err) {
     fail(err);
+  }
+}
+
+// --- acilis (opening crawl) ---------------------------------------------
+
+/** Ilk acilista bir kez gosterilir; hareket kapaliysa hic gosterilmez. */
+function maybeOpenCrawl(settings) {
+  if (reducedMotion()) return;
+  if (settings["ui.motion"] === "0") return;
+  if (settings["ui.crawl_seen"] === "1") return;
+  const box = el("crawl");
+  box.hidden = false;
+  document.documentElement.classList.add("crawl-open");
+  box.addEventListener("click", (event) => {
+    // Onay kutusuna tiklamak acilisi kapatmaz.
+    if (event.target.closest("#crawl-remember-box")) return;
+    closeCrawl();
+  });
+  clearTimeout(state.crawlTimer);
+  state.crawlTimer = setTimeout(closeCrawl, CRAWL_MS);
+}
+
+function closeCrawl() {
+  const box = el("crawl");
+  if (box.hidden) return;
+  clearTimeout(state.crawlTimer);
+  box.hidden = true;
+  document.documentElement.classList.remove("crawl-open");
+  if (el("crawl-remember").checked) {
+    saveSetting("ui.crawl_seen", "1").catch(() => {});
   }
 }
 
@@ -1469,7 +1593,8 @@ function bindEvents() {
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-      if (!el("history-popover").hidden) closeHistory();
+      if (!el("crawl").hidden) closeCrawl();
+      else if (!el("history-popover").hidden) closeHistory();
       else if (!el("modal").hidden) closeModal();
       else if (!el("drawer").hidden) closeDrawer();
       return;
@@ -1496,6 +1621,8 @@ document.addEventListener("DOMContentLoaded", () => {
   api("/api/settings")
     .then((data) => {
       const settings = data.settings || {};
+      applyAppearance(settings);
+      maybeOpenCrawl(settings);
       state.baseUrl = (settings["jira.base_url"] || "").replace(/\/+$/, "");
       const hint = el("connection-hint");
       if (settings["jira.base_url"] && settings.secret_set) {
