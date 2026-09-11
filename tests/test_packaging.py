@@ -61,7 +61,14 @@ def test_full_zip_name_is_unchanged():
 def test_lite_manifest_has_no_embed():
     entries = builder.manifest("windows", builder.VARIANT_LITE)
     assert "python-embed/" not in entries
-    for needed in ("app", "holocron.bat", "holocron.sh", "requirements.txt", "wheels/"):
+    for needed in (
+        "app",
+        "holocron_run.py",
+        "holocron.bat",
+        "holocron.sh",
+        "requirements.txt",
+        "wheels/",
+    ):
         assert needed in entries, needed
     assert "README.md" in entries and "LICENSE" in entries
 
@@ -141,6 +148,7 @@ def test_lite_zip_contents(fake_wheels, tmp_path):
     roots = {name.split("/")[1] for name in names}
     assert roots == {
         "app",
+        "holocron_run.py",
         "holocron.bat",
         "holocron.sh",
         "requirements.txt",

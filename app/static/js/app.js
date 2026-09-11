@@ -9,7 +9,8 @@ const TOAST_MS = 6000;
 // Is bitince halkanin yesil parladigi sure; sonra ozet balonu gelir.
 const DONE_MS = 1500;
 // Acilis animasyonu 9 sn; biraz pay birakilir.
-const CRAWL_MS = 9600;
+// Acilis suresi: 24 sn akis + 1.5 sn bekleme + 0.6 sn sonme (app.css ile ayni).
+const CRAWL_MS = 26100;
 // Olum Yildizi halkasinin cevresi (r = 14.2, viewBox 32).
 const RING_LENGTH = 2 * Math.PI * 14.2;
 

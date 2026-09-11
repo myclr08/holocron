@@ -7,6 +7,9 @@ holocron.db-journal
 holocron.db-wal
 holocron.db-shm
 holocron.key
+holocron.log
+holocron.log.*
+holocron.port
 
 # Tasinabilir paket artifaktlari
 python-embed/

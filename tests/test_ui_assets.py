@@ -249,6 +249,49 @@ def test_opening_crawl_is_on_the_page_and_can_be_skipped(api_client):
     assert "reducedMotion()" in script
 
 
+def test_opening_crawl_is_slow_enough_to_read(api_client):
+    """Ilk surumde 9 sn'de akiyordu, kimse okuyamadi: sabit hizda 24 sn."""
+    css = api_client.get("/static/css/app.css").text
+    assert "animation: crawl-up 24s linear 1 forwards;" in css
+    # Metin gorunur bolgenin altindan girer, opaklik akis boyunca sabit kalir.
+    block = css.split("@keyframes crawl-up", 1)[1].split("}", 2)[0]
+    assert "top: 100%" in block
+    assert "opacity" not in block
+
+
+def test_opening_crawl_waits_then_fades_out(api_client):
+    css = api_client.get("/static/css/app.css").text
+    assert "animation: crawl-fade .6s ease 25.5s 1 forwards;" in css
+    assert "@keyframes crawl-fade" in css
+
+
+def test_crawl_timer_matches_the_css_timeline(api_client):
+    """JS sayaci ile CSS zaman cizelgesi ayrilirsa panel erken/gec kapanir."""
+    script = api_client.get("/static/js/app.js").text
+    line = next(row for row in script.splitlines() if row.startswith("const CRAWL_MS"))
+    assert line == "const CRAWL_MS = 26100;"  # 24 sn akis + 1.5 sn bekleme + 0.6 sn sonme
+
+
+def test_crawl_can_still_be_skipped(api_client):
+    """Uzayan sure "Gec" ve Esc'yi zorunlu kiliyor, ikisi de yerinde kalmali."""
+    page = api_client.get("/").text
+    assert 'id="crawl-skip"' in page
+    assert "Geç (Esc)" in page
+    script = api_client.get("/static/js/app.js").text
+    assert 'if (!el("crawl").hidden) closeCrawl();' in script
+
+
+def test_reduced_motion_still_skips_the_crawl_entirely(api_client):
+    """Sure uzadi diye hareket kapaliyken acilis gosterilmemeli."""
+    script = api_client.get("/static/js/app.js").text
+    body = script.split("function maybeOpenCrawl", 1)[1].split("function closeCrawl", 1)[0]
+    assert "if (reducedMotion()) return;" in body
+    assert 'if (settings["ui.motion"] === "0") return;' in body
+    css = api_client.get("/static/css/app.css").text
+    assert "html.no-motion *" in css
+    assert "@media (prefers-reduced-motion: reduce)" in css
+
+
 def test_appearance_section_is_on_the_settings_page(api_client):
     page = api_client.get("/settings").text
     for marker in ("Görünüm", 'id="ui-starfield"', 'id="ui-motion"', "Açılışı tekrar göster"):

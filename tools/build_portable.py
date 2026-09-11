@@ -42,6 +42,7 @@ VARIANTS = (VARIANT_FULL, VARIANT_LITE)
 # paketi tasidiginda hangi isletim sisteminde acacagi bilinmez.
 PACKAGE_CONTENT = (
     "app",
+    "holocron_run.py",
     "holocron.bat",
     "holocron.sh",
     "requirements.txt",

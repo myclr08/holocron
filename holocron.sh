@@ -3,11 +3,13 @@
 set -euo pipefail
 
 # readlink -f her yerde yok; betigin bulundugu klasore tasinmanin tasinabilir yolu.
-cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+cd "$HERE"
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR=".venv"
 VENV_PY="$VENV_DIR/bin/python"
+ENTRY="$HERE/holocron_run.py"
 
 if [ ! -x "$VENV_PY" ]; then
   echo "[holocron] Sanal ortam kuruluyor..."
@@ -28,4 +30,7 @@ if [ ! -x "$VENV_PY" ]; then
   fi
 fi
 
-exec "$VENV_PY" -m app "$@"
+# Modul kipi calisma dizinine bagimli; giris dosyasi tam yoluyla cagriliyor ki
+# betik nereden calistirilirsa calistirilsin paket bulunabilsin.
+export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
+exec "$VENV_PY" "$ENTRY" "$@"

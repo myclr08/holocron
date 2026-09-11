@@ -115,3 +115,90 @@ def test_shell_launcher_also_falls_back_to_the_network():
     text = SH.read_text(encoding="utf-8")
     assert "--no-index --find-links wheels" in text
     assert "Cevrimdisi kurulum olmadi" in text
+
+
+def test_console_flag_exists_for_troubleshooting():
+    args = parse_args(["--console"])
+    assert args.console is True
+    assert parse_args([]).console is False
+
+
+# --- Windows baslaticisi: sessiz cokmeyi gorunur kilan dallar -----------
+
+
+def test_windows_launcher_checks_health_before_giving_up():
+    """start sonrasi nabiz yoklanmazsa hata yine sessiz kalirdi."""
+    text = BAT.read_text(encoding="utf-8")
+    assert "/api/health" in text
+    assert "curl.exe" in text
+    # Windows 10 1803 oncesinde curl yok; PowerShell yedegi sart.
+    assert "Invoke-WebRequest" in text
+    assert ":health_check" in text
+    assert ":start_failed" in text
+
+
+def test_windows_launcher_waits_with_ping_not_timeout():
+    """timeout /t yonlendirilmis girdide hata veriyor, ping her yerde calisir."""
+    text = BAT.read_text(encoding="utf-8")
+    assert "ping -n 7 127.0.0.1 >nul" in text
+    assert "timeout /t" not in text
+
+
+def test_windows_launcher_prints_the_log_and_pauses_on_failure():
+    text = BAT.read_text(encoding="utf-8")
+    failure = text.split(":start_failed", 1)[1]
+    assert "Uygulama acilmadi" in failure
+    assert "Get-Content -Tail 40" in failure
+    assert "type " in failure  # PowerShell yoksa yedek
+    assert "pause" in failure
+    assert "holocron.log" in text
+
+
+def test_windows_launcher_has_a_console_mode():
+    text = BAT.read_text(encoding="utf-8")
+    assert '"%~1"=="--console"' in text
+    assert ":launch_console" in text
+    console = text.split(":launch_console", 1)[1].split(":health_check", 1)[0]
+    # Konsol kipinde pythonw degil python.exe, ve pencere kapanmasin.
+    assert "%RUN_PY%" in console and "%RUN_PYW%" not in console
+    assert "pause" in console
+
+
+def test_windows_launcher_reads_the_port_the_app_chose():
+    text = BAT.read_text(encoding="utf-8")
+    assert "holocron.port" in text
+    assert "set /p PORT=" in text
+    assert 'set "PORT=8765"' in text  # port dosyasi yoksa varsayilan
+
+
+def test_windows_launcher_does_not_trust_the_working_directory():
+    """'No module named app': cwd sys.path'te olmayabilir (PYTHONSAFEPATH)."""
+    text = BAT.read_text(encoding="utf-8")
+    assert 'set "PYTHONPATH=%~dp0"' in text
+    assert "holocron_run.py" in text
+    assert '/d "%~dp0"' in text
+    assert "-m app" not in text
+
+
+def test_shell_launcher_is_also_working_directory_independent():
+    text = SH.read_text(encoding="utf-8")
+    assert "holocron_run.py" in text
+    assert 'export PYTHONPATH="$HERE' in text
+    assert "-m app" not in text
+
+
+def test_run_entrypoint_puts_its_own_folder_on_the_path():
+    source = (ROOT / "holocron_run.py").read_text(encoding="utf-8")
+    assert "__file__" in source
+    assert "sys.path.insert(0, str(ROOT))" in source
+    assert "from app.__main__ import main" in source
+
+
+def test_readme_documents_the_troubleshooting_path():
+    """Sessiz cokmenin cevabi belgede olmazsa kimse --console'u bulamaz."""
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "## Sorun giderme" in text
+    assert "holocron.bat --console" in text
+    assert "holocron.log" in text
+    assert "holocron.port" in text
+    assert "No module named app" in text

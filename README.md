@@ -42,9 +42,11 @@ varsa lite paketi seçin.
 
 Zip'i boş bir klasöre açın, sonra:
 
-- **Windows**: `holocron.bat` dosyasına çift tıklayın. Konsol penceresi açılmaz.
-  Lite pakette ilk çalıştırmada `.venv` kurulur ve bağımlılıklar yanınızdaki
-  `wheels/` klasöründen çevrimdışı yüklenir; birkaç saniye sürer.
+- **Windows**: `holocron.bat` dosyasına çift tıklayın. Lite pakette ilk
+  çalıştırmada `.venv` kurulur ve bağımlılıklar yanınızdaki `wheels/`
+  klasöründen çevrimdışı yüklenir; birkaç saniye sürer. Uygulama açıldıktan
+  sonra konsol penceresi kendiliğinden kapanır — **kapanmazsa** bir sorun var
+  demektir, pencerede son log satırları yazar (bkz. [Sorun giderme](#sorun-giderme)).
 - **Linux**: `./holocron.sh` çalıştırın. İlk seferde `.venv` yanınızdaki
   `wheels/` klasöründen kurulur; tekerlekler sizin Python sürümünüze uymazsa
   betik ağdan indirmeyi dener.
@@ -105,7 +107,63 @@ kapatır; arayüzdeki **Kapat** düğmesi de aynı işi anında yapar.
 ```bash
 ./holocron.sh --port 8765     # sabit port
 ./holocron.sh --no-browser    # tarayıcıyı açma
+./holocron.sh --console       # ayrıntılı log, hata ekranda kalır
 ```
+
+## Sorun giderme
+
+### Konsol açılıp hemen kapanıyor, tarayıcı gelmiyor
+
+Windows'ta uygulama `pythonw.exe` ile açılır: konsol penceresi yoktur, bu
+yüzden bir hata çıkarsa görünmez. İki aracınız var.
+
+**1. Konsol kipi.** Komut isteminde paketin klasöründe:
+
+```bat
+holocron.bat --console
+```
+
+Uygulama ön planda çalışır, hata mesajı pencerede kalır, kapanırken `pause`
+bekler. Çift tıklamayla da çalışır: `holocron.bat` kısayolu oluşturup hedefin
+sonuna ` --console` ekleyin.
+
+**2. Log dosyası.** Her çalıştırma `holocron.log` dosyasına yazar; dosya
+`holocron.db` ile aynı klasördedir (paketi açtığınız yer). İçinde ilk satırda
+sürüm, Python sürümü, işletim sistemi, port ve veri klasörü bulunur;
+yakalanmamış her hata tam yığın izi ile düşer. Dosya 1 MB'ı geçince döner,
+üç yedek tutulur.
+
+Normal başlatmada (çift tıklama) betik altı saniye bekleyip `/api/health`
+adresini yoklar. Cevap gelmezse pencere kapanmaz: "Uygulama acilmadi" der ve
+logun son kırk satırını basar.
+
+Paketi yazma izni olmayan bir klasöre (`Program Files`, doğrudan zip
+görüntüleyicisinin içi) açtıysanız veri ve log `%LOCALAPPDATA%\Holocron`
+altına düşer. En temizi paketi `Belgeler` gibi yazılabilir bir klasöre taşımak.
+
+### "No module named app"
+
+`python -m app` yalnızca doğru klasörden çalıştırılırsa iş görür ve
+`PYTHONSAFEPATH`/`-P` açıkken hiç çalışmaz. Bunun yerine giriş dosyasını tam
+yoluyla çağırın; nereden çalıştırdığınız önemli olmaz:
+
+```bat
+.venv\Scripts\python.exe "C:\yol\holocron\holocron_run.py" --console
+```
+
+Başlatıcılar (`holocron.bat`, `holocron.sh`) zaten bunu yapar.
+
+### Port 8765 dolu
+
+Uygulama kendisi boş bir port seçer ve seçtiğini `holocron.port` dosyasına
+yazar; başlatıcı sağlık yoklamasında o dosyayı okur. Sabit port isterseniz
+`--port` verin. Çalışan adres log dosyasının ilk satırında da yazılıdır.
+
+### Tarayıcı açılmıyor ama uygulama çalışıyor
+
+Log dosyasındaki adresi (`http://127.0.0.1:<port>/`) elle açın. Windows'ta
+önce `os.startfile`, olmazsa `webbrowser` denenir; ikisi de olmazsa uygulama
+yine de ayakta kalır, sadece log'a uyarı düşer.
 
 ## Kullanım
 
@@ -269,7 +327,9 @@ değiştirilir (`tests/fake_jira.py`).
 
 | Yol | İçerik |
 | --- | --- |
+| `holocron_run.py` | Çalışma dizininden bağımsız giriş dosyası (başlatıcılar bunu çağırır) |
 | `app/` | Uygulama kodu (API, veritabanı, Jira istemcisi, arayüz) |
+| `app/runlog.py` | Dosya logu, konsolsuz (pythonw) dayanıklılık, hata yakalama |
 | `app/repository.py` | Gruplar, üyelikler, kayıtlar ve alan kataloğu (tüm SQL) |
 | `app/fields.py` | Alan değerlerini metne çeviren saf formatlayıcı |
 | `app/grid.py` | Grid satırlarının kurulması (ekran ve Excel ortak kaynağı) |
@@ -282,6 +342,8 @@ değiştirilir (`tests/fake_jira.py`).
 | `tools/build_portable.py` | Taşınabilir Windows/Linux paketlerini üretir |
 | `holocron.db` | Yerel veritabanı (depoya girmez) |
 | `holocron.key` | Şifreleme anahtarı (depoya girmez, yedekleyin) |
+| `holocron.log` | Çalışma günlüğü (1 MB × 3, depoya girmez) |
+| `holocron.port` | Çalışırken seçilen port; kapanışta silinir |
 
 `holocron.key` dosyasını kaybederseniz kayıtlı token çözülemez; Ayarlar
 ekranından yeniden girmeniz gerekir.

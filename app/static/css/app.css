@@ -1093,6 +1093,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   justify-content: flex-end;
   overflow: hidden;
   cursor: pointer;
+  /* Akis bittikten sonra 1.5 sn duraklar, sonra 600 ms'de soner.
+     24 + 1.5 = 25.5 sn gecikme; JS sayaci 26.1 sn'de paneli kaldirir. */
+  animation: crawl-fade .6s ease 25.5s 1 forwards;
+}
+
+@keyframes crawl-fade {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 .crawl[hidden] { display: none !important; }
@@ -1122,7 +1130,9 @@ html.crawl-open .layout { visibility: hidden; }
   line-height: 1.5;
   text-align: justify;
   text-shadow: 0 0 22px rgba(255, 232, 31, .35);
-  animation: crawl-up 9s linear 1 forwards;
+  /* Sabit hiz (linear): metin hic hizlanmadan, yavaslamadan akar.
+     9 sn'de okunamiyordu; 24 sn uc kisa paragraf icin rahat bir tempo. */
+  animation: crawl-up 24s linear 1 forwards;
 }
 
 .crawl-text h1 {
@@ -1135,9 +1145,10 @@ html.crawl-open .layout { visibility: hidden; }
 .crawl-text p { margin: 0 0 .7em; }
 
 @keyframes crawl-up {
-  from { top: 100%; opacity: 1; }
-  92% { opacity: 1; }
-  to { top: -220%; opacity: 0; }
+  /* top: 100% = gorunur bolgenin hemen alti; metin asagidan girer.
+     Sonmeyi panel yapiyor, burada opaklik sabit: akis dumduz kalsin. */
+  from { top: 100%; }
+  to { top: -180%; }
 }
 
 .crawl-skip {
