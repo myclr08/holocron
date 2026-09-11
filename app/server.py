@@ -12,6 +12,7 @@ from . import __version__, paths
 from .api import router
 from .context import AppContext
 from .jira_client import JiraError
+from .repository import RepositoryError
 
 
 def create_app(context: AppContext) -> FastAPI:
@@ -21,6 +22,13 @@ def create_app(context: AppContext) -> FastAPI:
     @app.exception_handler(JiraError)
     async def _jira_error(_: Request, exc: JiraError) -> JSONResponse:
         return JSONResponse(status_code=400, content={"error": exc.to_dict()})
+
+    @app.exception_handler(RepositoryError)
+    async def _repository_error(_: Request, exc: RepositoryError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status,
+            content={"error": {"code": exc.code, "message": exc.message}},
+        )
 
     # Starlette'in kendi 404'u da buradan gecsin diye taban sinifa baglanir.
     @app.exception_handler(StarletteHTTPException)

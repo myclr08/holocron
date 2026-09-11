@@ -10,8 +10,9 @@ uygulamanın yanındaki `holocron.db` dosyasında kalır, hiçbir yere gönderil
 
 ## Durum
 
-Aşama 1: iskelet, veritabanı, Jira istemcisi ve ayarlar ekranı hazır.
-Gruplar, sütun seçimi, Excel'e aktarım ve tema sonraki aşamalarda gelecek.
+Aşama 2 tamam: gruplar (manuel ve JQL filtresi), kayıt listesi, sütun seçici,
+arama ve arka planda çalışan **Güncelle** işi kullanılabilir durumda. Yerel
+alanlar, Excel'e aktarım ve tam tema sonraki aşamalarda gelecek.
 
 ## Gereksinimler
 
@@ -45,6 +46,46 @@ Faydalı seçenekler:
 ./holocron.sh --port 8765     # sabit port
 ./holocron.sh --no-browser    # tarayıcıyı açma
 ```
+
+## Kullanım
+
+### Gruplar (Hangar)
+
+Sol kenardaki **+ Yeni Filo** ile grup açılır. İki tür vardır:
+
+- **Manuel**: kayıt anahtarlarını elle eklersiniz. **Kayıt ekle** kutusuna
+  satır, virgül veya boşlukla ayrılmış anahtarları yapıştırın; Jira
+  bağlantılarının içinden de anahtar okunur (`.../browse/DEMO-1`). Sonuç özeti
+  kaç tanesinin eklendiğini, kaçının zaten var olduğunu ve anlaşılmayanları söyler.
+- **JQL filtresi**: üyelik her Güncelle'de sorgudan gelir. Filtre grubuna elle
+  eklenen kayıt *iğnelenir*: JQL sonucundan düşse bile grupta kalır. İğneyi
+  satırdaki 📌 düğmesiyle açıp kapatabilirsiniz.
+
+Grupların sırası yukarı/aşağı oklarıyla değişir, renk şeridi ışın kılıcı
+paletinden seçilir (`blue`, `green`, `purple`, `red`, `yellow`, `white`).
+
+### Sütunlar ve arama
+
+**Sütunlar** düğmesi seçili sütunları sıralı gösterir; alan arama kutusundan
+yenisini ekler, ✕ ile çıkarır, ok tuşlarıyla sırasını değiştirirsiniz.
+**Genel varsayılan yap** seçimi sütunu olmayan bütün gruplara uygular.
+Başlığa tıklamak sıralar, arama kutusu (`/` kısayolu) seçili bütün sütunlarda
+büyük/küçük harf ayırmadan süzer; Türkçe `İ/ı` ayrımı gözetilmez.
+
+Satıra tıklamak sağdan detay çekmecesini açar (`Esc` kapatır); anahtar sütunu
+kaydı Jira'da yeni sekmede açar.
+
+### Güncelle
+
+**Güncelle** bütün grupları, **Güncelle (bu grup)** yalnız açık olanı tazeler.
+Aynı anda tek iş çalışır; üst çubukta ilerleme ve aşama görünür, **İptal**
+paketler arasında durur ve o ana kadar çekilenler kalır. İş bitince kaç kayıt
+çekildiği, kaçının yeni/değişmiş olduğu ve bulunamayan anahtarlar özetlenir;
+değişen hücreler beş saniye vurgulanır. Bir filtre grubunun JQL'i hatalıysa
+yalnız o grup hata listesine düşer, iş sürer.
+
+Kayıtlar `*navigable` (Jira Cloud'da `*all`) ile çekilir: sonradan hangi sütunu
+seçerseniz seçin yeniden çekmeye gerek kalmaz.
 
 ## Jira bağlantısı
 
@@ -91,6 +132,9 @@ değiştirilir (`tests/fake_jira.py`).
 | Yol | İçerik |
 | --- | --- |
 | `app/` | Uygulama kodu (API, veritabanı, Jira istemcisi, arayüz) |
+| `app/repository.py` | Gruplar, üyelikler, kayıtlar ve alan kataloğu (tüm SQL) |
+| `app/fields.py` | Alan değerlerini metne çeviren saf formatlayıcı |
+| `app/refresh.py` | Arka planda çalışan Güncelle işi |
 | `app/static/` | Vanilla HTML/CSS/JS arayüz, dış bağımlılık yok |
 | `tests/` | pytest testleri ve sahte Jira sunucusu |
 | `tools/build_portable.py` | Windows taşınabilir paketini üretir |

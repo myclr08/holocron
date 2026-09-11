@@ -7,6 +7,7 @@ oturumunu enjekte edebilir.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -16,6 +17,7 @@ import requests
 from . import db
 from .jira_client import BaseJiraClient, create_client
 from .lifecycle import Heartbeat
+from .refresh import RefreshManager
 from .secrets import SecretBox
 from .settings_store import JiraConfig, SettingsStore
 
@@ -29,6 +31,10 @@ class AppContext:
     heartbeat: Heartbeat
     client_factory: ClientFactory
     shutdown_hook: Callable[[], None] = field(default=lambda: None)
+    refresh: RefreshManager = field(default_factory=RefreshManager)
+    # Arka plan Guncelle isi ile istek is parcaciklari ayni baglantiyi
+    # kullanir; yazma islemleri bu kilitle sirayla girer.
+    db_lock: threading.RLock = field(default_factory=threading.RLock)
 
     def close(self) -> None:
         try:

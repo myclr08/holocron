@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from app import paths
@@ -103,13 +105,19 @@ def test_unreadable_secret_is_treated_as_missing(conn, box):
     assert other.has_secret("jira.secret") is True
 
 
-def test_key_file_is_created_with_owner_only_permissions(tmp_path):
+def test_key_file_is_created_and_reused(tmp_path):
     key_file = tmp_path / "holocron.key"
     key = ensure_key(key_file)
     assert key_file.exists()
-    assert key_file.stat().st_mode & 0o777 == 0o600
     # Ikinci cagri ayni anahtari dondurur, yenisini uretmez.
     assert ensure_key(key_file) == key
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows'ta POSIX mod bitleri anlamsiz (0o666 doner).")
+def test_key_file_is_created_with_owner_only_permissions(tmp_path):
+    key_file = tmp_path / "holocron.key"
+    ensure_key(key_file)
+    assert key_file.stat().st_mode & 0o777 == 0o600
 
 
 def test_key_lives_in_home_dir(isolated_home):

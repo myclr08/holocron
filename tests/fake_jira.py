@@ -7,6 +7,7 @@ testler gercek aga hic cikmaz.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -104,8 +105,39 @@ def _build(fake: FakeResponse, url: str) -> requests.Response:
     return response
 
 
-def issue(key: str, summary: str = "Ornek kayit") -> dict[str, Any]:
-    return {"id": str(abs(hash(key)) % 100000), "key": key, "fields": {"summary": summary}}
+def issue(key: str, summary: str = "Ornek kayit", **extra: Any) -> dict[str, Any]:
+    """Sahte kayit. Ek alanlar dogrudan fields altina konur."""
+    fields: dict[str, Any] = {"summary": summary}
+    fields.update(extra)
+    return {"id": _stable_id(key), "key": key, "fields": fields}
+
+
+def _stable_id(key: str) -> str:
+    # hash() surecten surece degisir; testlerin kararli olmasi icin sabit uretim.
+    total = 0
+    for char in key:
+        total = (total * 31 + ord(char)) % 100000
+    return str(total)
+
+
+def key_search(known: dict[str, dict[str, Any]]) -> Handler:
+    """key in (...) sorgularini karsilar; bilinmeyen anahtar iceren paket 400 doner."""
+
+    def handler(call: RecordedCall) -> FakeResponse:
+        jql = (call.json_body or {}).get("jql", "")
+        wanted = re.findall(r'"([^"]+)"', jql)
+        missing = [key for key in wanted if key.upper() not in known]
+        if missing:
+            return FakeResponse(
+                status=400,
+                body={"errorMessages": ["Bilinmeyen kayit anahtari: " + ", ".join(missing)]},
+            )
+        found = [known[key.upper()] for key in wanted]
+        return FakeResponse(
+            body={"startAt": 0, "maxResults": len(found), "total": len(found), "issues": found}
+        )
+
+    return handler
 
 
 def paged_v2(issues: list[dict[str, Any]], page_size: int = 100) -> Handler:
