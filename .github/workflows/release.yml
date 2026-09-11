@@ -60,7 +60,7 @@ jobs:
           $url = "https://www.python.org/ftp/python/$env:EMBED_VERSION/python-$env:EMBED_VERSION-embed-amd64.zip"
           Invoke-WebRequest -Uri $url -OutFile python-embed.zip
 
-      - name: Paketi uret
+      - name: Tam paketi uret (python-embed ile)
         run: >
           python tools/build_portable.py
           --target windows
@@ -69,10 +69,23 @@ jobs:
           --version ${{ github.ref_name }}
           --python-version ${{ env.PYTHON_VERSION }}
 
+      # Hedef makinede Python zaten kuruluysa embed olu yuk: binlerce kucuk
+      # dosya zipten yavas cikiyor. Lite paket yalnizca app/ + wheels/ tasir.
+      - name: Lite paketi uret (python-embed yok)
+        run: >
+          python tools/build_portable.py
+          --target windows
+          --no-embed
+          --wheels wheels
+          --version ${{ github.ref_name }}
+          --python-version ${{ env.PYTHON_VERSION }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: holocron-windows
-          path: dist/holocron-windows-x64.zip
+          path: |
+            dist/holocron-windows-x64.zip
+            dist/holocron-windows-x64-lite.zip
 
   publish:
     needs: [linux, windows]

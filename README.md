@@ -17,7 +17,7 @@ durumda. Taşınabilir Windows/Linux paketleri etiket itildiğinde üretilir.
 
 ## Gereksinimler
 
-- Python 3.11 veya üstü (Windows taşınabilir paketi kendi Python'ını getirir)
+- Python 3.11 veya üstü (Windows tam paketi kendi Python'ını getirir, lite paket getirmez)
 - Jira Server / Data Center (kişisel erişim anahtarı destekleyen sürümler) veya Jira Cloud
 
 ## Kurulum
@@ -29,14 +29,22 @@ durumda. Taşınabilir Windows/Linux paketleri etiket itildiğinde üretilir.
 [Releases](https://github.com/myclr08/holocron/releases) sayfasından
 işletim sisteminize uygun zip'i indirin:
 
-| Dosya | İçerik |
-| --- | --- |
-| `holocron-windows-x64.zip` | `python-embed/` ile birlikte gelir, Python kurmanız gerekmez |
-| `holocron-linux-x64.zip` | `wheels/` ile gelir, ilk çalıştırmada çevrimdışı kurulum yapar |
+| Durumunuz | Dosya | Boyut | İçerik |
+| --- | --- | --- | --- |
+| **Windows, Python kuruluysa** (önerilen) | `holocron-windows-x64-lite.zip` | ~7 MB, ~60 dosya | `app/` + `wheels/`; mevcut Python'unuzla `.venv` kurar |
+| **Windows, Python yoksa** | `holocron-windows-x64.zip` | ~29 MB, ~1600 dosya | `python-embed/` ile gelir, hiçbir kurulum gerekmez |
+| **Linux** | `holocron-linux-x64.zip` | ~8 MB, ~60 dosya | `wheels/` ile gelir, ilk çalıştırmada çevrimdışı kurulum yapar |
+
+Fark asıl dosya sayısında: `python-embed` standart kitaplığı bin altı yüz ayrı
+dosya olarak taşır, bu yüzden tam paketin zip'ten çıkması dakikalar sürebilir.
+Lite paket altmış dosyadır, saniyeler içinde açılır. Makinenizde Python 3.11+
+varsa lite paketi seçin.
 
 Zip'i boş bir klasöre açın, sonra:
 
 - **Windows**: `holocron.bat` dosyasına çift tıklayın. Konsol penceresi açılmaz.
+  Lite pakette ilk çalıştırmada `.venv` kurulur ve bağımlılıklar yanınızdaki
+  `wheels/` klasöründen çevrimdışı yüklenir; birkaç saniye sürer.
 - **Linux**: `./holocron.sh` çalıştırın. İlk seferde `.venv` yanınızdaki
   `wheels/` klasöründen kurulur; tekerlekler sizin Python sürümünüze uymazsa
   betik ağdan indirmeyi dener.
@@ -68,13 +76,18 @@ python3 -m venv .venv
 Taşınabilir paketi elle üretmek için:
 
 ```bash
-# Windows paketi (embed dağıtımını önce indirin)
+# Windows tam paketi (embed dağıtımını önce indirin)
 python tools/build_portable.py --target windows --embed-zip python-embed.zip --wheels wheels
-# Linux paketi
+# Windows lite paketi (python-embed yok, ~7 MB)
+python tools/build_portable.py --target windows --no-embed --wheels wheels
+# Linux paketi (zaten embed'siz)
 python tools/build_portable.py --target linux --wheels wheels
 # Ne yapacağını yazsın, dosyaya dokunmasın
 python tools/build_portable.py --target linux --wheels wheels --dry-run
 ```
+
+`--no-embed` ile `--variant lite` aynı şeydir. Her iki varyantta da `tests/`,
+`tools/`, `.github/` ve `__pycache__` pakete girmez.
 
 Tekerlekler şöyle toplanır:
 

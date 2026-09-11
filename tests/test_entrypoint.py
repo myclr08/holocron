@@ -99,6 +99,18 @@ def test_windows_launcher_falls_back_to_py_then_python():
     assert "goto no_python" in text
 
 
+def test_windows_launcher_explains_a_missing_venv_module():
+    """Lite pakette Python kullanicinin: venv yoksa ne yapacagini bilmeli."""
+    text = BAT.read_text(encoding="utf-8")
+    assert "-m venv --help" in text
+    assert "goto no_venv_module" in text
+    assert ":no_venv_module" in text
+    message = text.split(":no_venv_module", 1)[1].split("exit /b 1", 1)[0]
+    assert "venv" in message and "Cozum" in message
+    # Mesajlar ASCII kalmali: konsol kod sayfasi Turkce harfleri bozuyor.
+    text.encode("ascii")
+
+
 def test_shell_launcher_also_falls_back_to_the_network():
     text = SH.read_text(encoding="utf-8")
     assert "--no-index --find-links wheels" in text

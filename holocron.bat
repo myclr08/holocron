@@ -25,6 +25,10 @@ py -3 --version >nul 2>&1 && set "BOOT_PY=py -3"
 if not defined BOOT_PY python --version >nul 2>&1 && set "BOOT_PY=python"
 if not defined BOOT_PY goto no_python
 
+rem Bazi Python kurulumlari "venv" modulu olmadan gelir, once onu dogrula.
+%BOOT_PY% -m venv --help >nul 2>&1
+if errorlevel 1 goto no_venv_module
+
 echo [holocron] Sanal ortam kuruluyor...
 %BOOT_PY% -m venv .venv
 if not exist "%VENV_PY%" goto venv_failed
@@ -61,11 +65,24 @@ goto :eof
 
 :no_python
 echo [holocron] Python bulunamadi. Python 3.11+ kurun ya da tasinabilir paketi kullanin.
+echo [holocron] Python kurmak istemiyorsaniz python-embed iceren tam paketi indirin:
+echo [holocron] holocron-windows-x64.zip
+pause
+exit /b 1
+
+:no_venv_module
+echo [holocron] Python bulundu ama "venv" modulu yok, sanal ortam kurulamiyor.
+echo [holocron] Cozum 1: python.org uzerinden Python 3.13 kurun, kurulumda
+echo [holocron]           pip ve standart kitaplik secenekleri isaretli kalsin.
+echo [holocron] Cozum 2: Python gerektirmeyen tam paketi indirin:
+echo [holocron]           holocron-windows-x64.zip, python-embed ile gelir.
 pause
 exit /b 1
 
 :venv_failed
-echo [holocron] Sanal ortam kurulamadi.
+echo [holocron] Sanal ortam kurulamadi, .venv klasoru olusmadi.
+echo [holocron] Bu klasorde yazma izniniz var mi? Ag surucusu ya da OneDrive
+echo [holocron] altindaysaniz paketi yerel bir diske tasiyip yeniden deneyin.
 pause
 exit /b 1
 
