@@ -81,6 +81,7 @@ async function loadSettings() {
   const settings = data.settings || {};
   fillForm(settings);
   fillMail(settings);
+  fillTeams(settings);
   fillAppearance(settings);
 }
 
@@ -421,10 +422,10 @@ async function scanMail() {
 
 // --- Teams --------------------------------------------------------------
 //
-// Sablonlar, kayitli kanallar ve adres defteri burada yonetilir. Mesajin
-// kendisi kayit cekmecesinden gonderilir; buradaki ayarlar oraya beslenir.
+// Sablonlar ve adres defteri burada yonetilir; rehber Outlook'tan cekilir.
+// Mesajin kendisi kayit cekmecesinden acilir, buradaki ayarlar oraya besler.
 
-const teamsState = { templates: [], channels: [], contacts: [], placeholders: [] };
+const teamsState = { templates: [], contacts: [], placeholders: [], supported: true };
 
 function teamsRow(children) {
   const row = document.createElement("div");
@@ -450,19 +451,59 @@ function smallButton(label, kind, onClick) {
 }
 
 async function loadTeamsLists() {
-  const [templates, channels, contacts] = await Promise.all([
+  const [templates, contacts] = await Promise.all([
     api("/api/templates"),
-    api("/api/teams/channels"),
     api("/api/contacts?limit=50"),
   ]);
   teamsState.templates = templates.templates || [];
   teamsState.placeholders = templates.placeholders || [];
-  teamsState.channels = channels.channels || [];
   teamsState.contacts = contacts.contacts || [];
   document.getElementById("teams-topic").value = templates.topic_format || "{key}";
   renderTemplates();
-  renderChannels();
   renderContacts();
+}
+
+/** Rehber dugmesi ve son yenileme zamani; Windows disinda dugme pasif. */
+function fillTeams(settings) {
+  teamsState.supported = settings.mail_supported !== false;
+  document.getElementById("teams-gal").disabled = !teamsState.supported;
+  document.getElementById("teams-gal-unsupported").hidden = teamsState.supported;
+  const when = settings["teams.gal_synced_at"];
+  document.getElementById("teams-gal-when").textContent = when
+    ? "Son yenileme: " + galStamp(when)
+    : "Rehber hiç çekilmedi.";
+}
+
+/** ISO damgayi yerel saatle "GG.AA.YYYY SS:dd" yazar. */
+function galStamp(iso) {
+  const moment = new Date(iso);
+  if (isNaN(moment.getTime())) return String(iso);
+  const pad = (value) => String(value).padStart(2, "0");
+  return (
+    `${pad(moment.getDate())}.${pad(moment.getMonth() + 1)}.${moment.getFullYear()} ` +
+    `${pad(moment.getHours())}:${pad(moment.getMinutes())}`
+  );
+}
+
+/** Kurum rehberini ceker; sonuc sayilari durum satirinda yazar. */
+async function importGal() {
+  const status = teamsStatus();
+  setStatus(status, "Kurum rehberi okunuyor, büyük rehberde birkaç saniye sürebilir...", null);
+  try {
+    const data = await api("/api/contacts/import-gal", { method: "POST" });
+    const result = data.result || {};
+    await loadTeamsLists();
+    await loadSettings();
+    setStatus(
+      status,
+      `${result.imported || 0} kişi eklendi · ${result.updated || 0} kişi güncellendi · ` +
+        `${result.lists || 0} dağıtım listesi · ${result.total || 0} giriş · ` +
+        `${((result.ms || 0) / 1000).toFixed(1)} sn`,
+      "ok"
+    );
+  } catch (err) {
+    setStatus(status, "Kurum rehberi alınamadı: " + err.message, "error");
+  }
 }
 
 function renderTemplates() {
@@ -513,49 +554,43 @@ function renderTemplates() {
     ". Bilinmeyen yer tutucu boş kalır.";
 }
 
-function renderChannels() {
-  const box = document.getElementById("teams-channels");
-  box.textContent = "";
-  if (!teamsState.channels.length) {
-    box.appendChild(emptyNote("Kayıtlı kanal yok."));
-    return;
-  }
-  teamsState.channels.forEach((channel) => {
-    const nameBox = textBox(channel.name, "Kanal adı");
-    const urlBox = textBox(channel.url, "https://teams.microsoft.com/l/channel/...");
-    box.appendChild(
-      teamsRow([
-        nameBox,
-        urlBox,
-        smallButton("Kaydet", "", () =>
-          saveChannel(channel.id, { name: nameBox.value, url: urlBox.value })
-        ),
-        smallButton("Sil", "danger", () => dropChannel(channel)),
-      ])
-    );
-  });
-}
-
 function renderContacts() {
   const box = document.getElementById("teams-contacts");
   box.textContent = "";
   if (!teamsState.contacts.length) {
-    box.appendChild(emptyNote("Adres defteri boş: kayıtlara kişi ekledikçe dolar."));
+    box.appendChild(
+      emptyNote(
+        "Adres defteri boş: kayıtlara kişi ekledikçe dolar, " +
+          "ya da kurum rehberini Outlook'tan çekin."
+      )
+    );
     return;
   }
   teamsState.contacts.forEach((contact) => {
     const nameBox = textBox(contact.name, "Ad");
     const emailBox = textBox(contact.email, "ornek@example.com");
-    box.appendChild(
-      teamsRow([
-        nameBox,
-        emailBox,
-        smallButton("Kaydet", "", () =>
-          saveContact(contact.email, { name: nameBox.value, email: emailBox.value })
-        ),
-        smallButton("Sil", "danger", () => dropContact(contact)),
-      ])
+    const row = teamsRow([nameBox, emailBox]);
+    if (contact.kind === "list") {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = "liste";
+      badge.title = "Dağıtım listesi";
+      row.appendChild(badge);
+    }
+    if (contact.source === "gal") {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = "rehber";
+      badge.title = "Outlook kurum rehberinden geldi";
+      row.appendChild(badge);
+    }
+    row.appendChild(
+      smallButton("Kaydet", "", () =>
+        saveContact(contact.email, { name: nameBox.value, email: emailBox.value })
+      )
     );
+    row.appendChild(smallButton("Sil", "danger", () => dropContact(contact)));
+    box.appendChild(row);
   });
 }
 
@@ -625,36 +660,6 @@ function addTemplate() {
   }, "Şablon eklendi.");
 }
 
-function saveChannel(id, payload) {
-  return teamsAction(
-    () => api(`/api/teams/channels/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
-    "Kanal kaydedildi."
-  );
-}
-
-function dropChannel(channel) {
-  if (!confirm(`"${channel.name}" kanalı silinsin mi?`)) return;
-  teamsAction(async () => {
-    const data = await api(`/api/teams/channels/${channel.id}`, { method: "DELETE" });
-    if (data.issues) {
-      setStatus(teamsStatus(), `${data.issues} kaydın hedefi kişilere döndü.`, "ok");
-    }
-  }, "Kanal silindi.");
-}
-
-function addChannel() {
-  const name = document.getElementById("channel-name");
-  const url = document.getElementById("channel-url");
-  teamsAction(async () => {
-    await api("/api/teams/channels", {
-      method: "POST",
-      body: JSON.stringify({ name: name.value, url: url.value }),
-    });
-    name.value = "";
-    url.value = "";
-  }, "Kanal eklendi.");
-}
-
 function saveContact(email, payload) {
   return teamsAction(
     () =>
@@ -707,7 +712,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("mail-test").addEventListener("click", testMail);
   document.getElementById("mail-scan").addEventListener("click", scanMail);
   document.getElementById("template-add").addEventListener("click", addTemplate);
-  document.getElementById("channel-add").addEventListener("click", addChannel);
+  document.getElementById("teams-gal").addEventListener("click", importGal);
   document.getElementById("teams-save").addEventListener("click", saveTeams);
   document.getElementById("clear-secret").addEventListener("click", async () => {
     const status = document.getElementById("status");

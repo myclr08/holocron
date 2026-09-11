@@ -11,9 +11,23 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
-from .source import MailError, MailFolder, MailMessage, clean_body
+from .source import (
+    CONTACT_LIST,
+    GalEntry,
+    MailError,
+    MailFolder,
+    MailMessage,
+    clean_body,
+)
 
 INBOX = "Gelen Kutusu"
+
+# Sahte kurum rehberi; testler kendi listesini verebilir.
+DEFAULT_GAL: tuple[GalEntry, ...] = (
+    GalEntry(email="ayse.yilmaz@example.com", name="Ayşe Yılmaz"),
+    GalEntry(email="mehmet.demir@example.com", name="Mehmet Demir"),
+    GalEntry(email="tedarik@example.com", name="Tedarik Ekibi", kind=CONTACT_LIST),
+)
 
 
 def message(
@@ -56,6 +70,7 @@ class FakeMailSource:
         failing_folders: Iterable[str] = (),
         account: str = "ornek@example.com",
         version: str = "16.0 (sahte)",
+        address_book: Iterable[GalEntry] | None = None,
     ) -> None:
         self.items: list[MailMessage] = list(messages)
         self.failing_folders = {str(name).casefold() for name in failing_folders}
@@ -63,6 +78,8 @@ class FakeMailSource:
         self.version = version
         self.opened: list[tuple[str, str]] = []
         self.probes = 0
+        self.gal: list[GalEntry] = list(DEFAULT_GAL if address_book is None else address_book)
+        self.gal_reads = 0
 
     # --- sozlesme -----------------------------------------------------
 
@@ -99,6 +116,10 @@ class FakeMailSource:
         if not entry_id:
             raise MailError("mail_not_found", "Bu görevin e-posta bağı yok.")
         return True
+
+    def address_book(self) -> list[GalEntry]:
+        self.gal_reads += 1
+        return list(self.gal)
 
     # --- kolaylik -----------------------------------------------------
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from fastapi import APIRouter, Body, Request
@@ -567,6 +568,7 @@ def open_task_mail(request: Request, task_id: int) -> dict[str, Any]:
 # Graph API yok, IT izni yok: mesaj `https://teams.microsoft.com/l/chat/...`
 # baglantisiyla Teams'in yazma kutusuna konur, **Gonder'e kullanici basar**.
 # Bu yuzden `sent_messages` satirlari "gonderildi" degil "acildi" demektir.
+# Hedef yalnizca kisilerdir; kanala yazma yolu kaldirildi.
 
 
 @router.get("/contacts")
@@ -575,6 +577,27 @@ def search_contacts(request: Request, q: str = "", limit: int = 20) -> dict[str,
     context = get_context(request)
     capped = max(1, min(int(limit or repository.CONTACT_SEARCH_LIMIT), 50))
     return {"contacts": repository.list_contacts(context.connection(), q, capped)}
+
+
+@router.post("/contacts/import-gal")
+def import_address_book(request: Request) -> dict[str, Any]:
+    """Outlook kurum rehberini (Genel Adres Listesi) adres defterine ceker.
+
+    Yalnizca Windows'ta is gorur: kaynak COM'a baglanamiyorsa uc
+    `feature_unavailable` doner. Elle girilen kisiler korunur; ayni adres
+    rehberde de geciyorsa adi ve turu tazelenir.
+    """
+    context = get_context(request)
+    source = mail_source(context)
+    started = time.monotonic()
+    entries = source.address_book()
+    with context.db_lock:
+        result = repository.import_contacts(context.connection(), entries)
+    result["ms"] = int((time.monotonic() - started) * 1000)
+    stamp = repository.now_iso()
+    context.settings.set("teams.gal_synced_at", stamp)
+    result["synced_at"] = stamp
+    return {"result": result}
 
 
 @router.put("/contacts/{email}")
@@ -614,66 +637,6 @@ def write_issue_contacts(
     with context.db_lock:
         contacts = repository.set_issue_contacts(context.connection(), key, entries)
     return {"contacts": contacts}
-
-
-@router.get("/teams/channels")
-def list_channels(request: Request) -> dict[str, Any]:
-    context = get_context(request)
-    return {"channels": repository.list_teams_channels(context.connection())}
-
-
-@router.post("/teams/channels")
-def create_channel(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
-    context = get_context(request)
-    with context.db_lock:
-        channel = repository.create_teams_channel(
-            context.connection(), payload.get("name"), payload.get("url")
-        )
-    return {"channel": channel}
-
-
-@router.put("/teams/channels/{channel_id}")
-def write_channel(
-    request: Request, channel_id: int, payload: dict[str, Any] = Body(default_factory=dict)
-):
-    context = get_context(request)
-    with context.db_lock:
-        channel = repository.update_teams_channel(context.connection(), channel_id, payload)
-    return {"channel": channel}
-
-
-@router.delete("/teams/channels/{channel_id}")
-def drop_channel(request: Request, channel_id: int) -> dict[str, Any]:
-    context = get_context(request)
-    with context.db_lock:
-        return repository.delete_teams_channel(context.connection(), channel_id)
-
-
-@router.get("/issues/{key}/channel")
-def read_issue_channel(request: Request, key: str) -> dict[str, Any]:
-    context = get_context(request)
-    return {"channel": repository.get_issue_channel(context.connection(), key)}
-
-
-@router.put("/issues/{key}/channel")
-def write_issue_channel(
-    request: Request, key: str, payload: dict[str, Any] = Body(default_factory=dict)
-):
-    context = get_context(request)
-    channel_id = payload.get("channel_id")
-    if channel_id is None:
-        return error_response("invalid_channel", "channel_id zorunlu.")
-    with context.db_lock:
-        channel = repository.set_issue_channel(context.connection(), key, channel_id)
-    return {"channel": channel}
-
-
-@router.delete("/issues/{key}/channel")
-def drop_issue_channel(request: Request, key: str) -> dict[str, Any]:
-    context = get_context(request)
-    with context.db_lock:
-        repository.clear_issue_channel(context.connection(), key)
-    return {"ok": True}
 
 
 @router.get("/templates")
@@ -748,26 +711,6 @@ def build_teams_link(
     if isinstance(body, JSONResponse):
         return body
     message = _render_issue_message(context, conn, clean_key, body)
-
-    if payload.get("channel"):
-        channel = repository.get_issue_channel(conn, clean_key)
-        if channel is None:
-            return error_response(
-                "channel_missing", "Bu kayıt için kayıtlı bir kanal seçilmemiş."
-            )
-        opened = teams.build_channel_open(channel["url"], message)
-        with context.db_lock:
-            repository.record_sent_message(
-                conn, clean_key, teams.TARGET_CHANNEL, channel["name"], message
-            )
-        return {
-            "kind": teams.TARGET_CHANNEL,
-            "url": opened["url"],
-            "message": message,
-            "clipboard": opened["clipboard"],
-            "truncated": False,
-            "target": channel["name"],
-        }
 
     contacts = repository.list_issue_contacts(conn, clean_key)
     if not contacts:

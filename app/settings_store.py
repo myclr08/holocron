@@ -63,6 +63,8 @@ DEFAULTS: dict[str, str] = {
     "mail.scan_on_refresh": "1",
     # Teams: grup sohbetinin konu adi bicimi (sablon yer tutuculari gecerli).
     "teams.topic_format": "{key}",
+    # Kurum rehberi en son ne zaman cekildi (bos = hic).
+    "teams.gal_synced_at": "",
 }
 
 # "1"/"0" olarak saklanan anahtarlar: arayuz bazen gercek boolean gonderir.

@@ -15,6 +15,10 @@ from datetime import datetime, timezone
 from fnmatch import fnmatch
 from typing import Any, Iterable, Protocol, runtime_checkable
 
+# Kurum rehberi (Genel Adres Listesi) girisinin turu; tanim `app/teams.py`
+# icinde, adres defterinin yanindadir.
+from ..teams import CONTACT_KINDS, CONTACT_LIST, CONTACT_PERSON  # noqa: F401
+
 # Yalnizca bunlarla baslayan ogeler gorev uretir.
 MAIL_CLASS_PREFIX = "IPM.Note"
 
@@ -118,6 +122,19 @@ class MailFolder:
         }
 
 
+@dataclass
+class GalEntry:
+    """Kurum rehberinden tek bir giris.
+
+    `kind` dagitim listelerini kisilerden ayirir: ikisine de yazilabilir ama
+    bir listeye yazmak bambaska bir sey, arayuz rozetle soyler.
+    """
+
+    email: str
+    name: str = ""
+    kind: str = CONTACT_PERSON
+
+
 @runtime_checkable
 class MailSource(Protocol):
     """Posta kaynagi sozlesmesi."""
@@ -133,6 +150,9 @@ class MailSource(Protocol):
 
     def open_message(self, entry_id: str, store_id: str = "") -> bool:
         """Mesaji Outlook'ta acar."""
+
+    def address_book(self) -> list[GalEntry]:
+        """Kurum rehberi (Genel Adres Listesi) girisleri."""
 
 
 # --- saf yardimcilar -----------------------------------------------------

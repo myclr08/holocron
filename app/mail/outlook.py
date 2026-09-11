@@ -31,6 +31,9 @@ from typing import Any, Iterator
 
 from .source import (
     BODY_LIMIT,
+    CONTACT_LIST,
+    CONTACT_PERSON,
+    GalEntry,
     MailError,
     MailFolder,
     MailMessage,
@@ -46,6 +49,12 @@ PR_SENDER_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x5D01001F"
 PR_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x39FE001F"
 
 OL_FOLDER_INBOX = 6
+
+# `AddressEntry.AddressEntryUserType`: 1 = Exchange dagitim listesi.
+OL_EXCHANGE_DISTRIBUTION_LIST = 1
+
+# Kurum rehberi on binlerce giris tasiyabilir; kacak bir dongude asili kalmayalim.
+GAL_LIMIT = 100000
 
 RECIPIENT_TO = 1
 RECIPIENT_CC = 2
@@ -96,6 +105,103 @@ def exchange_smtp(entry: Any) -> str:
             if address:
                 return address
     return ""
+
+
+def distribution_list_smtp(entry: Any) -> str:
+    """Dagitim listesinin SMTP adresi (`GetExchangeDistributionList`)."""
+    getter = getattr(entry, "GetExchangeDistributionList", None)
+    if not callable(getter):
+        return ""
+    try:
+        group = getter()
+    except Exception:
+        return ""
+    if group is None:
+        return ""
+    return clean_address(getattr(group, "PrimarySmtpAddress", ""))
+
+
+def address_entry_kind(entry: Any) -> str:
+    """Giris kisi mi dagitim listesi mi?"""
+    value = getattr(entry, "AddressEntryUserType", None)
+    try:
+        return CONTACT_LIST if int(value) == OL_EXCHANGE_DISTRIBUTION_LIST else CONTACT_PERSON
+    except (TypeError, ValueError):
+        return CONTACT_PERSON
+
+
+def address_entry_smtp(entry: Any) -> str:
+    """Rehber girisinin SMTP adresi; X500 gelirse uc kademeli cozumleme.
+
+    Once `GetExchangeUser()` / `GetExchangeDistributionList()`, sonra
+    PR_SMTP_ADDRESS, en sonda ham `Address` (X500 ise atilir).
+    """
+    address = exchange_smtp(entry)
+    if address:
+        return address
+    address = distribution_list_smtp(entry)
+    if address:
+        return address
+    address = clean_address(property_value(entry, PR_SMTP_ADDRESS))
+    if address:
+        return address
+    raw = clean_address(getattr(entry, "Address", ""))
+    return "" if raw.startswith("/o=") else raw
+
+
+def gal_entry(entry: Any) -> GalEntry | None:
+    """`AddressEntry` -> rehber girisi; adresi cozulemeyen giris atlanir.
+
+    Rehberde odalar, ekipmanlar ve X500'den oteye gecmeyen eski kayitlar da
+    var; hepsini denemek yerine adresi olmayan giris sessizce dusurulur.
+    """
+    if entry is None:
+        return None
+    try:
+        email = address_entry_smtp(entry)
+    except Exception:
+        return None
+    if "@" not in email:
+        return None
+    try:
+        name = str(getattr(entry, "Name", "") or "").strip()
+    except Exception:
+        name = ""
+    return GalEntry(email=email, name=name, kind=address_entry_kind(entry))
+
+
+def walk_address_entries(entries: Any, limit: int = GAL_LIMIT) -> Iterator[Any]:
+    """`AddressEntries` uzerinde TEK GECIS: `GetFirst()` / `GetNext()`.
+
+    Buyuk GAL'de (20-50 bin giris) `Count` + `Item(i)` dolasimi her adimda
+    koleksiyonu yeniden konumlandirir ve dakikalara cikar; imlec yurutmek tek
+    gecistir. Koleksiyon bu cifti sunmuyorsa duz dongu ile devam edilir.
+    """
+    if entries is None:
+        return
+    first = getattr(entries, "GetFirst", None)
+    following = getattr(entries, "GetNext", None)
+    if callable(first) and callable(following):
+        try:
+            item = first()
+        except Exception:
+            return
+        seen = 0
+        while item is not None and seen < limit:
+            yield item
+            seen += 1
+            try:
+                item = following()
+            except Exception:
+                return
+        return
+    try:
+        collection = list(entries)
+    except Exception:
+        return
+    for item in collection[:limit]:
+        if item is not None:
+            yield item
 
 
 def sender_address(item: Any) -> str:
@@ -361,7 +467,38 @@ class OutlookSource:
             item.Display()
             return True
 
+    def address_book(self) -> list[GalEntry]:
+        with self._namespace() as namespace:
+            return self._address_book(namespace)
+
     # --- ic yardimcilar -----------------------------------------------
+
+    def _address_book(self, namespace: Any) -> list[GalEntry]:
+        """Genel Adres Listesi; ayni adres iki kez gecerse ilki kalir."""
+        getter = getattr(namespace, "GetGlobalAddressList", None)
+        if not callable(getter):
+            raise MailError(
+                "gal_unavailable",
+                "Outlook'ta kurum rehberi (Genel Adres Listesi) bulunamadı.",
+            )
+        try:
+            gal = getter()
+            entries = gal.AddressEntries
+        except Exception as exc:
+            raise MailError(
+                "gal_unavailable",
+                "Kurum rehberi okunamadı; Exchange hesabı bağlı mı?",
+            ) from exc
+
+        seen: set[str] = set()
+        result: list[GalEntry] = []
+        for item in walk_address_entries(entries):
+            built = gal_entry(item)
+            if built is None or built.email in seen:
+                continue
+            seen.add(built.email)
+            result.append(built)
+        return result
 
     def _folders(self, namespace: Any) -> list[MailFolder]:
         tree: list[MailFolder] = []

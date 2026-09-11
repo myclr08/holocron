@@ -226,10 +226,13 @@ def _migration_0006_teams(conn: sqlite3.Connection) -> None:
     """Asama 8: kayittan Teams'e mesaj (derin baglanti, Graph API yok).
 
     `contacts` adres defteridir: kayda kisi eklenince buraya da duser, bir
-    sonraki kayitta otomatik tamamlamada cikar. `issue_channel` bir kayda
-    kayitli kanal secildiyse onu tutar; doluysa mesaj kisiler yerine oraya
-    gider. `sent_messages` yalnizca "acildi" kaydidir: Gonder'e kullanici
-    basar, uygulama gonderildigini DOGRULAYAMAZ.
+    sonraki kayitta otomatik tamamlamada cikar. `sent_messages` yalnizca
+    "acildi" kaydidir: Gonder'e kullanici basar, uygulama gonderildigini
+    DOGRULAYAMAZ.
+
+    NOT: buradaki `teams_channels` / `issue_channel` tablolari 0007'de
+    DUSURULUR (kanala yazma kaldirildi). Bu goc gecmis kaydidir, oldugu gibi
+    birakilir; yeni kurulumda iki tablo yaratilip hemen ardindan silinir.
     """
     conn.executescript(
         """
@@ -304,6 +307,26 @@ def _migration_0006_teams(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migration_0007_address_book(conn: sqlite3.Connection) -> None:
+    """Adres defterine kaynak/tur, kanal hedefine veda.
+
+    `source` elle girilen kisiyi kurum rehberinden geleni ayirir ("gal"
+    tazelenirken elle yazilanlar silinmez), `kind` dagitim listelerini
+    isaretler. Kanala mesaj gonderme kaldirildi (Teams kanal baglantilari
+    mesaj on doldurmayi kabul etmiyordu, iki ayri akis tasimaya degmedi):
+    0006 gecmise dokunulmadan birakilir, tablolar burada duser.
+    """
+    _add_column(conn, "contacts", "source", "TEXT NOT NULL DEFAULT 'manual'")
+    _add_column(conn, "contacts", "kind", "TEXT NOT NULL DEFAULT 'person'")
+    _add_column(conn, "contacts", "updated_at", "TEXT")
+    conn.executescript(
+        """
+        DROP TABLE IF EXISTS issue_channel;
+        DROP TABLE IF EXISTS teams_channels;
+        """
+    )
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
@@ -312,6 +335,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (4, "mail intake", _migration_0004_mail),
     (5, "mail address lists", _migration_0005_mail_address_lists),
     (6, "teams messages", _migration_0006_teams),
+    (7, "address book source", _migration_0007_address_book),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

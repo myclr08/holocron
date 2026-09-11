@@ -370,6 +370,8 @@ Nasıl çalışır:
 - **Kurulum gerekmez.** Graph API, uygulama kaydı, IT izni yok. Kullanılan tek
   şey derin bağlantıdır: `https://teams.microsoft.com/l/chat/0/0?users=...&message=...`
   Tarayıcı bunu kurulu Teams uygulamasına devreder, Teams yoksa web arayüzü açılır.
+  Hedef yalnızca **kişilerdir**: kanala yazma denendi ve kaldırıldı, çünkü Teams
+  kanal bağlantıları mesaj ön doldurmayı kabul etmiyor.
 - **Kişiler.** Detay çekmecesindeki **Teams** bölümünde kişi eklersiniz (e-posta ya
   da adres defterinden ad). Tek kişi varsa doğrudan sohbet, birden fazlaysa **grup
   sohbeti** açılır; grup sohbetinin adı **Ayarlar → Teams → Konu adı biçimi** ile
@@ -379,10 +381,18 @@ Nasıl çalışır:
   Türkçe `İ/ı` ayrımı gözetilmez, önce baştan eşleşenler gelir. Defter
   **Ayarlar → Teams** altında listelenir: ad ve adres düzenlenir, silinen kişi
   bütün kayıtlardan da çıkar.
-- **Kanal.** Var olan bir kanala ya da grup sohbetine yazmak isterseniz Teams'te
-  ⋯ menüsünden **Bağlantı kopyala** deyip Holocron'a kaydedin, sonra kayıt için
-  o kanalı seçin. Teams kanal bağlantıları mesaj ön doldurmayı kabul etmiyor:
-  metin **panoya kopyalanır**, kanal açılır, siz yapıştırırsınız.
+- **Kurum rehberi (yalnız Windows).** **Ayarlar → Teams → Rehberi Outlook'tan
+  yenile**, Outlook'un Genel Adres Listesi'ni (GAL) tek geçişte okuyup adres
+  defterine yazar: parola sorulmaz, açık Outlook oturumu kullanılır. Kaç kişi
+  eklendiği, kaçının güncellendiği, kaç dağıtım listesi geldiği ve süre durum
+  satırında yazar; son yenileme zamanı düğmenin yanında durur.
+  - **Elle girdiğiniz kişiler korunur:** aynı adres rehberde de geçiyorsa
+    yalnızca adı tazelenir, kaynağı "manual" kalır.
+  - **Dağıtım listeleri** (`ekip@...`) ayrı işaretlenir ve hem defterde hem
+    çekmecedeki çipte küçük **liste** rozetiyle görünür — bir listeye yazmak
+    bir kişiye yazmakla aynı şey değildir.
+  - Adresi çözülemeyen girişler (toplantı odaları, X500'de kalmış eski kayıtlar)
+    sessizce atlanır. Windows dışında düğme pasiftir, uç `feature_unavailable` döner.
 - **Şablonlar.** İki şablonla gelir — *Son durum* ve *Güncelleme rica*. Yenisini
   **Ayarlar → Teams** altında yazarsınız. Yer tutucular:
 
@@ -397,13 +407,15 @@ Nasıl çalışır:
   `{musteri}` diye görünmez. Şablon seçince metin kutusu çözülmüş haliyle dolar
   ve göndermeden önce elle düzenlenebilir.
 - **Uzun mesaj.** Adres uzunluğu 2.000 karakteri aşarsa mesaj kırpılır ve tamamı
-  panoya kopyalanır; balon bunu söyler.
+  panoya kopyalanır; balon bunu söyler. Panoya kopyalama yalnızca bu durumda
+  devreye girer.
 - **Sütun.** Sütun seçicide **Teams kişileri** sanal sütunu vardır: kayda bağlı
   adları virgülle gösterir, Excel'e de aynı şekilde girer.
 - **Kanban.** Bir görev Jira kaydına bağlıysa kartta da aynı düğme durur.
 
-Kayıtta kişi de kanal da yoksa düğme mesaj açmaz, çekmeceyi açıp önce kişi
-eklemenizi ister.
+Kayıtta kişi yoksa düğme mesaj açmaz; çekmeceyi açıp önce kişi eklemenizi ister.
+Adres defteri de boşsa kutunun altında "Rehber boş — Ayarlar → Teams → Rehberi
+Outlook'tan yenile" ipucu çıkar.
 
 ### E-posta (yalnız Windows)
 

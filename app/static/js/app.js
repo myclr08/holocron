@@ -887,26 +887,21 @@ function renderDrawerLocal(body) {
 // --- Teams (derin baglanti) ---------------------------------------------
 //
 // Mesaj Teams'in yazma kutusuna KONUR, Gonder'e kullanici basar: uygulama
-// gonderimi ne yapar ne de dogrulayabilir. Kanal kipinde on doldurma yoktur
-// (Teams kanal baglantilari mesaj parametresi kabul etmiyor): metin panoya
-// kopyalanir, kanal acilir, kullanici yapistirir.
+// gonderimi ne yapar ne de dogrulayabilir. Hedef yalnizca kisilerdir; tek
+// kisi dogrudan sohbet, birden fazlasi grup sohbeti acar.
 
-const TEAMS_PEOPLE = "people";
-const TEAMS_CHANNEL = "channel";
 const CONTACT_SUGGEST_MS = 200;
 
 function emptyTeams(key) {
   return {
     key: key || null,
     contacts: [],
-    channel: null,
-    channels: [],
     templates: [],
     messages: [],
     book: [],
+    bookEmpty: false,
     templateId: null,
     body: "",
-    target: TEAMS_PEOPLE,
     ready: false,
   };
 }
@@ -915,10 +910,8 @@ function emptyTeams(key) {
 async function loadTeams(key) {
   const path = `/api/issues/${encodeURIComponent(key)}`;
   const quiet = (promise, fallback) => promise.catch(() => fallback);
-  const [contacts, channel, channels, templates, messages, preview] = await Promise.all([
+  const [contacts, templates, messages, preview] = await Promise.all([
     quiet(api(`${path}/contacts`), { contacts: [] }),
-    quiet(api(`${path}/channel`), { channel: null }),
-    quiet(api("/api/teams/channels"), { channels: [] }),
     quiet(api("/api/templates"), { templates: [] }),
     quiet(api(`${path}/messages`), { messages: [] }),
     quiet(api(`${path}/message-preview`, { method: "POST", body: "{}" }), { message: "" }),
@@ -928,15 +921,12 @@ async function loadTeams(key) {
   state.teams = {
     key: key,
     contacts: contacts.contacts || [],
-    channel: channel.channel || null,
-    channels: channels.channels || [],
     templates: list,
     messages: messages.messages || [],
     book: [],
+    bookEmpty: false,
     templateId: chosen ? chosen.id : null,
     body: preview.message || "",
-    // Kayda kanal secilmisse varsayilan hedef odur.
-    target: channel.channel ? TEAMS_CHANNEL : TEAMS_PEOPLE,
     ready: true,
   };
 }
@@ -948,7 +938,6 @@ function renderDrawerTeams(parent) {
   const section = h("section", { class: "drawer-teams" }, [h("h3", { text: "Teams" })]);
   section.appendChild(teamsChips(data));
   section.appendChild(teamsAddBox(data));
-  section.appendChild(teamsTargetBox(data));
   section.appendChild(teamsMessageBox(data));
   section.appendChild(
     h("p", {
@@ -967,16 +956,22 @@ function teamsChips(data) {
     return chips;
   }
   data.contacts.forEach((contact) => {
-    chips.appendChild(
-      h("span", { class: "teams-chip", title: contact.email }, [
-        h("span", { class: "chip-name", text: contact.name || contact.email }),
-        h("button", {
-          text: "×",
-          title: "Kişiyi kaldır",
-          onclick: () => writeTeamsContacts(data.contacts.filter((item) => item.email !== contact.email)),
-        }),
-      ])
+    const chip = h("span", { class: "teams-chip", title: contact.email }, [
+      h("span", { class: "chip-name", text: contact.name || contact.email }),
+    ]);
+    // Dagitim listesine yazmak kisiye yazmakla ayni sey degil; rozet uyarir.
+    if (contact.kind === "list") {
+      chip.appendChild(h("span", { class: "chip-kind", text: "liste" }));
+    }
+    chip.appendChild(
+      h("button", {
+        text: "×",
+        title: "Kişiyi kaldır",
+        onclick: () =>
+          writeTeamsContacts(data.contacts.filter((item) => item.email !== contact.email)),
+      })
     );
+    chips.appendChild(chip);
   });
   return chips;
 }
@@ -1007,17 +1002,29 @@ function teamsAddBox(data) {
     try {
       const found = await api(`/api/contacts?q=${encodeURIComponent(typed)}`);
       data.book = found.contacts || [];
+      if (!typed) data.bookEmpty = data.book.length === 0;
     } catch (err) {
       data.book = [];
     }
     clear(book);
     data.book.forEach((item) =>
-      book.appendChild(h("option", { value: item.email, label: item.name || item.email }))
+      book.appendChild(
+        h("option", {
+          value: item.email,
+          label: (item.name || item.email) + (item.kind === "list" ? " (liste)" : ""),
+        })
+      )
     );
     // Defterde olmayan yeni bir adres: ad sorulur, zorunlu degildir.
     nameBox.hidden = !typed || !!known(typed);
-    note.textContent =
-      !typed || known(typed) ? "" : "Bu kişi adres defterinde yok; ad yazarsanız deftere de düşer.";
+    if (!typed && data.bookEmpty) {
+      note.textContent = "Rehber boş — Ayarlar → Teams → Rehberi Outlook'tan yenile.";
+    } else {
+      note.textContent =
+        !typed || known(typed)
+          ? ""
+          : "Bu kişi adres defterinde yok; ad yazarsanız deftere de düşer.";
+    }
   };
   emailInput.addEventListener("input", () => {
     clearTimeout(timer);
@@ -1059,48 +1066,6 @@ function teamsAddBox(data) {
   ]);
 }
 
-function teamsTargetBox(data) {
-  const picked = (value) => {
-    data.target = value;
-    renderDrawerBody();
-  };
-  const people = h("label", { class: "checkbox" }, [
-    h("input", {
-      type: "radio",
-      name: "teams-target",
-      checked: data.target === TEAMS_PEOPLE,
-      onchange: () => picked(TEAMS_PEOPLE),
-    }),
-    h("span", { text: "Kişilere" }),
-  ]);
-  const channel = h("label", { class: "checkbox" }, [
-    h("input", {
-      type: "radio",
-      name: "teams-target",
-      checked: data.target === TEAMS_CHANNEL,
-      onchange: () => picked(TEAMS_CHANNEL),
-    }),
-    h("span", { text: "Kanala" }),
-  ]);
-
-  const select = h("select", {
-    onchange: (event) => setIssueChannel(event.target.value),
-  });
-  select.appendChild(h("option", { value: "", text: "— kanal seçilmedi —" }));
-  (data.channels || []).forEach((item) =>
-    select.appendChild(h("option", { value: String(item.id), text: item.name }))
-  );
-  select.value = data.channel ? String(data.channel.id) : "";
-
-  return h("div", { class: "teams-target" }, [
-    h("div", { class: "choice-group" }, [people, channel]),
-    h("div", { class: "teams-channel-row" }, [
-      select,
-      h("button", { class: "small", text: "Yeni kanal bağlantısı", onclick: channelModal }),
-    ]),
-  ]);
-}
-
 function teamsMessageBox(data) {
   const select = h("select", {
     onchange: (event) => pickTemplate(event.target.value),
@@ -1128,11 +1093,7 @@ function teamsMessageBox(data) {
     h("button", {
       class: "primary",
       text: "Teams'te aç",
-      onclick: () =>
-        sendTeamsLink(data.key, {
-          body: area.value,
-          channel: data.target === TEAMS_CHANNEL,
-        }),
+      onclick: () => sendTeamsLink(data.key, { body: area.value }),
     }),
   ]);
 }
@@ -1147,11 +1108,7 @@ function teamsSentBox(data) {
     box.appendChild(
       h("div", { class: "sent-line", title: item.body }, [
         h("span", { class: "when", text: stamp(item.opened_at) }),
-        h("span", {
-          class: "who",
-          text: item.target_text,
-          title: item.target_kind === TEAMS_CHANNEL ? "Kanal" : "Kişiler",
-        }),
+        h("span", { class: "who", text: item.target_text, title: "Kişiler" }),
         h("span", { class: "what", text: item.first_line }),
       ])
     );
@@ -1175,27 +1132,6 @@ async function writeTeamsContacts(contacts) {
   }
 }
 
-async function setIssueChannel(value) {
-  const key = state.drawerKey;
-  try {
-    if (!value) {
-      await api(`/api/issues/${encodeURIComponent(key)}/channel`, { method: "DELETE" });
-      state.teams.channel = null;
-      state.teams.target = TEAMS_PEOPLE;
-    } else {
-      const data = await api(`/api/issues/${encodeURIComponent(key)}/channel`, {
-        method: "PUT",
-        body: JSON.stringify({ channel_id: Number(value) }),
-      });
-      state.teams.channel = data.channel;
-      state.teams.target = TEAMS_CHANNEL;
-    }
-    renderDrawerBody();
-  } catch (err) {
-    fail(err);
-  }
-}
-
 async function pickTemplate(value) {
   const key = state.drawerKey;
   state.teams.templateId = value ? Number(value) : null;
@@ -1211,42 +1147,6 @@ async function pickTemplate(value) {
   renderDrawerBody();
 }
 
-/** Kayitli kanal ekleme penceresi: Teams'te "Bağlantı kopyala" ile alinir. */
-function channelModal() {
-  const nameInput = h("input", { type: "text", placeholder: "Destek kanalı" });
-  const urlInput = h("input", {
-    type: "text",
-    placeholder: "https://teams.microsoft.com/l/channel/...",
-  });
-  const body = h("div", {}, [
-    field("Kanal adı", nameInput),
-    field("Bağlantı", urlInput),
-    h("p", {
-      class: "hint",
-      text:
-        "Teams'te kanalın ya da grup sohbetinin yanındaki ⋯ menüsünden " +
-        "\"Bağlantı kopyala\" deyip buraya yapıştırın.",
-    }),
-  ]);
-  const save = async () => {
-    try {
-      const data = await api("/api/teams/channels", {
-        method: "POST",
-        body: JSON.stringify({ name: nameInput.value, url: urlInput.value }),
-      });
-      closeModal();
-      state.teams.channels = (state.teams.channels || []).concat([data.channel]);
-      await setIssueChannel(String(data.channel.id));
-    } catch (err) {
-      fail(err);
-    }
-  };
-  openModal("Yeni kanal bağlantısı", body, [
-    { label: "Vazgeç", onClick: closeModal },
-    { label: "Kaydet", kind: "primary", onClick: save },
-  ]);
-}
-
 /** Baglantiyi kurar, gerekirse panoya kopyalar, Teams'i acar. */
 async function sendTeamsLink(key, payload) {
   try {
@@ -1254,22 +1154,17 @@ async function sendTeamsLink(key, payload) {
       method: "POST",
       body: JSON.stringify(payload || {}),
     });
-    const clip = data.clipboard || (data.kind === TEAMS_CHANNEL ? data.message : "");
-    const copied = clip ? await copyText(clip) : false;
+    // Pano yalnizca kirpma durumunda devreye girer: adres sinirina sigmayan
+    // metnin tamami kaybolmasin.
+    const copied = data.truncated ? await copyText(data.clipboard || data.message) : false;
     window.open(data.url, "_blank", "noopener");
 
-    if (data.kind === TEAMS_CHANNEL) {
-      toast(
-        "Kanal açılıyor",
-        copied
-          ? "Mesaj panoya kopyalandı, kanalda yapıştırın."
-          : "Mesaj panoya kopyalanamadı; metni çekmeceden kopyalayın.",
-        copied ? "ok" : ""
-      );
-    } else if (data.truncated) {
+    if (data.truncated) {
       toast(
         "Teams açılıyor",
-        "Mesaj adres sınırına sığmadı ve kısaltıldı; tamamı panoya kopyalandı.",
+        copied
+          ? "Mesaj adres sınırına sığmadı ve kısaltıldı; tamamı panoya kopyalandı."
+          : "Mesaj adres sınırına sığmadı ve kısaltıldı.",
         ""
       );
     } else {
@@ -1291,11 +1186,6 @@ async function sendTeamsLink(key, payload) {
 /** Grid satiri ve kanban karti: tek tikla "son durumu sor". */
 async function askStatus(key) {
   try {
-    const channel = (await api(`/api/issues/${encodeURIComponent(key)}/channel`)).channel;
-    if (channel) {
-      await sendTeamsLink(key, { channel: true });
-      return;
-    }
     const contacts = (await api(`/api/issues/${encodeURIComponent(key)}/contacts`)).contacts || [];
     if (contacts.length) {
       await sendTeamsLink(key, {});
@@ -1303,7 +1193,7 @@ async function askStatus(key) {
     }
     // Hedef yok: kullanici once kisi eklesin, cekmecenin Teams bolumu acilir.
     await openDrawer(key);
-    toast("Teams hedefi yok", "Bu kayda önce bir kişi ekleyin ya da kanal seçin.", "");
+    toast("Teams kişisi yok", "Bu kayda önce bir kişi ekleyin.", "");
   } catch (err) {
     fail(err);
   }

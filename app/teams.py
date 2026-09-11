@@ -31,9 +31,17 @@ CHAT_BASE = "https://teams.microsoft.com/l/chat/0/0"
 URL_LIMIT = 2000
 ELLIPSIS = "…"
 
+# Hedef yalnizca kisilerdir. Kanala yazma denendi ve kaldirildi: Teams kanal
+# baglantilari mesaj on doldurmayi kabul etmiyor, "panoya kopyala + yapistir"
+# akisi de tek tiklik vaadi bozuyordu.
 TARGET_PEOPLE = "people"
-TARGET_CHANNEL = "channel"
-TARGET_KINDS: tuple[str, ...] = (TARGET_PEOPLE, TARGET_CHANNEL)
+TARGET_KINDS: tuple[str, ...] = (TARGET_PEOPLE,)
+
+# Adres defterindeki giris turu: kisi ya da dagitim listesi. Kurum rehberi
+# ikisini de veriyor; arayuz listeleri rozetle ayirir.
+CONTACT_PERSON = "person"
+CONTACT_LIST = "list"
+CONTACT_KINDS: tuple[str, ...] = (CONTACT_PERSON, CONTACT_LIST)
 
 # Grup sohbetinin konu adi; kullanici Ayarlar'dan degistirebilir.
 DEFAULT_TOPIC_FORMAT = "{key}"
@@ -213,15 +221,6 @@ def build_chat_link(
             high = middle - 1
     short = text[:low].rstrip() + ELLIPSIS
     return {"url": _chat_url(users, short, label), "message": short, "truncated": True}
-
-
-def build_channel_open(url: str, message: str) -> dict[str, Any]:
-    """Kanal/grup baglantisi: on doldurma yok, mesaj panoya gider.
-
-    Teams kanal baglantilari mesaj parametresi kabul etmiyor; kullanici
-    kanali acilmis halde bulur ve panodaki metni yapistirir.
-    """
-    return {"url": str(url or "").strip(), "clipboard": str(message or "")}
 
 
 def _chat_url(users: str, message: str, topic: str = "") -> str:

@@ -13,6 +13,10 @@ from __future__ import annotations
 from typing import Any
 
 from .source import (
+    CONTACT_KINDS,
+    CONTACT_LIST,
+    CONTACT_PERSON,
+    GalEntry,
     MailError,
     MailFolder,
     MailMessage,
@@ -22,6 +26,10 @@ from .source import (
 )
 
 __all__ = [
+    "CONTACT_KINDS",
+    "CONTACT_LIST",
+    "CONTACT_PERSON",
+    "GalEntry",
     "MailError",
     "MailFolder",
     "MailMessage",

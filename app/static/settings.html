@@ -218,7 +218,7 @@
         <p class="hint">
           Kayıtlara Teams kişileri iliştirip tek tıkla "bu kaydın son durumu ne?" mesajı
           hazırlayabilirsiniz. Tek kişide doğrudan sohbet, birden fazla kişide grup sohbeti
-          açılır; kayda bir kanal seçilmişse mesaj panoya kopyalanır ve kanal açılır.
+          açılır.
           <strong>Mesaj Teams'te hazır açılır, göndermek için Gönder'e basmanız gerekir.</strong>
         </p>
 
@@ -248,35 +248,20 @@
         </div>
 
         <div class="field">
-          <span class="label-text">Kayıtlı kanallar</span>
-          <div class="teams-list" id="teams-channels"></div>
-          <p class="hint">
-            Teams'te kanalın ya da grup sohbetinin ⋯ menüsünden "Bağlantı kopyala" deyip
-            buraya yapıştırın.
-          </p>
-        </div>
-        <div class="row">
-          <div class="field">
-            <label for="channel-name">Yeni kanal adı</label>
-            <input type="text" id="channel-name" placeholder="Destek kanalı" />
-          </div>
-          <div class="field">
-            <label for="channel-url">Bağlantı</label>
-            <input type="text" id="channel-url"
-              placeholder="https://teams.microsoft.com/l/channel/..." />
-          </div>
-        </div>
-        <div class="actions">
-          <button id="channel-add">Kanal ekle</button>
-        </div>
-
-        <div class="field">
           <span class="label-text">Adres defteri</span>
           <div class="teams-list" id="teams-contacts"></div>
           <p class="hint">
             Kayıtlara girdiğiniz kişiler buraya düşer ve bir daha yazarken tamamlanır.
-            Buradan silinen kişi bütün kayıtlardan da çıkar.
+            Buradan silinen kişi bütün kayıtlardan da çıkar. Dağıtım listeleri
+            <strong>liste</strong> rozetiyle görünür.
           </p>
+          <p class="warn-note" id="teams-gal-unsupported" hidden>
+            Kurum rehberi yalnız Windows'ta Outlook ile okunabilir.
+          </p>
+          <div class="actions">
+            <button id="teams-gal">Rehberi Outlook'tan yenile</button>
+            <span class="hint" id="teams-gal-when"></span>
+          </div>
         </div>
 
         <div class="actions">

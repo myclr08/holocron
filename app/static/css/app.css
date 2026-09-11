@@ -1174,6 +1174,15 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   font-size: 12px;
 }
 
+.chip-kind {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+
 .teams-chip button {
   padding: 0 2px;
   border: 0;
@@ -1188,11 +1197,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .teams-add-row input { flex: 1; min-width: 0; }
 .teams-name { margin-top: 6px; }
 .teams-name input { width: 100%; }
-
-.teams-target { margin-top: 10px; }
-.teams-target .choice-group { flex-direction: row; gap: 14px; margin-bottom: 6px; }
-.teams-channel-row { display: flex; gap: 6px; align-items: center; }
-.teams-channel-row select { flex: 1; min-width: 0; }
 
 .teams-message { margin-top: 10px; }
 .teams-message-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
