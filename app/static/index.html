@@ -21,6 +21,7 @@
         </div>
       </div>
       <div class="topbar-actions">
+        <button id="local-fields" title="Kendi alanlarinizi tanimlayin">Alanlar</button>
         <a class="button" href="/settings">Ayarlar</a>
         <button class="danger" data-action="shutdown">Kapat</button>
       </div>
@@ -105,6 +106,17 @@
       <div class="modal-body" id="modal-body"></div>
       <footer class="modal-foot" id="modal-foot"></footer>
     </div>
+  </div>
+
+  <div class="popover" id="history-popover" hidden>
+    <header class="popover-head">
+      <strong id="history-title"></strong>
+      <button id="history-close" title="Kapat (Esc)">✕</button>
+    </header>
+    <div class="popover-body" id="history-body"></div>
+    <footer class="popover-foot">
+      <button class="danger small" id="history-clear">Gecmisi temizle</button>
+    </footer>
   </div>
 
   <div class="toast" id="toast" hidden></div>

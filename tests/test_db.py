@@ -8,6 +8,7 @@ EXPECTED_TABLES = {
     "issues",
     "local_fields",
     "local_values",
+    "local_value_history",
     "groups",
     "group_items",
     "schema_version",
@@ -92,3 +93,64 @@ def test_issue_key_is_primary_key(conn):
     conn.commit()
     rows = conn.execute("SELECT jira_id FROM issues").fetchall()
     assert len(rows) == 1 and rows[0]["jira_id"] == "2"
+
+
+# --- asama 3 gocu -------------------------------------------------------
+
+
+def _columns(conn, table):
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def test_stage_two_database_is_upgraded_in_place(tmp_path):
+    """Asama 2'de kalmis bir veritabani acildiginda 0002 uzerine uygulanir."""
+    conn = db.connect(tmp_path / "eski.db")
+    try:
+        only_first = db.MIGRATIONS[:1]
+        assert db.migrate(conn, only_first) == 1
+        assert "local_value_history" not in db.table_names(conn)
+        assert "track_history" not in _columns(conn, "local_fields")
+
+        # Icinde veri varken yukseltme yapilir; veri kaybolmamali.
+        conn.execute(
+            "INSERT INTO local_fields (name, type, position) VALUES ('Not', 'text', 0)"
+        )
+        conn.execute(
+            "INSERT INTO local_values (issue_key, field_id, value) VALUES ('DEMO-1', 1, 'eski')"
+        )
+        conn.commit()
+
+        assert db.migrate(conn) == db.SCHEMA_VERSION
+        assert "local_value_history" in db.table_names(conn)
+        assert {"track_history", "created_at"} <= _columns(conn, "local_fields")
+        assert "updated_at" in _columns(conn, "local_values")
+        row = conn.execute("SELECT value FROM local_values WHERE field_id = 1").fetchone()
+        assert row["value"] == "eski"
+        assert conn.execute("SELECT track_history FROM local_fields").fetchone()["track_history"] == 0
+    finally:
+        conn.close()
+
+
+def test_stage_three_migration_is_idempotent(tmp_path):
+    conn = db.connect(tmp_path / "tekrar.db")
+    try:
+        db.migrate(conn)
+        db.migrate(conn, db.MIGRATIONS[1:2])  # zaten uygulanmis, atlanir
+        columns = _columns(conn, "local_fields")
+        assert len([name for name in columns if name == "track_history"]) == 1
+    finally:
+        conn.close()
+
+
+def test_local_history_cascades_when_field_is_dropped(conn):
+    conn.execute("INSERT INTO local_fields (name, type, position) VALUES ('Not', 'text', 0)")
+    field_id = conn.execute("SELECT id FROM local_fields").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO local_value_history (issue_key, field_id, old_value, new_value, changed_at) "
+        "VALUES ('DEMO-1', ?, NULL, 'ilk', '2026-09-11T09:05:00+00:00')",
+        (field_id,),
+    )
+    conn.commit()
+    conn.execute("DELETE FROM local_fields WHERE id = ?", (field_id,))
+    conn.commit()
+    assert conn.execute("SELECT COUNT(*) AS c FROM local_value_history").fetchone()["c"] == 0

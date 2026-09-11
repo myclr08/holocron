@@ -81,9 +81,46 @@ def _migration_0001_initial(conn: sqlite3.Connection) -> None:
     )
 
 
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row["name"] == column for row in rows)
+
+
+def _add_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    """ALTER TABLE ADD COLUMN idempotent degil; once sutunun varligina bakilir."""
+    if not _has_column(conn, table, column):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _migration_0002_local_history(conn: sqlite3.Connection) -> None:
+    """Asama 3: yerel alanlarda gecmis takibi ve deger zaman damgasi."""
+    _add_column(conn, "local_fields", "track_history", "INTEGER NOT NULL DEFAULT 0")
+    _add_column(conn, "local_fields", "created_at", "TEXT")
+    _add_column(conn, "local_values", "updated_at", "TEXT")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS local_value_history (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            issue_key  TEXT NOT NULL,
+            field_id   INTEGER NOT NULL,
+            old_value  TEXT,
+            new_value  TEXT,
+            changed_at TEXT NOT NULL,
+            FOREIGN KEY (field_id) REFERENCES local_fields(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_local_history_cell
+            ON local_value_history(issue_key, field_id, id);
+        CREATE INDEX IF NOT EXISTS idx_local_history_field
+            ON local_value_history(field_id);
+        """
+    )
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
+    (2, "local field history", _migration_0002_local_history),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

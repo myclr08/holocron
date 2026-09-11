@@ -571,3 +571,138 @@ textarea {
 .toast .toast-head button { background: none; border: 0; color: var(--hc-text-dim); padding: 0 2px; }
 .toast ul { margin: 6px 0 0; padding-left: 18px; color: var(--hc-text-dim); }
 .toast .key-link { font-family: var(--hc-mono); }
+
+/* --- Asama 3: yerel alanlar, satir ici duzenleyici, gecmis -------------- */
+
+.grid td.local-cell {
+  cursor: text;
+  white-space: nowrap;
+}
+
+.grid td.local-cell:hover { background: var(--hc-surface-2); }
+.grid td.local-cell .local-text { color: var(--hc-text); }
+.grid td.local-cell.is-empty .local-text { color: var(--hc-text-dim); }
+
+.local-input {
+  width: 100%;
+  min-width: 120px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--hc-text);
+  background: var(--hc-bg);
+  border: 1px solid var(--hc-accent-dim);
+  border-radius: var(--hc-radius);
+  padding: 4px 6px;
+}
+
+.local-input.local-check { width: auto; min-width: 0; }
+.local-input.bad { border-color: var(--hc-danger); }
+
+.local-error {
+  display: block;
+  margin-top: 3px;
+  color: var(--hc-danger);
+  font-size: 11px;
+  white-space: normal;
+}
+
+.local-open {
+  background: none;
+  border: 1px solid transparent;
+  padding: 2px 6px;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.local-open:hover { border-color: var(--hc-accent-dim); }
+
+.clock {
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  margin-left: 6px;
+  color: var(--hc-text-dim);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.clock.on { color: var(--hc-accent); }
+.clock:hover { color: var(--hc-accent); }
+
+/* Gecmis popover */
+
+.popover {
+  position: fixed;
+  z-index: 35;
+  width: min(340px, 92vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--hc-surface);
+  border: 1px solid var(--hc-border);
+  border-radius: var(--hc-radius);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+}
+
+.popover[hidden] { display: none; }
+
+.popover-head,
+.popover-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.popover-head { justify-content: space-between; border-bottom: 1px solid var(--hc-border); }
+.popover-head strong { font-size: 12px; }
+.popover-head button { background: none; border: 0; color: var(--hc-text-dim); padding: 0 2px; }
+.popover-head button:hover { color: var(--hc-accent); }
+.popover-foot { justify-content: flex-end; border-top: 1px solid var(--hc-border); }
+.popover-body { padding: 6px 12px; overflow-y: auto; }
+
+.history-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--hc-border);
+  font-size: 12px;
+}
+
+.history-line:last-child { border-bottom: 0; }
+.history-line .when { color: var(--hc-text-dim); font-family: var(--hc-mono); white-space: nowrap; }
+.history-line .what { flex: 1; word-break: break-word; }
+.history-line .old { color: var(--hc-text-dim); }
+.history-line .new { color: var(--hc-text); }
+.history-line .drop { background: none; border: 0; color: var(--hc-text-dim); padding: 0 2px; }
+.history-line .drop:hover { color: var(--hc-danger); }
+
+/* Cekmecedeki yerel bolum */
+
+.drawer-local { margin-bottom: 14px; }
+.drawer-local h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--hc-accent);
+}
+.drawer-local .label { display: flex; align-items: center; gap: 8px; }
+.drawer-local .history-inline { margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--hc-border); }
+
+/* Sutun secicide yerel baslik ve girintili turetilmis satir */
+
+.column-list .list-head {
+  padding: 6px 8px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--hc-accent);
+  background: var(--hc-surface-2);
+  border-bottom: 1px solid var(--hc-border);
+}
+
+.column-list .entry.derived { padding-left: 22px; }
+.column-list .entry.derived .name { color: var(--hc-text-dim); }

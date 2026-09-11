@@ -11,6 +11,7 @@ import json
 import re
 import unicodedata
 from datetime import date, datetime, timezone, tzinfo
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 # Grid hucresinde gosterilecek en fazla karakter; tamami detay cekmecesinde.
@@ -377,3 +378,234 @@ def _normalize(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
     except (TypeError, ValueError):
         return str(value)
+
+
+# --- yerel (kullanici tanimli) alanlar ----------------------------------
+#
+# Yerel deger her zaman METIN olarak saklanir; normalizasyon yazma aninda
+# yapilir. Boylece okuma tarafi (grid, arama, siralama, sonraki asamada
+# Excel) tek bicimli bir metinle calisir.
+
+LOCAL_TEXT = "text"
+LOCAL_NUMBER = "number"
+LOCAL_DATE = "date"
+LOCAL_BOOL = "bool"
+LOCAL_SELECT = "select"
+
+LOCAL_TYPES: tuple[str, ...] = (LOCAL_TEXT, LOCAL_NUMBER, LOCAL_DATE, LOCAL_BOOL, LOCAL_SELECT)
+
+LOCAL_TYPE_LABELS: dict[str, str] = {
+    LOCAL_TEXT: "Metin",
+    LOCAL_NUMBER: "Sayi",
+    LOCAL_DATE: "Tarih",
+    LOCAL_BOOL: "Evet/Hayir",
+    LOCAL_SELECT: "Liste",
+}
+
+# Turetilmis (sanal) sutun ekleri: yalnizca gecmisi tutulan alanlarda uretilir.
+DERIVED_CHANGED_AT = "changed_at"
+DERIVED_CHANGES = "changes"
+DERIVED_SUFFIXES: tuple[str, ...] = (DERIVED_CHANGED_AT, DERIVED_CHANGES)
+DERIVED_LABELS: dict[str, str] = {
+    DERIVED_CHANGED_AT: "son degisim",
+    DERIVED_CHANGES: "kac kez degisti",
+}
+
+BOOL_TRUE_TEXT = "Evet"
+BOOL_FALSE_TEXT = "Hayir"
+
+_TRUE_WORDS = frozenset({"1", "true", "evet", "yes", "on", "dogru", "e", "x", "✓"})
+_FALSE_WORDS = frozenset({"0", "false", "hayir", "no", "off", "yanlis", "h", "-"})
+
+_ISO_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+_TR_DATE = re.compile(r"^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$")
+
+
+class LocalValueError(ValueError):
+    """Yerel alan degeri tipe uymuyor; mesaj dogrudan kullaniciya gider."""
+
+
+def local_schema(field_type: str) -> dict[str, Any]:
+    """Yerel tipi Jira semasi diline cevirir (siralama/bicimlendirme ortak kalsin)."""
+    if field_type == LOCAL_NUMBER:
+        return {"type": "number"}
+    if field_type == LOCAL_DATE:
+        return {"type": "date"}
+    return {"type": "string"}
+
+
+def derived_schema(suffix: str) -> dict[str, Any]:
+    return {"type": "number"} if suffix == DERIVED_CHANGES else {"type": "datetime"}
+
+
+def normalize_local_value(field_type: str, value: Any, options: Any = None) -> str:
+    """Degeri saklanacak metne cevirir. Bos metin 'degeri sil' demektir."""
+    if field_type not in LOCAL_TYPES:
+        raise LocalValueError(f"Bilinmeyen alan tipi: {field_type}")
+    if value is None:
+        return ""
+
+    if field_type == LOCAL_BOOL:
+        return _normalize_bool(value)
+
+    text = value if isinstance(value, str) else _plain_scalar(value)
+    text = text.strip()
+    if not text:
+        return ""
+
+    if field_type == LOCAL_TEXT:
+        return _clean(text)
+    if field_type == LOCAL_NUMBER:
+        return _normalize_number_text(text)
+    if field_type == LOCAL_DATE:
+        return _normalize_date_text(text)
+    return _normalize_select_text(text, options)
+
+
+def format_local_value(field_type: str, stored: Any, tz: tzinfo | None = None) -> str:
+    """Saklanan metni ekranda gosterilecek hale getirir."""
+    if stored is None:
+        return ""
+    text = str(stored)
+    if not text:
+        return ""
+    if field_type == LOCAL_BOOL:
+        return BOOL_TRUE_TEXT if text == "1" else BOOL_FALSE_TEXT
+    if field_type == LOCAL_DATE:
+        return _format_date(text)
+    return text
+
+
+def local_sort_key(field_type: str, stored: Any) -> tuple[int, float, str]:
+    """Yerel deger icin siralama anahtari; bos deger her zaman sona duser."""
+    text = "" if stored is None else str(stored)
+    if not text:
+        return (1, 0.0, "")
+    if field_type == LOCAL_NUMBER:
+        number = _as_number(text)
+        if number is not None:
+            return (0, number, "")
+    if field_type == LOCAL_BOOL:
+        return (0, 1.0 if text == "1" else 0.0, "")
+    if field_type == LOCAL_DATE:
+        moment = _parse_datetime(text)
+        if moment is not None:
+            return (0, moment.timestamp(), "")
+    return (0, 0.0, fold(text))
+
+
+def derived_sort_key(suffix: str, value: Any) -> tuple[int, float, str]:
+    """Turetilmis sutun icin siralama anahtari."""
+    if suffix == DERIVED_CHANGES:
+        return (0, float(value or 0), "")
+    moment = _parse_datetime(value)
+    if moment is None:
+        return (1, 0.0, "")
+    return (0, moment.timestamp(), "")
+
+
+def format_derived_value(suffix: str, value: Any, tz: tzinfo | None = None) -> str:
+    if suffix == DERIVED_CHANGES:
+        return str(int(value or 0))
+    if not value:
+        return ""
+    return _format_datetime(value, tz)
+
+
+def normalize_options(field_type: str, options: Any) -> list[str]:
+    """Liste tipinde secenekleri temizler; digerlerinde secenek tutulmaz."""
+    if field_type != LOCAL_SELECT:
+        return []
+    if options is None:
+        raise LocalValueError("Liste tipinde en az bir secenek gerekli.")
+    if isinstance(options, str):
+        candidates = [part for part in options.splitlines()]
+    elif isinstance(options, (list, tuple)):
+        candidates = [_plain_scalar(item) for item in options]
+    else:
+        raise LocalValueError("Secenekler bir liste olmali.")
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        text = str(item).strip()
+        if not text:
+            continue
+        marker = fold(text)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        cleaned.append(text)
+    if not cleaned:
+        raise LocalValueError("Liste tipinde en az bir secenek gerekli.")
+    return cleaned
+
+
+# --- yerel alan ic yardimcilari ----------------------------------------
+
+
+def _plain_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _normalize_bool(value: Any) -> str:
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return "1" if value else "0"
+    text = str(value).strip()
+    if not text:
+        return ""
+    marker = fold(text)
+    if marker in _TRUE_WORDS:
+        return "1"
+    if marker in _FALSE_WORDS:
+        return "0"
+    raise LocalValueError(f"Evet/Hayir bekleniyor, '{text}' anlasilmadi.")
+
+
+def _normalize_number_text(text: str) -> str:
+    candidate = text.replace(" ", "").replace(" ", "")
+    # Turkce klavyede ondalik virgul yaygin; nokta bicimine cevrilir.
+    if "," in candidate and "." not in candidate:
+        candidate = candidate.replace(",", ".")
+    try:
+        number = Decimal(candidate)
+    except (InvalidOperation, ValueError) as exc:
+        raise LocalValueError(f"Sayi bekleniyor, '{text}' anlasilmadi.") from exc
+    if not number.is_finite():
+        raise LocalValueError(f"Sayi bekleniyor, '{text}' anlasilmadi.")
+    # normalize() 100 -> 1E+2 uretir; "f" bicimi her zaman duz yazar.
+    return format(number.normalize(), "f")
+
+
+def _normalize_date_text(text: str) -> str:
+    iso = _ISO_DATE.match(text)
+    if iso:
+        year, month, day = (int(part) for part in iso.groups())
+    else:
+        local = _TR_DATE.match(text)
+        if not local:
+            raise LocalValueError(f"Tarih bekleniyor (GG.AA.YYYY), '{text}' anlasilmadi.")
+        day, month, year = (int(part) for part in local.groups())
+    try:
+        return date(year, month, day).isoformat()
+    except ValueError as exc:
+        raise LocalValueError(f"Gecersiz tarih: '{text}'.") from exc
+
+
+def _normalize_select_text(text: str, options: Any) -> str:
+    choices = [str(item) for item in (options or [])]
+    if not choices:
+        raise LocalValueError("Bu alanin secenek listesi bos.")
+    marker = fold(text)
+    for choice in choices:
+        if fold(choice) == marker:
+            return choice
+    raise LocalValueError(
+        f"'{text}' secenekler arasinda yok: " + ", ".join(choices)
+    )

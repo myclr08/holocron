@@ -24,9 +24,12 @@ const state = {
   pollTimer: null,
   drawerKey: null,
   drawerFields: [],
+  drawerLocal: [],
   drawerFetchedAt: null,
   drawerShowEmpty: false,
   lastRefreshState: "idle",
+  editing: null,
+  popover: null,
 };
 
 // --- kucuk yardimcilar --------------------------------------------------
@@ -49,6 +52,11 @@ function h(tag, attrs, children) {
 
 function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
+}
+
+// "local:3:changes" gibi kimlikler sinif adinda kullanilamaz; sadelestirilir.
+function cssName(fieldId) {
+  return String(fieldId).replace(/[^A-Za-z0-9_-]/g, "-");
 }
 
 function toast(title, message, kind, items) {
@@ -275,12 +283,18 @@ function renderRow(row) {
     onclick: () => openDrawer(row.key),
   });
 
-  row.cells.forEach((cell) => {
+  row.cells.forEach((cell, index) => {
+    const column = state.columns[index] || {};
     const changed = changedFields.indexOf(cell.field) >= 0;
     const td = h("td", {
-      class: "cell-" + cell.field + (changed ? " changed" : ""),
+      class: "cell-" + cssName(cell.field) + (changed ? " changed" : ""),
       title: cell.text,
     });
+    if (column.local && !column.derived) {
+      renderLocalCell(td, row, cell, column);
+      tr.appendChild(td);
+      return;
+    }
     if (cell.field === "issuekey") {
       if (row.pinned) td.appendChild(h("span", { class: "pin-mark", text: "📌", title: "Iglenmis" }));
       if (row.url) {
@@ -379,10 +393,12 @@ async function openDrawer(key) {
     link.hidden = !data.url;
     if (data.url) link.href = data.url;
     state.drawerFields = data.fields;
+    state.drawerLocal = data.local || [];
     state.drawerFetchedAt = data.fetched_at;
     renderDrawerBody();
   } catch (err) {
     state.drawerFields = [];
+    state.drawerLocal = [];
     clear(body);
     body.appendChild(h("p", { class: "hint", text: err.message }));
     el("drawer-link").hidden = true;
@@ -394,7 +410,12 @@ function renderDrawerBody() {
   clear(body);
   if (state.drawerFetchedAt) {
     body.appendChild(h("p", { class: "hint", text: "Cekilme: " + state.drawerFetchedAt }));
+  } else {
+    body.appendChild(
+      h("p", { class: "hint", text: "Bu kayit henuz Jira'dan cekilmedi." })
+    );
   }
+  renderDrawerLocal(body);
   (state.drawerFields || [])
     .filter((item) => state.drawerShowEmpty || !item.empty)
     .forEach((item) => {
@@ -411,6 +432,518 @@ function closeDrawer() {
   el("drawer").hidden = true;
   state.drawerKey = null;
   if (state.group) renderGrid();
+}
+
+// --- yerel alanlar: hucre duzenleyici, gecmis, alan yonetimi -------------
+
+const LOCAL_TYPE_LABEL = {
+  text: "Metin",
+  number: "Sayi",
+  date: "Tarih",
+  bool: "Evet/Hayir",
+  select: "Liste",
+};
+
+// Ekranda gosterilen zaman: sunucu ISO/UTC yazar, kullanici yereline cevrilir.
+function stamp(iso) {
+  if (!iso) return "";
+  const moment = new Date(iso);
+  if (isNaN(moment.getTime())) return String(iso);
+  const pad = (value) => String(value).padStart(2, "0");
+  return (
+    `${pad(moment.getDate())}.${pad(moment.getMonth() + 1)}.${moment.getFullYear()} ` +
+    `${pad(moment.getHours())}:${pad(moment.getMinutes())}`
+  );
+}
+
+function renderLocalCell(td, row, cell, column) {
+  td.classList.add("local-cell");
+  if (!cell.text) td.classList.add("is-empty");
+  td.appendChild(h("span", { class: "local-text", text: cell.text || "—" }));
+
+  const tracked = column.local.track_history || cell.changes > 0;
+  if (tracked) {
+    const badge = cell.changes ? String(cell.changes) : "";
+    td.appendChild(
+      h("button", {
+        class: "clock" + (cell.changes ? " on" : ""),
+        text: "🕘" + badge,
+        title: cell.changes ? `${cell.changes} degisim` : "Henuz degisim yok",
+        onclick: (event) => {
+          event.stopPropagation();
+          openHistory(event.currentTarget, row.key, column.local);
+        },
+      })
+    );
+  }
+
+  td.addEventListener("click", (event) => {
+    event.stopPropagation();
+    // Acik duzenleyicinin icine tiklamak onu bastan kurmasin.
+    if (state.editing && state.editing.node === td) return;
+    startCellEdit(td, row, cell, column.local);
+  });
+}
+
+function startCellEdit(td, row, cell, field) {
+  if (state.editing) closeEditor(true);
+  const editor = localEditor(field, cell.raw, {
+    onSave: (value) => saveLocalValue(row.key, field, value, editor),
+    onCancel: () => {
+      closeEditor(false);
+      renderGrid();
+    },
+  });
+  state.editing = { node: td, editor: editor };
+  clear(td);
+  td.appendChild(editor.node);
+  editor.focus();
+}
+
+function closeEditor(silent) {
+  const editing = state.editing;
+  state.editing = null;
+  if (editing && !silent) editing.editor.detach();
+}
+
+/** Tipe gore satir ici duzenleyici. Enter kaydeder, Esc vazgecer, blur kaydeder. */
+function localEditor(field, value, hooks) {
+  let node;
+  let dead = false;
+  const read = () => (field.type === "bool" ? (node.checked ? "1" : "0") : node.value);
+  const commit = () => {
+    if (dead) return;
+    dead = true;
+    hooks.onSave(read());
+  };
+  const abort = () => {
+    if (dead) return;
+    dead = true;
+    hooks.onCancel();
+  };
+
+  if (field.type === "select") {
+    node = h("select", { class: "local-input" }, []);
+    node.appendChild(h("option", { value: "", text: "—" }));
+    (field.options || []).forEach((option) =>
+      node.appendChild(h("option", { value: option, text: option }))
+    );
+    node.value = value || "";
+    node.addEventListener("change", commit);
+  } else if (field.type === "bool") {
+    node = h("input", { type: "checkbox", class: "local-input local-check" });
+    node.checked = value === "1";
+    node.addEventListener("change", commit);
+  } else if (field.type === "date") {
+    node = h("input", { type: "date", class: "local-input" });
+    node.value = value || "";
+    node.addEventListener("change", commit);
+  } else {
+    // Sayi icin de metin kutusu: tarayicinin number girdisi Turkce ondalik
+    // virgulu yutuyor, dogrulamayi sunucu yapiyor.
+    node = h("input", {
+      type: "text",
+      class: "local-input",
+      inputmode: field.type === "number" ? "decimal" : null,
+    });
+    node.value = value || "";
+  }
+
+  node.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      abort();
+    }
+  });
+  node.addEventListener("blur", () => {
+    // Hata gosterilirken odak kaybi kaydi tekrar denemesin.
+    if (node.classList.contains("bad")) return;
+    commit();
+  });
+
+  return {
+    node: node,
+    focus: () => {
+      node.focus();
+      if (node.select) node.select();
+    },
+    detach: () => {},
+    fail: (message) => {
+      dead = false;
+      node.classList.add("bad");
+      node.title = message;
+      const holder = node.parentNode;
+      if (holder && !holder.querySelector(".local-error")) {
+        holder.appendChild(h("span", { class: "local-error", text: message }));
+      }
+      node.focus();
+    },
+    clean: () => {
+      node.classList.remove("bad");
+      const holder = node.parentNode;
+      const note = holder && holder.querySelector(".local-error");
+      if (note) note.remove();
+    },
+  };
+}
+
+async function saveLocalValue(key, field, value, editor) {
+  try {
+    await api(`/api/issues/${encodeURIComponent(key)}/local/${field.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ value: value }),
+    });
+    if (editor) editor.clean();
+    state.editing = null;
+    if (state.drawerKey === key) await openDrawer(key);
+    await loadIssues();
+  } catch (err) {
+    if (editor) editor.fail(err.message);
+    else fail(err);
+  }
+}
+
+// --- gecmis popover -----------------------------------------------------
+
+async function openHistory(anchor, key, field) {
+  const box = el("history-popover");
+  el("history-title").textContent = `${field.name} · ${key}`;
+  const body = el("history-body");
+  clear(body);
+  body.appendChild(h("p", { class: "hint", text: "Okunuyor..." }));
+  box.hidden = false;
+  placePopover(box, anchor);
+  state.popover = { key: key, field: field };
+
+  try {
+    const data = await api(`/api/issues/${encodeURIComponent(key)}/local/${field.id}/history`);
+    renderHistory(data.entries || []);
+    placePopover(box, anchor);
+  } catch (err) {
+    clear(body);
+    body.appendChild(h("p", { class: "hint", text: err.message }));
+  }
+}
+
+function renderHistory(entries) {
+  const body = el("history-body");
+  clear(body);
+  el("history-clear").disabled = entries.length === 0;
+  if (!entries.length) {
+    body.appendChild(h("p", { class: "hint", text: "Bu hucrede henuz degisim yok." }));
+    return;
+  }
+  entries.forEach((entry) => body.appendChild(historyLine(entry)));
+}
+
+function historyLine(entry) {
+  return h("div", { class: "history-line" }, [
+    h("span", { class: "when", text: stamp(entry.changed_at) }),
+    h("span", { class: "what" }, [
+      h("span", { class: "old", text: entry.old_text || "—" }),
+      document.createTextNode(" → "),
+      h("span", { class: "new", text: entry.new_text || "—" }),
+    ]),
+    h("button", {
+      class: "drop",
+      text: "✕",
+      title: "Bu satiri sil",
+      onclick: () => dropHistoryEntry(entry.id),
+    }),
+  ]);
+}
+
+async function dropHistoryEntry(historyId) {
+  const target = state.popover;
+  if (!target) return;
+  try {
+    await api(
+      `/api/issues/${encodeURIComponent(target.key)}/local/${target.field.id}/history/${historyId}`,
+      { method: "DELETE" }
+    );
+    const data = await api(
+      `/api/issues/${encodeURIComponent(target.key)}/local/${target.field.id}/history`
+    );
+    renderHistory(data.entries || []);
+    await loadIssues();
+    if (state.drawerKey === target.key) await openDrawer(target.key);
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function clearHistory() {
+  const target = state.popover;
+  if (!target) return;
+  if (!confirm(`${target.key} icin "${target.field.name}" gecmisi tamamen silinsin mi?`)) return;
+  try {
+    await api(`/api/issues/${encodeURIComponent(target.key)}/local/${target.field.id}/history`, {
+      method: "DELETE",
+    });
+    closeHistory();
+    await loadIssues();
+    if (state.drawerKey === target.key) await openDrawer(target.key);
+  } catch (err) {
+    fail(err);
+  }
+}
+
+function placePopover(box, anchor) {
+  const spot = anchor.getBoundingClientRect();
+  const width = box.offsetWidth || 320;
+  const left = Math.max(8, Math.min(spot.left, window.innerWidth - width - 8));
+  const below = spot.bottom + 6;
+  const height = box.offsetHeight || 200;
+  const top = below + height > window.innerHeight ? Math.max(8, spot.top - height - 6) : below;
+  box.style.left = left + "px";
+  box.style.top = top + "px";
+}
+
+function closeHistory() {
+  el("history-popover").hidden = true;
+  state.popover = null;
+}
+
+// --- detay cekmecesindeki yerel bolum -----------------------------------
+
+function renderDrawerLocal(body) {
+  const items = state.drawerLocal || [];
+  if (!items.length) return;
+  const key = state.drawerKey;
+  const section = h("section", { class: "drawer-local" }, [
+    h("h3", { text: "Yerel alanlar" }),
+  ]);
+
+  items.forEach((item) => {
+    const value = h("div", { class: "value" }, []);
+    const show = () => {
+      clear(value);
+      value.appendChild(
+        h("button", {
+          class: "local-open",
+          text: item.text || "—",
+          title: "Duzenle",
+          onclick: () => edit(),
+        })
+      );
+    };
+    const edit = () => {
+      clear(value);
+      const editor = localEditor(item, item.value, {
+        onSave: (fresh) => saveLocalValue(key, item, fresh, editor),
+        onCancel: show,
+      });
+      value.appendChild(editor.node);
+      editor.focus();
+    };
+    show();
+
+    const head = h("div", { class: "label" }, [
+      h("span", { text: `${item.name} (${item.type_label})` }),
+    ]);
+    if (item.track_history || item.changes) {
+      head.appendChild(h("span", { class: "badge", text: `${item.changes} degisim` }));
+    }
+
+    const rowBox = h("div", { class: "detail-row" + (item.empty ? " is-empty" : "") }, [head, value]);
+    if (item.history && item.history.length) {
+      const list = h("div", { class: "history-inline" }, []);
+      item.history.forEach((entry) => {
+        list.appendChild(
+          h("div", { class: "history-line" }, [
+            h("span", { class: "when", text: stamp(entry.changed_at) }),
+            h("span", { class: "what" }, [
+              h("span", { class: "old", text: entry.old_text || "—" }),
+              document.createTextNode(" → "),
+              h("span", { class: "new", text: entry.new_text || "—" }),
+            ]),
+          ])
+        );
+      });
+      rowBox.appendChild(list);
+    }
+    section.appendChild(rowBox);
+  });
+
+  body.appendChild(section);
+}
+
+// --- Alanlar ekrani -----------------------------------------------------
+
+async function localFieldsModal() {
+  let fields = [];
+  try {
+    fields = (await api("/api/local-fields")).fields;
+  } catch (err) {
+    fail(err);
+    return;
+  }
+
+  const list = h("div", { class: "column-list" }, []);
+
+  function render() {
+    clear(list);
+    if (!fields.length) {
+      list.appendChild(
+        h("div", {
+          class: "empty-note",
+          text: "Henuz yerel alan yok. 'Yeni alan' ile kendi bilginizi eklemeye baslayin.",
+        })
+      );
+      return;
+    }
+    fields.forEach((field, index) => {
+      list.appendChild(
+        h("div", { class: "entry" }, [
+          h("span", { class: "name", text: field.name, title: field.column_id }),
+          h("span", { class: "id", text: field.type_label }),
+          h("span", {
+            class: "badge" + (field.track_history ? " on" : ""),
+            text: field.track_history ? "gecmis acik" : "gecmis kapali",
+          }),
+          h("span", { class: "id", text: `${field.group_count} grup` }),
+          h("button", {
+            text: "▲",
+            title: "Yukari",
+            disabled: index === 0,
+            onclick: () => reorderFields(index, -1),
+          }),
+          h("button", {
+            text: "▼",
+            title: "Asagi",
+            disabled: index === fields.length - 1,
+            onclick: () => reorderFields(index, 1),
+          }),
+          h("button", { text: "Duzenle", onclick: () => fieldForm(field) }),
+          h("button", { class: "danger", text: "Sil", onclick: () => dropField(field) }),
+        ])
+      );
+    });
+  }
+
+  async function reload() {
+    fields = (await api("/api/local-fields")).fields;
+    render();
+    await loadIssues();
+  }
+
+  async function reorderFields(index, delta) {
+    const ids = fields.map((field) => field.id);
+    const target = index + delta;
+    if (target < 0 || target >= ids.length) return;
+    const swap = ids[index];
+    ids[index] = ids[target];
+    ids[target] = swap;
+    try {
+      fields = (await api("/api/local-fields/reorder", {
+        method: "POST",
+        body: JSON.stringify({ ids: ids }),
+      })).fields;
+      render();
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  async function dropField(field) {
+    const warning =
+      `"${field.name}" alani silinsin mi?\n` +
+      `${field.value_count} kayittaki deger ve ${field.history_count} gecmis satiri silinecek.`;
+    if (!confirm(warning)) return;
+    try {
+      await api(`/api/local-fields/${field.id}`, { method: "DELETE" });
+      await reload();
+      toast("Alan silindi", `"${field.name}" ve bagli degerleri kaldirildi.`, "ok");
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  function fieldForm(existing) {
+    const nameInput = h("input", { type: "text", value: existing ? existing.name : "" });
+    const typeSelect = h("select", {}, []);
+    Object.keys(LOCAL_TYPE_LABEL).forEach((name) =>
+      typeSelect.appendChild(h("option", { value: name, text: LOCAL_TYPE_LABEL[name] }))
+    );
+    typeSelect.value = existing ? existing.type : "text";
+    if (existing) typeSelect.disabled = true;
+
+    const optionsInput = h("textarea", { placeholder: "Her satira bir secenek" });
+    if (existing) optionsInput.value = (existing.options || []).join("\n");
+    const optionsField = field("Secenekler", optionsInput);
+    const syncOptions = () => {
+      optionsField.hidden = typeSelect.value !== "select";
+    };
+    typeSelect.addEventListener("change", syncOptions);
+    syncOptions();
+
+    const historyInput = h("input", { type: "checkbox" });
+    historyInput.checked = existing ? existing.track_history : false;
+    const historyBox = h("label", { class: "checkbox" }, [
+      historyInput,
+      document.createTextNode("Gecmisi tut (her degisim kaydedilir)"),
+    ]);
+
+    const body = h("div", {}, [
+      field("Ad", nameInput),
+      field("Tip", typeSelect),
+      optionsField,
+      field("Gecmis", historyBox),
+      h("p", {
+        class: "hint",
+        text:
+          "Yerel alanlar Jira'ya gitmez, Guncelle bunlari ezmez. " +
+          (existing ? "Tip sonradan degistirilemez." : ""),
+      }),
+    ]);
+
+    const save = async () => {
+      const payload = {
+        name: nameInput.value,
+        track_history: historyInput.checked,
+        options: optionsInput.value
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line),
+      };
+      if (!existing) payload.type = typeSelect.value;
+      try {
+        if (existing) await api(`/api/local-fields/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) });
+        else await api("/api/local-fields", { method: "POST", body: JSON.stringify(payload) });
+        await reload();
+        openList();
+      } catch (err) {
+        fail(err);
+      }
+    };
+
+    openModal(existing ? "Alani duzenle" : "Yeni alan", body, [
+      { label: "Geri", onClick: openList },
+      { label: "Kaydet", kind: "primary", onClick: save },
+    ]);
+  }
+
+  function openList() {
+    render();
+    openModal("Yerel alanlar", h("div", {}, [
+      h("p", {
+        class: "hint",
+        text:
+          "Buradaki alanlar butun gruplarda ortaktir, deger kayit basina tektir. " +
+          "Hangi grupta gorunecegini 'Sutunlar' ekranindan secersiniz.",
+      }),
+      list,
+    ]), [
+      { label: "Yeni alan", onClick: () => fieldForm(null) },
+      { label: "Kapat", kind: "primary", onClick: closeModal },
+    ]);
+  }
+
+  openList();
 }
 
 // --- grup olusturma / duzenleme ----------------------------------------
@@ -569,8 +1102,9 @@ async function columnsModal() {
       chosenBox.appendChild(h("div", { class: "empty-note", text: "Sutun secilmedi." }));
     }
     chosen.forEach((id, index) => {
+      const known = byId[id];
       chosenBox.appendChild(
-        h("div", { class: "entry" }, [
+        h("div", { class: "entry" + (known && known.kind === "derived" ? " derived" : "") }, [
           h("span", { class: "name", text: nameOf(id), title: id }),
           h("span", { class: "id", text: id }),
           h("button", {
@@ -619,8 +1153,10 @@ async function columnsModal() {
           !needle ||
           item.name.toLocaleLowerCase("tr").indexOf(needle) >= 0 ||
           item.id.toLowerCase().indexOf(needle) >= 0
-      )
-      .slice(0, 200);
+      );
+    const jira = list.filter((item) => item.kind !== "local" && item.kind !== "derived");
+    const local = list.filter((item) => item.kind === "local" || item.kind === "derived");
+
     if (!list.length) {
       availableBox.appendChild(
         h("div", {
@@ -631,9 +1167,10 @@ async function columnsModal() {
         })
       );
     }
-    list.forEach((item) => {
+
+    const add = (item) => {
       availableBox.appendChild(
-        h("div", { class: "entry" }, [
+        h("div", { class: "entry" + (item.kind === "derived" ? " derived" : "") }, [
           h("span", { class: "name", text: item.name, title: item.id }),
           h("span", { class: "id", text: item.id }),
           h("button", {
@@ -647,7 +1184,13 @@ async function columnsModal() {
           }),
         ])
       );
-    });
+    };
+
+    jira.slice(0, 200).forEach(add);
+    if (local.length) {
+      availableBox.appendChild(h("div", { class: "list-head", text: "Yerel alanlar" }));
+      local.forEach(add);
+    }
   }
 
   search.addEventListener("input", renderAvailable);
@@ -802,6 +1345,9 @@ function bindEvents() {
   el("add-items").addEventListener("click", addItemsModal);
   el("empty-add").addEventListener("click", addItemsModal);
   el("choose-columns").addEventListener("click", columnsModal);
+  el("local-fields").addEventListener("click", localFieldsModal);
+  el("history-close").addEventListener("click", closeHistory);
+  el("history-clear").addEventListener("click", clearHistory);
   el("refresh-all").addEventListener("click", () => startRefresh(null));
   el("refresh-group").addEventListener("click", () => startRefresh(state.activeId));
   el("refresh-cancel").addEventListener("click", cancelRefresh);
@@ -822,9 +1368,18 @@ function bindEvents() {
     state.searchTimer = setTimeout(loadIssues, 200);
   });
 
+  // Popover disina tiklayinca kapanir; kendi icindeki tiklama gecerli kalir.
+  document.addEventListener("mousedown", (event) => {
+    const box = el("history-popover");
+    if (box.hidden || box.contains(event.target)) return;
+    if (event.target.closest && event.target.closest(".clock")) return;
+    closeHistory();
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-      if (!el("modal").hidden) closeModal();
+      if (!el("history-popover").hidden) closeHistory();
+      else if (!el("modal").hidden) closeModal();
       else if (!el("drawer").hidden) closeDrawer();
       return;
     }

@@ -10,9 +10,10 @@ uygulamanın yanındaki `holocron.db` dosyasında kalır, hiçbir yere gönderil
 
 ## Durum
 
-Aşama 2 tamam: gruplar (manuel ve JQL filtresi), kayıt listesi, sütun seçici,
-arama ve arka planda çalışan **Güncelle** işi kullanılabilir durumda. Yerel
-alanlar, Excel'e aktarım ve tam tema sonraki aşamalarda gelecek.
+Aşama 3 tamam: gruplar (manuel ve JQL filtresi), kayıt listesi, sütun seçici,
+arama, arka planda çalışan **Güncelle** işi ve kendi tanımladığınız **yerel
+alanlar** (alan başına değişim geçmişiyle) kullanılabilir durumda. Excel'e
+aktarım ve tam tema sonraki aşamalarda gelecek.
 
 ## Gereksinimler
 
@@ -70,10 +71,51 @@ paletinden seçilir (`blue`, `green`, `purple`, `red`, `yellow`, `white`).
 yenisini ekler, ✕ ile çıkarır, ok tuşlarıyla sırasını değiştirirsiniz.
 **Genel varsayılan yap** seçimi sütunu olmayan bütün gruplara uygular.
 Başlığa tıklamak sıralar, arama kutusu (`/` kısayolu) seçili bütün sütunlarda
-büyük/küçük harf ayırmadan süzer; Türkçe `İ/ı` ayrımı gözetilmez.
+büyük/küçük harf ayırmadan süzer; Türkçe `İ/ı` ayrımı gözetilmez. Yerel alan
+değerleri, sütunu seçili olmasa bile aramaya dahildir.
 
 Satıra tıklamak sağdan detay çekmecesini açar (`Esc` kapatır); anahtar sütunu
-kaydı Jira'da yeni sekmede açar.
+kaydı Jira'da yeni sekmede açar. Yerel alan hücresine tıklamak çekmeceyi açmaz,
+hücreyi düzenlemeye alır.
+
+### Yerel alanlar
+
+Üst çubuktaki **Alanlar** düğmesi kendi bilginizi tutacağınız alanları yönetir.
+Bu alanlar Jira'ya **asla gönderilmez**, **Güncelle** bunların üzerine yazmaz.
+
+- Alanlar geneldir (bütün gruplarda ortak), değer kayıt başına tektir. Bir kayıt
+  iki grupta geçse bile değeri tektir.
+- Tipler: metin, sayı, tarih, evet/hayır, liste. Değer yazılırken doğrulanır ve
+  normalleştirilir: sayı ondalık noktalı düz metne (`3,5` → `3.5`), tarih ISO
+  biçimine (`11.09.2026` → `2026-09-11`) çevrilir, liste değeri seçeneklerden
+  biri olmak zorundadır. Hücreyi boşaltmak değeri siler.
+- Alanın tipi sonradan değiştirilemez; adı, seçenekleri ve geçmiş anahtarı
+  değişebilir. Ad büyük/küçük harf ve Türkçe `İ/ı` ayrımı gözetilmeden benzersizdir.
+- Alanı silmek o alandaki bütün değerleri ve geçmişi siler, sütunu kullanan
+  grupların sütun listesinden de düşürür. Arayüz kaç kayıt etkileneceğini sorar.
+
+Grid'de yerel hücreye tıklayın: tipe göre metin kutusu, tarih seçici, onay kutusu
+ya da açılır liste açılır. `Enter` kaydeder, `Esc` vazgeçer, odak kaybı kaydeder.
+Hatalı değer kırmızı kenarlıkla ve kısa bir mesajla geri döner. Aynı alanlar
+detay çekmecesinde de ayrı bir bölümde düzenlenebilir.
+
+#### Geçmiş
+
+Alan tanımında **geçmişi tut** işaretliyse, değer her *gerçekten* değiştiğinde
+bir satır düşülür (aynı değeri tekrar yazmak satır eklemez). Hücrenin kenarındaki
+saat simgesi değişim sayısını gösterir; tıklayınca zaman çizelgesi açılır
+(`11.09.2026 09:05  bekliyor → müşteriye soruldu`). Satırlar tek tek silinebilir,
+**Geçmişi temizle** hepsini kaldırır — değerin kendisi durur.
+
+Geçmişi sonradan açarsanız kayıt o andan itibaren tutulur; kapatırsanız o ana
+kadar biriken geçmiş **silinmez**, yalnızca yeni satır eklenmez.
+
+Geçmişi tutulan her alan için sütun seçicide iki türetilmiş sütun daha çıkar:
+**son değişim** (tarih-saat) ve **kaç kez değişti** (sayı). İkisi de normal sütun
+gibi sıralanır.
+
+Kayıt gruptan çıkarılsa bile yerel değer ve geçmiş durur (kayıt geri gelirse
+bilgi kaybolmasın).
 
 ### Güncelle
 

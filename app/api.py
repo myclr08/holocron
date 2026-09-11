@@ -263,9 +263,16 @@ def group_issues(
     schemas = repository.field_schemas(conn)
 
     items = repository.list_items(conn, group_id)
-    stored = repository.get_issues(conn, [item["key"] for item in items])
+    keys = [item["key"] for item in items]
+    stored = repository.get_issues(conn, keys)
+    local_fields = repository.local_fields_by_id(conn)
+    local_values = repository.local_values_for(conn, keys)
+    local_stats = repository.history_stats(conn, keys)
+    local_view = _LocalView(local_fields, local_values, local_stats)
 
-    rows = [_build_row(item, stored.get(item["key"]), columns, schemas) for item in items]
+    rows = [
+        _build_row(item, stored.get(item["key"]), columns, schemas, local_view) for item in items
+    ]
     total = len(rows)
 
     needle = field_utils.fold(q.strip()) if q else ""
@@ -274,7 +281,7 @@ def group_issues(
 
     sort_field, direction = _sort_choice(group, sort, dir)
     if sort_field:
-        rows = _sort_rows(rows, sort_field, direction, schemas)
+        rows = _sort_rows(rows, sort_field, direction, schemas, local_view)
 
     base_url = (context.settings.get("jira.base_url", "") or "").rstrip("/")
     for row in rows:
@@ -282,12 +289,11 @@ def group_issues(
         for cell in row["cells"]:
             cell["text"] = field_utils.truncate(cell["text"])
         row.pop("_raw", None)
+        row.pop("_local_text", None)
 
     return {
         "group": group,
-        "columns": [
-            {"id": column, "name": repository.field_name(schemas, column)} for column in columns
-        ],
+        "columns": [_column_head(column, schemas, local_view) for column in columns],
         "rows": rows,
         "total": total,
         "shown": len(rows),
@@ -300,9 +306,15 @@ def group_issues(
 def read_issue(request: Request, key: str) -> dict[str, Any]:
     context = get_context(request)
     conn = context.conn
-    record = repository.get_issue(conn, key)
-    if record is None:
+    clean_key = str(key).strip().upper()
+    record = repository.get_issue(conn, clean_key)
+    if record is None and not repository.issue_is_known(conn, clean_key):
         raise RepositoryError("issue_not_found", "Kayit henuz cekilmemis.", status=404)
+
+    # Henuz cekilmemis ama bir grupta duran kayit: Jira alanlari bos gelir,
+    # yerel alanlar yine de okunup duzenlenebilir.
+    if record is None:
+        record = {"key": clean_key, "fetched_at": None, "raw": {"key": clean_key, "fields": {}}}
 
     schemas = repository.field_schemas(conn)
     raw = record["raw"]
@@ -319,9 +331,124 @@ def read_issue(request: Request, key: str) -> dict[str, Any]:
     return {
         "key": record["key"],
         "fetched_at": record["fetched_at"],
+        "missing": record["fetched_at"] is None,
         "url": f"{base_url}/browse/{record['key']}" if base_url else "",
         "fields": values,
+        "local": _local_detail(conn, record["key"]),
     }
+
+
+# --- yerel alanlar ------------------------------------------------------
+
+
+@router.get("/local-fields")
+def list_local_fields(request: Request) -> dict[str, Any]:
+    context = get_context(request)
+    return {
+        "fields": repository.list_local_fields(context.conn),
+        "types": [
+            {"id": name, "label": field_utils.LOCAL_TYPE_LABELS[name]}
+            for name in field_utils.LOCAL_TYPES
+        ],
+    }
+
+
+@router.post("/local-fields")
+def create_local_field(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
+    context = get_context(request)
+    with context.db_lock:
+        field = repository.create_local_field(
+            context.conn,
+            name=str(payload.get("name") or ""),
+            type=str(payload.get("type") or field_utils.LOCAL_TEXT),
+            options=payload.get("options"),
+            track_history=bool(payload.get("track_history")),
+        )
+    return {"field": field}
+
+
+@router.post("/local-fields/reorder")
+def reorder_local_fields(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
+    context = get_context(request)
+    ids = payload.get("ids")
+    if not isinstance(ids, list):
+        return error_response("invalid_order", "ids bir liste olmali.")
+    with context.db_lock:
+        fields = repository.reorder_local_fields(context.conn, ids)
+    return {"fields": fields}
+
+
+@router.get("/local-fields/{field_id}")
+def read_local_field(request: Request, field_id: int) -> dict[str, Any]:
+    context = get_context(request)
+    return {"field": repository.require_local_field(context.conn, field_id)}
+
+
+@router.put("/local-fields/{field_id}")
+def write_local_field(
+    request: Request, field_id: int, payload: dict[str, Any] = Body(default_factory=dict)
+):
+    context = get_context(request)
+    with context.db_lock:
+        field = repository.update_local_field(context.conn, field_id, payload)
+    return {"field": field}
+
+
+@router.delete("/local-fields/{field_id}")
+def drop_local_field(request: Request, field_id: int) -> dict[str, Any]:
+    context = get_context(request)
+    with context.db_lock:
+        return repository.delete_local_field(context.conn, field_id)
+
+
+# --- kayit basina yerel deger ve gecmis ---------------------------------
+
+
+@router.put("/issues/{key}/local/{field_id}")
+def write_local_value(
+    request: Request,
+    key: str,
+    field_id: int,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    context = get_context(request)
+    with context.db_lock:
+        return repository.set_local_value(context.conn, key, field_id, payload.get("value"))
+
+
+@router.get("/issues/{key}/local/{field_id}/history")
+def read_local_history(request: Request, key: str, field_id: int) -> dict[str, Any]:
+    context = get_context(request)
+    conn = context.conn
+    field = repository.require_local_field(conn, field_id)
+    entries = repository.list_local_history(conn, key, field_id)
+    return {
+        "key": str(key).strip().upper(),
+        "field": repository.local_column_id(field["id"]),
+        "name": field["name"],
+        "track_history": field["track_history"],
+        "entries": entries,
+        "changes": len(entries),
+    }
+
+
+@router.delete("/issues/{key}/local/{field_id}/history")
+def clear_local_history(request: Request, key: str, field_id: int) -> dict[str, Any]:
+    context = get_context(request)
+    with context.db_lock:
+        removed = repository.clear_local_history(context.conn, key, field_id)
+    return {"ok": True, "removed": removed}
+
+
+@router.delete("/issues/{key}/local/{field_id}/history/{history_id}")
+def drop_local_history_entry(
+    request: Request, key: str, field_id: int, history_id: int
+) -> dict[str, Any]:
+    context = get_context(request)
+    with context.db_lock:
+        repository.delete_local_history_entry(context.conn, key, field_id, history_id)
+        remaining = repository.list_local_history(context.conn, key, field_id)
+    return {"ok": True, "changes": len(remaining)}
 
 
 # --- Guncelle -----------------------------------------------------------
@@ -360,15 +487,108 @@ def cancel_refresh(request: Request) -> dict[str, Any]:
 # --- ic yardimcilar -----------------------------------------------------
 
 
+class _LocalView:
+    """Bir istek boyunca yerel alan/deger/gecmis okumalarini bir arada tutar."""
+
+    def __init__(
+        self,
+        fields: dict[int, dict[str, Any]],
+        values: dict[str, dict[int, dict[str, Any]]],
+        stats: dict[str, dict[int, dict[str, Any]]],
+    ) -> None:
+        self.fields = fields
+        self.values = values
+        self.stats = stats
+
+    def column(self, column: str) -> tuple[dict[str, Any], str] | None:
+        """Sutun kimligi yerel bir alana isaret ediyorsa (alan, turetilmis-ek)."""
+        parsed = repository.parse_local_column(column)
+        if parsed is None:
+            return None
+        field = self.fields.get(parsed[0])
+        return (field, parsed[1]) if field else None
+
+    def stat(self, key: str, field_id: int) -> dict[str, Any]:
+        return self.stats.get(key, {}).get(field_id, {})
+
+    def value(self, key: str, field_id: int) -> str:
+        return self.values.get(key, {}).get(field_id, {}).get("value", "")
+
+    def raw_for(self, key: str, field: dict[str, Any], suffix: str) -> Any:
+        if not suffix:
+            return self.value(key, field["id"])
+        stat = self.stat(key, field["id"])
+        if suffix == field_utils.DERIVED_CHANGES:
+            return int(stat.get("changes", 0))
+        return stat.get("changed_at")
+
+    def cell(self, key: str, column: str, field: dict[str, Any], suffix: str) -> dict[str, Any]:
+        raw = self.raw_for(key, field, suffix)
+        if suffix:
+            return {
+                "field": column,
+                "text": field_utils.format_derived_value(suffix, raw),
+                "raw": raw,
+                "derived": suffix,
+            }
+        stat = self.stat(key, field["id"])
+        cell: dict[str, Any] = {
+            "field": column,
+            "text": field_utils.format_local_value(field["type"], raw),
+            "raw": raw,
+            "editable": True,
+            "changes": int(stat.get("changes", 0)),
+            "changed_at": stat.get("changed_at"),
+        }
+        return cell
+
+    def sort_key(
+        self, key: str, field: dict[str, Any], suffix: str
+    ) -> tuple[int, float, str]:
+        raw = self.raw_for(key, field, suffix)
+        if suffix:
+            return field_utils.derived_sort_key(suffix, raw)
+        return field_utils.local_sort_key(field["type"], raw)
+
+    def search_text(self, key: str) -> str:
+        """Aramanin kapsadigi yerel metin: sutun secilmemis olsa da gorunur."""
+        parts = []
+        for field_id, entry in (self.values.get(key) or {}).items():
+            field = self.fields.get(field_id)
+            if field is None:
+                continue
+            parts.append(field_utils.format_local_value(field["type"], entry.get("value")))
+        return " ".join(part for part in parts if part)
+
+
+def _column_head(
+    column: str, schemas: dict[str, dict[str, Any]], local_view: _LocalView
+) -> dict[str, Any]:
+    head: dict[str, Any] = {"id": column, "name": repository.field_name(schemas, column)}
+    found = local_view.column(column)
+    if found is None:
+        return head
+    field, suffix = found
+    head["local"] = field
+    head["derived"] = suffix
+    head["editable"] = not suffix
+    return head
+
+
 def _build_row(
     item: dict[str, Any],
     record: dict[str, Any] | None,
     columns: list[str],
     schemas: dict[str, dict[str, Any]],
+    local_view: _LocalView,
 ) -> dict[str, Any]:
     raw = record["raw"] if record else {"key": item["key"], "fields": {}}
     cells = []
     for column in columns:
+        found = local_view.column(column)
+        if found is not None:
+            cells.append(local_view.cell(item["key"], column, found[0], found[1]))
+            continue
         value = field_utils.issue_value(raw, column)
         cells.append(
             {
@@ -384,6 +604,7 @@ def _build_row(
         "fetched_at": record["fetched_at"] if record else None,
         "cells": cells,
         "_raw": raw,
+        "_local_text": local_view.search_text(item["key"]),
     }
 
 
@@ -401,10 +622,50 @@ def _detail_cell(
     }
 
 
+def _local_detail(conn: Any, key: str) -> list[dict[str, Any]]:
+    """Detay cekmecesinin yerel alan bolumu: deger + acik gecmis listesi."""
+    values = repository.local_values_for(conn, [key]).get(key, {})
+    stats = repository.history_stats(conn, [key]).get(key, {})
+    entries: list[dict[str, Any]] = []
+    for field in repository.list_local_fields(conn):
+        stored = values.get(field["id"], {}).get("value", "")
+        stat = stats.get(field["id"], {})
+        history = (
+            repository.list_local_history(conn, key, field["id"])
+            if stat.get("changes")
+            else []
+        )
+        entries.append(
+            {
+                "field": field["column_id"],
+                # Arayuz hem grid hem cekmecede ayni duzenleyiciyi kullanir; her
+                # ikisinde de alan kimligi "id" adiyla okunur.
+                "id": field["id"],
+                "field_id": field["id"],
+                "name": field["name"],
+                "type": field["type"],
+                "type_label": field["type_label"],
+                "options": field["options"],
+                "track_history": field["track_history"],
+                "value": stored,
+                "text": field_utils.format_local_value(field["type"], stored),
+                "updated_at": values.get(field["id"], {}).get("updated_at"),
+                "changes": int(stat.get("changes", 0)),
+                "changed_at": stat.get("changed_at"),
+                "history": history,
+                "empty": stored == "",
+            }
+        )
+    return entries
+
+
 def _matches(row: dict[str, Any], needle: str) -> bool:
     if needle in field_utils.fold(row["key"]):
         return True
-    return any(needle in field_utils.fold(cell["text"]) for cell in row["cells"])
+    if any(needle in field_utils.fold(cell["text"]) for cell in row["cells"]):
+        return True
+    # Yerel degerler sutun secili olmasa da aranir: kullanicinin kendi notu.
+    return needle in field_utils.fold(row.get("_local_text", ""))
 
 
 def _sort_choice(group: dict[str, Any], sort: str, direction: str) -> tuple[str, str]:
@@ -424,12 +685,18 @@ def _sort_rows(
     field_id: str,
     direction: str,
     schemas: dict[str, dict[str, Any]],
+    local_view: _LocalView,
 ) -> list[dict[str, Any]]:
     schema = schemas.get(field_id)
+    local = local_view.column(field_id)
 
     def key(row: dict[str, Any]) -> tuple[Any, ...]:
-        value = field_utils.issue_value(row["_raw"], field_id)
-        return (*field_utils.sort_key(schema, value), field_utils.fold(row["key"]))
+        if local is not None:
+            base = local_view.sort_key(row["key"], local[0], local[1])
+        else:
+            value = field_utils.issue_value(row["_raw"], field_id)
+            base = field_utils.sort_key(schema, value)
+        return (*base, field_utils.fold(row["key"]))
 
     return sorted(rows, key=key, reverse=direction == "desc")
 
