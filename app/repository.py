@@ -1069,6 +1069,306 @@ def _clean_local_options(field_type: str, options: Any) -> list[str]:
         raise RepositoryError("invalid_options", str(exc)) from exc
 
 
+# --- gorevler (kisisel kanban) ------------------------------------------
+#
+# Gorevler Jira'dan bagimsizdir: kullanicinin kendi listesi. Bir goreve
+# istege bagli olarak tek bir kayit anahtari baglanabilir; anahtar `issues`
+# tablosuna yabanci anahtar DEGILDIR (henuz cekilmemis kayit da baglanabilsin).
+
+TASK_TODO = "todo"
+TASK_DOING = "doing"
+TASK_DONE = "done"
+TASK_STATUSES: tuple[str, ...] = (TASK_TODO, TASK_DOING, TASK_DONE)
+
+TASK_STATUS_LABELS: dict[str, str] = {
+    TASK_TODO: "Yapılacak",
+    TASK_DOING: "Yapılıyor",
+    TASK_DONE: "Yapıldı",
+}
+
+TASK_TITLE_LIMIT = 200
+
+
+def clean_task_status(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text not in TASK_STATUSES:
+        raise RepositoryError(
+            "invalid_status", "Durum yalnızca " + ", ".join(TASK_STATUSES) + " olabilir."
+        )
+    return text
+
+
+def clean_task_title(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise RepositoryError("invalid_title", "Görev adı boş olamaz.")
+    if len(text) > TASK_TITLE_LIMIT:
+        raise RepositoryError("invalid_title", f"Görev adı en fazla {TASK_TITLE_LIMIT} karakter.")
+    return text
+
+
+def clean_task_key(value: Any) -> str | None:
+    """Bos metin bagi kaldirir; bicimi tutmayan metin hata verir."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    keys = parse_issue_keys(text)
+    if len(keys) != 1:
+        raise RepositoryError(
+            "invalid_value", f"Tek bir kayıt anahtarı bekleniyor, '{text}' anlaşılmadı."
+        )
+    return keys[0]
+
+
+def clean_task_due_date(value: Any) -> str | None:
+    """ISO (YYYY-AA-GG) ya da GG.AA.YYYY kabul eder, ISO olarak saklar."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return field_utils.normalize_local_value(field_utils.LOCAL_DATE, text) or None
+    except field_utils.LocalValueError as exc:
+        raise RepositoryError("invalid_due_date", str(exc)) from exc
+
+
+def list_tasks(conn: sqlite3.Connection, status: str | None = None) -> list[dict[str, Any]]:
+    if status is None:
+        rows = conn.execute("SELECT * FROM tasks ORDER BY status, position, id").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM tasks WHERE status = ? ORDER BY position, id",
+            (clean_task_status(status),),
+        ).fetchall()
+    return [_task_dict(row) for row in rows]
+
+
+def get_task(conn: sqlite3.Connection, task_id: int) -> dict[str, Any] | None:
+    try:
+        wanted = int(task_id)
+    except (TypeError, ValueError):
+        return None
+    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (wanted,)).fetchone()
+    return _task_dict(row) if row else None
+
+
+def require_task(conn: sqlite3.Connection, task_id: int) -> dict[str, Any]:
+    task = get_task(conn, task_id)
+    if task is None:
+        raise RepositoryError("task_not_found", "Görev bulunamadı.", status=404)
+    return task
+
+
+def create_task(
+    conn: sqlite3.Connection,
+    title: str,
+    description: Any = None,
+    note: Any = None,
+    due_date: Any = None,
+    status: Any = None,
+    issue_key: Any = None,
+) -> dict[str, Any]:
+    clean_status = clean_task_status(status or TASK_TODO)
+    stamp = now_iso()
+    position = conn.execute(
+        "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM tasks WHERE status = ?",
+        (clean_status,),
+    ).fetchone()["p"]
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO tasks (title, description, note, due_date, status, issue_key, "
+            "position, created_at, updated_at, done_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                clean_task_title(title),
+                _task_text(description),
+                _task_text(note),
+                clean_task_due_date(due_date),
+                clean_status,
+                clean_task_key(issue_key),
+                int(position),
+                stamp,
+                stamp,
+                stamp if clean_status == TASK_DONE else None,
+            ),
+        )
+    return require_task(conn, int(cursor.lastrowid))  # type: ignore[arg-type]
+
+
+def update_task(
+    conn: sqlite3.Connection, task_id: int, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Alanlari gunceller. 'done' olunca done_at yazilir, geri alininca silinir."""
+    task = require_task(conn, task_id)
+    updates: dict[str, Any] = {}
+
+    if "title" in payload:
+        updates["title"] = clean_task_title(payload["title"])
+    if "description" in payload:
+        updates["description"] = _task_text(payload["description"])
+    if "note" in payload:
+        updates["note"] = _task_text(payload["note"])
+    if "due_date" in payload:
+        updates["due_date"] = clean_task_due_date(payload["due_date"])
+    if "issue_key" in payload:
+        updates["issue_key"] = clean_task_key(payload["issue_key"])
+    if "status" in payload and payload["status"] is not None:
+        wanted = clean_task_status(payload["status"])
+        if wanted != task["status"]:
+            updates["status"] = wanted
+            updates["done_at"] = now_iso() if wanted == TASK_DONE else None
+            # Sutun degisti: yeni sutunun sonuna dusesin.
+            updates["position"] = conn.execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM tasks WHERE status = ?",
+                (wanted,),
+            ).fetchone()["p"]
+
+    if not updates:
+        return task
+
+    updates["updated_at"] = now_iso()
+    assignments = ", ".join(f"{column} = ?" for column in updates)
+    with conn:
+        conn.execute(
+            f"UPDATE tasks SET {assignments} WHERE id = ?", (*updates.values(), task["id"])
+        )
+    return require_task(conn, task["id"])
+
+
+def delete_task(conn: sqlite3.Connection, task_id: int) -> bool:
+    task = require_task(conn, task_id)
+    with conn:
+        conn.execute("DELETE FROM tasks WHERE id = ?", (task["id"],))
+    _renumber_tasks(conn, task["status"])
+    return True
+
+
+def move_task(
+    conn: sqlite3.Connection, task_id: int, status: Any = None, position: Any = None
+) -> dict[str, Any]:
+    """Sutun degisimi + sutun ici sira tek islemde."""
+    task = require_task(conn, task_id)
+    target = clean_task_status(status) if status is not None else task["status"]
+
+    others = [
+        int(row["id"])
+        for row in conn.execute(
+            "SELECT id FROM tasks WHERE status = ? AND id <> ? ORDER BY position, id",
+            (target, task["id"]),
+        ).fetchall()
+    ]
+    if position is None:
+        index = len(others)
+    else:
+        try:
+            index = int(position)
+        except (TypeError, ValueError) as exc:
+            raise RepositoryError("invalid_position", "position sayı olmalı.") from exc
+        index = max(0, min(index, len(others)))
+    others.insert(index, task["id"])
+
+    stamp = now_iso()
+    done_at = task["done_at"]
+    if target == TASK_DONE and task["status"] != TASK_DONE:
+        done_at = stamp
+    elif target != TASK_DONE:
+        done_at = None
+
+    source = task["status"]
+    with conn:
+        conn.execute(
+            "UPDATE tasks SET status = ?, done_at = ?, updated_at = ? WHERE id = ?",
+            (target, done_at, stamp, task["id"]),
+        )
+        for order, moved_id in enumerate(others):
+            conn.execute("UPDATE tasks SET position = ? WHERE id = ?", (order, moved_id))
+    if source != target:
+        _renumber_tasks(conn, source)
+    return require_task(conn, task["id"])
+
+
+def reorder_tasks(
+    conn: sqlite3.Connection, ids: Sequence[Any], status: Any = None
+) -> list[dict[str, Any]]:
+    """Bir sutunun sirasi. Listede gecmeyen gorevler mevcut sirayla sona eklenir."""
+    wanted: list[int] = []
+    for value in ids:
+        try:
+            wanted.append(int(value))
+        except (TypeError, ValueError) as exc:
+            raise RepositoryError("invalid_order", "Sıra listesi yalnızca görev kimliği içerir.") from exc
+
+    if status is not None:
+        column = clean_task_status(status)
+    else:
+        first = next((get_task(conn, task_id) for task_id in wanted), None)
+        if first is None:
+            raise RepositoryError("invalid_order", "Sıralanacak görev bulunamadı.")
+        column = first["status"]
+
+    current = [task["id"] for task in list_tasks(conn, column)]
+    ordered = [task_id for task_id in wanted if task_id in current]
+    ordered.extend(task_id for task_id in current if task_id not in ordered)
+    with conn:
+        for order, task_id in enumerate(ordered):
+            conn.execute("UPDATE tasks SET position = ? WHERE id = ?", (order, task_id))
+    return list_tasks(conn, column)
+
+
+def known_issue_keys(
+    conn: sqlite3.Connection, q: str = "", limit: int = 20
+) -> list[dict[str, Any]]:
+    """Bagla alanindaki otomatik tamamlama: cekilmis ve gruplarda gecen anahtarlar."""
+    needle = str(q or "").strip().upper()
+    pattern = f"%{needle}%"
+    rows = conn.execute(
+        "SELECT key FROM issues WHERE ? = '' OR UPPER(key) LIKE ? "
+        "UNION SELECT issue_key AS key FROM group_items WHERE ? = '' OR UPPER(issue_key) LIKE ? "
+        "ORDER BY key",
+        (needle, pattern, needle, pattern),
+    ).fetchall()
+    keys = [row["key"] for row in rows][: max(0, int(limit))]
+    stored = get_issues(conn, keys)
+    result: list[dict[str, Any]] = []
+    for key in keys:
+        record = stored.get(key)
+        raw = (record or {}).get("raw") or {}
+        summary = field_utils.plain_text((raw.get("fields") or {}).get("summary"))
+        result.append({"key": key, "summary": summary, "fetched": record is not None})
+    return result
+
+
+def _renumber_tasks(conn: sqlite3.Connection, status: str) -> None:
+    """Sutunda bosluk kalmasin: 0..n-1."""
+    rows = conn.execute(
+        "SELECT id FROM tasks WHERE status = ? ORDER BY position, id", (status,)
+    ).fetchall()
+    with conn:
+        for order, row in enumerate(rows):
+            conn.execute("UPDATE tasks SET position = ? WHERE id = ?", (order, row["id"]))
+
+
+def _task_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
+    return text or None
+
+
+def _task_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "description": row["description"] or "",
+        "note": row["note"] or "",
+        "due_date": row["due_date"] or "",
+        "status": row["status"],
+        "issue_key": row["issue_key"] or "",
+        "position": row["position"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "done_at": row["done_at"],
+    }
+
+
 # --- ic yardimcilar -----------------------------------------------------
 
 

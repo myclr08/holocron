@@ -7,7 +7,15 @@ from typing import Any
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse, Response
 
-from . import __version__, db, export, fields as field_utils, grid, repository
+from . import (
+    __version__,
+    db,
+    export,
+    fields as field_utils,
+    grid,
+    repository,
+    tasks as task_utils,
+)
 from .context import AppContext
 from .diagnose import run_diagnostics
 from .jira_client import JiraError
@@ -328,6 +336,18 @@ def export_group(
     )
 
 
+@router.get("/issues/keys")
+def list_issue_keys(request: Request, q: str = "", limit: int = 20) -> dict[str, Any]:
+    """Gorev formundaki 'Jira kaydi' alaninin otomatik tamamlama listesi.
+
+    Bu uc `/issues/{key}`'den ONCE tanimlanir; sonra gelirse "keys" bir kayit
+    anahtari sanilir ve 404 doner.
+    """
+    context = get_context(request)
+    capped = max(1, min(int(limit or 20), 50))
+    return {"keys": repository.known_issue_keys(context.connection(), q, capped)}
+
+
 @router.get("/issues/{key}")
 def read_issue(request: Request, key: str) -> dict[str, Any]:
     context = get_context(request)
@@ -362,6 +382,121 @@ def read_issue(request: Request, key: str) -> dict[str, Any]:
         "fields": values,
         "local": _local_detail(conn, record["key"]),
     }
+
+
+# --- gorevler (kisisel kanban) ------------------------------------------
+#
+# Yol sirasi onemli: "summary", "export.xlsx" ve "reorder" sabit yollari
+# "/tasks/{task_id}"den once gelmeli.
+
+
+@router.get("/tasks")
+def read_tasks(request: Request, q: str = "", include_old_done: str = "") -> dict[str, Any]:
+    context = get_context(request)
+    board = task_utils.build_board(context, q=q, include_old_done=export.truthy(include_old_done))
+    return _board_payload(board)
+
+
+@router.post("/tasks")
+def create_task(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
+    context = get_context(request)
+    with context.db_lock:
+        task = repository.create_task(
+            context.connection(),
+            title=payload.get("title"),
+            description=payload.get("description"),
+            note=payload.get("note"),
+            due_date=payload.get("due_date"),
+            status=payload.get("status"),
+            issue_key=payload.get("issue_key"),
+        )
+    return {"task": _task_payload(context, task)}
+
+
+@router.get("/tasks/summary")
+def read_tasks_summary(request: Request) -> dict[str, Any]:
+    """Kenar cubugu rozeti; pano yuklenmeden de okunur."""
+    context = get_context(request)
+    return task_utils.summary_counts(context.connection())
+
+
+@router.get("/tasks/export.xlsx")
+def export_tasks(request: Request, status: str = "all", q: str = ""):
+    context = get_context(request)
+    if status and status != "all":
+        repository.clean_task_status(status)
+    payload = export.build_tasks_workbook(context, status=status or "all", q=q)
+    return Response(
+        content=payload,
+        media_type=export.MEDIA_TYPE,
+        headers={"Content-Disposition": export.content_disposition(export.TASKS_NAME)},
+    )
+
+
+@router.post("/tasks/reorder")
+def reorder_tasks(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
+    context = get_context(request)
+    ids = payload.get("ids")
+    if not isinstance(ids, list):
+        return error_response("invalid_order", "ids bir liste olmalı.")
+    with context.db_lock:
+        repository.reorder_tasks(context.connection(), ids, payload.get("status"))
+    return _board_payload(task_utils.build_board(context))
+
+
+@router.put("/tasks/{task_id}")
+def write_task(request: Request, task_id: int, payload: dict[str, Any] = Body(default_factory=dict)):
+    context = get_context(request)
+    with context.db_lock:
+        task = repository.update_task(context.connection(), task_id, payload)
+    return {"task": _task_payload(context, task)}
+
+
+@router.delete("/tasks/{task_id}")
+def drop_task(request: Request, task_id: int) -> dict[str, Any]:
+    context = get_context(request)
+    with context.db_lock:
+        repository.delete_task(context.connection(), task_id)
+    return {"ok": True}
+
+
+@router.post("/tasks/{task_id}/move")
+def move_task(request: Request, task_id: int, payload: dict[str, Any] = Body(default_factory=dict)):
+    context = get_context(request)
+    with context.db_lock:
+        task = repository.move_task(
+            context.connection(),
+            task_id,
+            status=payload.get("status"),
+            position=payload.get("position"),
+        )
+    return {"task": _task_payload(context, task)}
+
+
+def _board_payload(board: task_utils.Board) -> dict[str, Any]:
+    return {
+        "columns": board.columns,
+        "old_done_count": board.old_done_count,
+        "summary": board.summary,
+        "base_url": board.base_url,
+        "statuses": [
+            {"id": name, "label": repository.TASK_STATUS_LABELS[name]}
+            for name in repository.TASK_STATUSES
+        ],
+    }
+
+
+def _task_payload(context: AppContext, task: dict[str, Any]) -> dict[str, Any]:
+    """Tek gorev: kart ile ayni bicimde (due_state + bagli kayit)."""
+    card = dict(task)
+    card["due_state"] = task_utils.due_state(task["due_date"])
+    base_url = (context.settings.get("jira.base_url", "") or "").rstrip("/")
+    if task["issue_key"]:
+        record = repository.get_issue(context.connection(), task["issue_key"])
+        card["issue"] = task_utils.issue_view(task["issue_key"], record, base_url)
+    else:
+        card["issue"] = None
+    return card
 
 
 # --- yerel alanlar ------------------------------------------------------

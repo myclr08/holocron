@@ -12,8 +12,8 @@ uygulamanın yanındaki `holocron.db` dosyasında kalır, hiçbir yere gönderil
 
 Gruplar (manuel ve JQL filtresi), kayıt listesi, sütun seçici, arama, arka
 planda çalışan **Güncelle** işi, kendi tanımladığınız **yerel alanlar** (alan
-başına değişim geçmişiyle), **Excel'e aktarma** ve tam tema kullanılabilir
-durumda. Taşınabilir Windows/Linux paketleri etiket itildiğinde üretilir.
+başına değişim geçmişiyle), kişisel kanban panosu (**Görevlerim**),
+**Excel'e aktarma** ve tam tema kullanılabilir durumda. Taşınabilir Windows/Linux paketleri etiket itildiğinde üretilir.
 
 ## Gereksinimler
 
@@ -313,6 +313,41 @@ eklersin; **görünen süzgeç ve sıralama** varsayılan olarak uygulanır. Dos
 Aynı dosyayı doğrudan da indirebilirsin:
 `GET /api/groups/<id>/export.xlsx?columns=issuekey,summary&history=1&q=&sort=&dir=`
 
+### Görevlerim
+
+Sol kenarda, grupların üstünde duran **Görevlerim** kendi işlerinizin panosudur.
+Jira'dan bağımsızdır: üç sütun (**Yapılacak**, **Yapılıyor**, **Yapıldı**), her
+kartta ad, açıklama, not ve son tarih vardır. Rozet açık görev sayısını gösterir,
+gecikmiş görev varsa kırmızıya döner.
+
+- **Yeni görev** düğmesi pencereyi açar; `Ctrl+Enter` kaydeder, `Esc` kapatır.
+  Karta tıklamak aynı pencereyi düzenleme kipinde açar, **Sil** onay ister.
+- Kart sürükleyip bırakılarak hem sütun hem sıra değiştirir; klavye ve fare
+  kullanmadan da olsun diye sağ üstteki `←` / `→` düğmeleri kartı komşu sütuna
+  taşır. Sütun **Yapıldı** olunca tamamlanma zamanı damgalanır, geri alınınca
+  silinir.
+- Son tarih rozeti geciken kartta kırmızı, bugün bitmesi gerekende sarı, üç gün
+  içinde gelende turuncu, uzaktakinde nötrdür.
+- Arama kutusu (`/` kısayolu burada da çalışır) ad, açıklama, not, bağlı kayıt
+  anahtarı ve bağlı kaydın özeti üzerinde süzer.
+- Biten kartlardan tamamlanması **30 günden eski** olanlar panoyu doldurmasın
+  diye gizlenir; kaç tane olduğu yazar, **Eskileri göster** hepsini geri getirir.
+
+#### Bir görevi Jira kaydına bağlamak
+
+Pencerede **Jira kaydı** alanına anahtarı yazın (`DEMO-1`) ya da kaydın
+bağlantısını yapıştırın; kutunun altında bilinen anahtarlardan öneri gelir.
+Bağ zorunlu değildir ve **henüz çekilmemiş** bir anahtar da bağlanabilir —
+o durumda kart "henüz çekilmedi" der, kayıt ilk Güncelle'de özetiyle gelir.
+Kartın üstündeki anahtara tıklamak sağdaki detay çekmecesini açar. Ters yön de
+var: grid'de satırın sonundaki görev düğmesi, adı Jira özetiyle önden dolu bir
+görev penceresi açar.
+
+Görevler **Excel'e aktar** ile tek sayfalık bir dosyaya yazılır: Durum, Ad,
+Açıklama, Not, Son tarih (gerçek tarih hücresi), Jira kaydı (köprü), Jira özeti,
+Jira durumu, Oluşturma, Tamamlanma. Dosya eski biten kartları da kapsar.
+Doğrudan da indirilebilir: `GET /api/tasks/export.xlsx?status=all|todo|doing|done`
+
 ### Güncelle
 
 **Güncelle** bütün grupları, **Güncelle (bu grup)** yalnız açık olanı tazeler.
@@ -416,6 +451,7 @@ değiştirilir (`tests/fake_jira.py`).
 | `app/repository.py` | Gruplar, üyelikler, kayıtlar ve alan kataloğu (tüm SQL) |
 | `app/fields.py` | Alan değerlerini metne çeviren saf formatlayıcı |
 | `app/grid.py` | Grid satırlarının kurulması (ekran ve Excel ortak kaynağı) |
+| `app/tasks.py` | Görev panosunun kurulması (sütunlar, son tarih durumu) |
 | `app/export.py` | Grup → Excel (.xlsx) dosyası |
 | `app/refresh.py` | Arka planda çalışan Güncelle işi |
 | `app/static/` | Vanilla HTML/CSS/JS arayüz, dış bağımlılık yok |

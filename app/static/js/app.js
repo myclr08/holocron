@@ -42,6 +42,16 @@ const state = {
   toastTimer: null,
   doneTimer: null,
   crawlTimer: null,
+  view: "groups",
+  tasks: {
+    columns: [],
+    oldDone: 0,
+    includeOld: false,
+    query: "",
+    summary: { open: 0, overdue: 0 },
+    baseUrl: "",
+    drag: null,
+  },
 };
 
 // --- kucuk yardimcilar --------------------------------------------------
@@ -157,7 +167,9 @@ function renderGroups() {
     const row = h(
       "div",
       {
-        class: "group-item" + (group.id === state.activeId ? " active" : ""),
+        class:
+          "group-item" +
+          (state.view !== "tasks" && group.id === state.activeId ? " active" : ""),
         title: group.kind === "filter" ? group.jql : "Manuel grup",
         onclick: () => selectGroup(group.id),
       },
@@ -210,6 +222,7 @@ async function move(index, delta) {
 }
 
 function showPlaceholder() {
+  if (state.view === "tasks") return;
   state.activeId = null;
   state.group = null;
   el("placeholder").hidden = false;
@@ -218,6 +231,8 @@ function showPlaceholder() {
 
 async function selectGroup(groupId, keepView) {
   const changing = state.activeId !== groupId;
+  // Arka planda tazeleme (keepView) gorev panosunu kapatmaz; grubu tiklamak kapatir.
+  if (!keepView) leaveTasks();
   state.activeId = groupId;
   if (changing || !keepView) {
     state.query = "";
@@ -225,7 +240,7 @@ async function selectGroup(groupId, keepView) {
     state.sort = null;
   }
   el("placeholder").hidden = true;
-  el("group-view").hidden = false;
+  if (state.view !== "tasks") el("group-view").hidden = false;
   renderGroups();
   await loadIssues();
 }
@@ -378,6 +393,17 @@ function renderRow(row) {
 
   const isFilter = state.group && state.group.kind === "filter";
   const actions = h("div", { class: "row-actions" }, [
+    h(
+      "button",
+      {
+        title: "Bu kayıt için görev oluştur",
+        onclick: (event) => {
+          event.stopPropagation();
+          taskFromRow(row);
+        },
+      },
+      [icon("task")]
+    ),
     isFilter
       ? h(
           "button",
@@ -1381,6 +1407,415 @@ function exportModal() {
   ]);
 }
 
+// --- Görevlerim: kişisel kanban -----------------------------------------
+
+const TASK_LABEL = { todo: "Yapılacak", doing: "Yapılıyor", done: "Yapıldı" };
+const TASK_ORDER = ["todo", "doing", "done"];
+// Son tarih rozetinin baslik metni; renk CSS'te due-<durum> ile gelir.
+const DUE_TITLE = {
+  overdue: "Gecikti",
+  today: "Bugün son gün",
+  soon: "Yaklaşıyor",
+  later: "Son tarih",
+  none: "",
+};
+const KEY_SUGGEST_MS = 220;
+
+/** "2026-09-11" -> "11.09.2026". Saat dilimi kaydirmasi olmasin diye elle. */
+function dateText(iso) {
+  const parts = String(iso || "").split("-");
+  if (parts.length !== 3) return String(iso || "");
+  return `${parts[2]}.${parts[1]}.${parts[0]}`;
+}
+
+function showTasks() {
+  state.view = "tasks";
+  el("placeholder").hidden = true;
+  el("group-view").hidden = true;
+  el("tasks-view").hidden = false;
+  el("tasks-entry").classList.add("active");
+  renderGroups();
+  closeDrawer();
+  loadTasks();
+}
+
+function leaveTasks() {
+  state.view = "groups";
+  el("tasks-view").hidden = true;
+  el("tasks-entry").classList.remove("active");
+}
+
+function setTaskBadge(summary) {
+  const counts = summary || { open: 0, overdue: 0 };
+  state.tasks.summary = counts;
+  const badge = el("tasks-badge");
+  badge.textContent = String(counts.open || 0);
+  badge.classList.toggle("overdue", (counts.overdue || 0) > 0);
+  badge.title = counts.overdue ? `${counts.overdue} gecikmiş görev` : "Açık görev sayısı";
+}
+
+async function refreshTaskBadge() {
+  try {
+    setTaskBadge(await api("/api/tasks/summary"));
+  } catch (err) {
+    // Rozet ikincil bilgi; okunamazsa ekran yine calisir.
+  }
+}
+
+async function loadTasks() {
+  const params = new URLSearchParams();
+  if (state.tasks.query) params.set("q", state.tasks.query);
+  if (state.tasks.includeOld) params.set("include_old_done", "1");
+  const query = params.toString();
+  try {
+    const data = await api(`/api/tasks${query ? "?" + query : ""}`);
+    state.tasks.columns = data.columns || [];
+    state.tasks.oldDone = data.old_done_count || 0;
+    state.tasks.baseUrl = data.base_url || "";
+    setTaskBadge(data.summary);
+    renderKanban();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+function renderKanban() {
+  const board = el("kanban");
+  clear(board);
+  const shown = state.tasks.columns.reduce((total, column) => total + column.count, 0);
+  el("tasks-count").textContent = `${shown} görev`;
+
+  const old = el("tasks-old");
+  old.hidden = !state.tasks.oldDone && !state.tasks.includeOld;
+  old.textContent = state.tasks.includeOld ? "Eskileri gizle" : "Eskileri göster";
+  old.title = state.tasks.includeOld
+    ? "30 günden eski biten görevleri gizle"
+    : `${state.tasks.oldDone} eski biten görev gizli`;
+  el("tasks-hint").textContent =
+    !state.tasks.includeOld && state.tasks.oldDone
+      ? `${state.tasks.oldDone} eski biten görev gizli`
+      : "";
+
+  state.tasks.columns.forEach((column) => board.appendChild(renderColumn(column)));
+}
+
+function renderColumn(column) {
+  const body = h("div", { class: "kanban-body" }, []);
+  if (!column.tasks.length) {
+    body.appendChild(h("div", { class: "kanban-drop", text: "Buraya sürükle" }));
+  }
+  column.tasks.forEach((task) => body.appendChild(taskCard(task, column)));
+
+  body.addEventListener("dragover", (event) => {
+    if (state.tasks.drag === null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    body.classList.add("drop-over");
+  });
+  body.addEventListener("dragleave", (event) => {
+    if (event.target === body) body.classList.remove("drop-over");
+  });
+  body.addEventListener("drop", (event) => {
+    event.preventDefault();
+    body.classList.remove("drop-over");
+    const carried = Number(event.dataTransfer.getData("text/plain"));
+    const taskId = carried || state.tasks.drag;
+    if (!taskId) return;
+    moveTask(taskId, column.status, dropIndex(body, event.clientY, taskId));
+  });
+
+  return h("div", { class: "kanban-column column-" + column.status }, [
+    h("div", { class: "kanban-head" }, [
+      h("span", { class: "kanban-name", text: column.label }),
+      h("span", { class: "count", text: String(column.count) }),
+    ]),
+    body,
+  ]);
+}
+
+/** Birakilan noktanin sutun icindeki sirasi (surüklenen kart sayilmaz). */
+function dropIndex(body, y, taskId) {
+  const cards = Array.from(body.querySelectorAll(".task-card")).filter(
+    (card) => Number(card.dataset.id) !== taskId
+  );
+  let index = 0;
+  cards.forEach((card) => {
+    const box = card.getBoundingClientRect();
+    if (y > box.top + box.height / 2) index += 1;
+  });
+  return index;
+}
+
+function taskCard(task, column) {
+  const card = h("div", {
+    class: "task-card" + (task.status === "done" ? " is-done" : ""),
+    draggable: "true",
+    tabindex: "0",
+    onclick: () => taskModal(task),
+  });
+  card.dataset.id = String(task.id);
+
+  const index = TASK_ORDER.indexOf(column.status);
+  const arrows = h("div", { class: "task-arrows" }, [
+    h("button", {
+      text: "←",
+      title: index > 0 ? `${TASK_LABEL[TASK_ORDER[index - 1]]} sütununa taşı` : "En soldaki sütun",
+      disabled: index <= 0,
+      onclick: (event) => {
+        event.stopPropagation();
+        moveTask(task.id, TASK_ORDER[index - 1], null);
+      },
+    }),
+    h("button", {
+      text: "→",
+      title:
+        index < TASK_ORDER.length - 1
+          ? `${TASK_LABEL[TASK_ORDER[index + 1]]} sütununa taşı`
+          : "En sağdaki sütun",
+      disabled: index >= TASK_ORDER.length - 1,
+      onclick: (event) => {
+        event.stopPropagation();
+        moveTask(task.id, TASK_ORDER[index + 1], null);
+      },
+    }),
+  ]);
+
+  card.appendChild(
+    h("div", { class: "task-top" }, [h("span", { class: "task-title", text: task.title }), arrows])
+  );
+
+  if (task.due_date) {
+    card.appendChild(
+      h("div", { class: "task-line" }, [
+        h("span", {
+          class: "due-badge due-" + (task.due_state || "none"),
+          text: dateText(task.due_date),
+          title: DUE_TITLE[task.due_state] || "Son tarih",
+        }),
+      ])
+    );
+  }
+
+  if (task.issue) card.appendChild(taskIssueLine(task.issue));
+
+  if (task.description) {
+    card.appendChild(h("div", { class: "task-desc", text: task.description }));
+  }
+  if (task.status === "done" && task.done_at) {
+    card.appendChild(h("div", { class: "task-done-at", text: "Bitti: " + stamp(task.done_at) }));
+  }
+
+  card.addEventListener("dragstart", (event) => {
+    state.tasks.drag = task.id;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(task.id));
+    card.classList.add("dragging");
+  });
+  card.addEventListener("dragend", () => {
+    state.tasks.drag = null;
+    card.classList.remove("dragging");
+  });
+  return card;
+}
+
+function taskIssueLine(issue) {
+  const line = h("div", { class: "task-issue" }, [
+    h("button", {
+      class: "task-key",
+      text: issue.key,
+      title: "Kaydın detayını aç",
+      onclick: (event) => {
+        event.stopPropagation();
+        openDrawer(issue.key);
+      },
+    }),
+  ]);
+  if (issue.url) {
+    line.appendChild(
+      h("a", {
+        class: "task-jira",
+        href: issue.url,
+        target: "_blank",
+        rel: "noopener",
+        text: "Jira",
+        title: "Jira'da aç",
+        onclick: (event) => event.stopPropagation(),
+      })
+    );
+  }
+  if (issue.summary) {
+    line.appendChild(h("span", { class: "task-summary", text: issue.summary }));
+  }
+  if (issue.status_text) {
+    line.appendChild(
+      h("span", {
+        class:
+          "status-pill" + (issue.status_category ? " status-" + issue.status_category : ""),
+        text: issue.status_text,
+      })
+    );
+  } else if (!issue.fetched) {
+    line.appendChild(h("span", { class: "task-unfetched", text: "henüz çekilmedi" }));
+  }
+  return line;
+}
+
+async function moveTask(taskId, status, position) {
+  try {
+    const payload = { status: status };
+    if (position !== null && position !== undefined) payload.position = position;
+    await api(`/api/tasks/${taskId}/move`, { method: "POST", body: JSON.stringify(payload) });
+    await loadTasks();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+/** Yeni görev / düzenleme penceresi. `preset` grid'den gelen ön dolu alanlar. */
+function taskModal(existing, preset) {
+  const seed = existing || preset || {};
+  const titleInput = h("input", { type: "text", value: seed.title || "" });
+  const descInput = h("textarea", { placeholder: "Görev ne hakkında?" });
+  descInput.value = seed.description || "";
+  const noteInput = h("textarea", { placeholder: "Kendine not" });
+  noteInput.value = seed.note || "";
+  const dueInput = h("input", { type: "date", value: seed.due_date || "" });
+
+  const statusSelect = h("select", {}, []);
+  TASK_ORDER.forEach((name) =>
+    statusSelect.appendChild(h("option", { value: name, text: TASK_LABEL[name] }))
+  );
+  statusSelect.value = seed.status || "todo";
+
+  const keyInput = h("input", {
+    type: "text",
+    value: seed.issue_key || "",
+    placeholder: "DEMO-1",
+    autocomplete: "off",
+  });
+  const suggestions = h("datalist", { id: "task-issue-keys" }, []);
+  keyInput.setAttribute("list", "task-issue-keys");
+  const keyNote = h("p", { class: "hint", text: "" });
+
+  let suggestTimer = null;
+  const suggest = async () => {
+    const typed = keyInput.value.trim();
+    try {
+      const data = await api(`/api/issues/keys?q=${encodeURIComponent(typed)}`);
+      clear(suggestions);
+      (data.keys || []).forEach((item) =>
+        suggestions.appendChild(
+          h("option", { value: item.key, label: item.summary || item.key })
+        )
+      );
+      if (!typed) {
+        keyNote.textContent = "";
+        return;
+      }
+      const found = (data.keys || []).find(
+        (item) => item.key === typed.toUpperCase() && item.fetched
+      );
+      keyNote.textContent = found
+        ? found.summary || ""
+        : "Bu kayıt henüz çekilmedi; bağ yine de kurulur.";
+    } catch (err) {
+      keyNote.textContent = "";
+    }
+  };
+  keyInput.addEventListener("input", () => {
+    clearTimeout(suggestTimer);
+    suggestTimer = setTimeout(suggest, KEY_SUGGEST_MS);
+  });
+  suggest();
+
+  const body = h("div", {}, [
+    field("Ad", titleInput),
+    field("Açıklama", descInput),
+    field("Not", noteInput),
+    h("div", { class: "row" }, [field("Son tarih", dueInput), field("Durum", statusSelect)]),
+    field("Jira kaydı", h("div", {}, [keyInput, suggestions, keyNote])),
+    h("p", {
+      class: "hint",
+      text: "Görevler Jira'ya gitmez; bağlı kayıt yalnızca burada görünür. Ctrl+Enter kaydeder.",
+    }),
+  ]);
+
+  const save = async () => {
+    const payload = {
+      title: titleInput.value,
+      description: descInput.value,
+      note: noteInput.value,
+      due_date: dueInput.value,
+      status: statusSelect.value,
+      issue_key: keyInput.value,
+    };
+    try {
+      if (existing) {
+        await api(`/api/tasks/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) });
+      } else {
+        await api("/api/tasks", { method: "POST", body: JSON.stringify(payload) });
+      }
+      closeModal();
+      if (state.view === "tasks") {
+        await loadTasks();
+        return;
+      }
+      // Grid'den açılan pencere kullanıcıyı panoya sürüklemez; rozet tazelenir.
+      await refreshTaskBadge();
+      toast(
+        existing ? "Görev güncellendi" : "Görev oluşturuldu",
+        titleInput.value.trim(),
+        "ok"
+      );
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  body.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      save();
+    }
+  });
+
+  const buttons = [{ label: "Vazgeç", onClick: closeModal }];
+  if (existing) {
+    buttons.unshift({ label: "Sil", kind: "danger", onClick: () => dropTask(existing) });
+  }
+  buttons.push({ label: "Kaydet", kind: "primary", onClick: save });
+
+  openModal(existing ? "Görevi düzenle" : "Yeni görev", body, buttons);
+}
+
+async function dropTask(task) {
+  if (!confirm(`"${task.title}" görevi silinsin mi?`)) return;
+  try {
+    await api(`/api/tasks/${task.id}`, { method: "DELETE" });
+    closeModal();
+    await loadTasks();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+/** Grid satirindan görev: anahtar bagli, ad Jira özetiyle ön dolu. */
+function taskFromRow(row) {
+  const index = state.columns.findIndex((column) => column.id === "summary");
+  const summary = index >= 0 ? (row.cells[index] || {}).text : "";
+  taskModal(null, { issue_key: row.key, title: summary || row.key });
+}
+
+function exportTasks() {
+  const params = new URLSearchParams();
+  params.set("status", "all");
+  if (state.tasks.query) params.set("q", state.tasks.query);
+  const link = h("a", { href: `/api/tasks/export.xlsx?${params.toString()}`, download: true });
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 // --- Guncelle -----------------------------------------------------------
 
 /** Halkayi doldurur: 0..1 arasi oran saat yonunde sari yay olur. */
@@ -1470,6 +1905,8 @@ function finishRefresh(status) {
     state.changed = {};
   }, CHANGED_MS);
   loadGroups(state.activeId).catch(fail);
+  if (state.view === "tasks") loadTasks();
+  else refreshTaskBadge();
 }
 
 function refreshToast(status) {
@@ -1562,6 +1999,24 @@ function bindEvents() {
   el("choose-columns").addEventListener("click", columnsModal);
   el("export-xlsx").addEventListener("click", exportModal);
   el("local-fields").addEventListener("click", localFieldsModal);
+  el("tasks-entry").addEventListener("click", showTasks);
+  el("tasks-entry").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      showTasks();
+    }
+  });
+  el("new-task").addEventListener("click", () => taskModal(null));
+  el("tasks-export").addEventListener("click", exportTasks);
+  el("tasks-old").addEventListener("click", () => {
+    state.tasks.includeOld = !state.tasks.includeOld;
+    loadTasks();
+  });
+  el("task-search").addEventListener("input", (event) => {
+    state.tasks.query = event.target.value;
+    clearTimeout(state.searchTimer);
+    state.searchTimer = setTimeout(loadTasks, 200);
+  });
   el("history-close").addEventListener("click", closeHistory);
   el("history-clear").addEventListener("click", clearHistory);
   el("refresh-all").addEventListener("click", () => startRefresh(null));
@@ -1602,9 +2057,14 @@ function bindEvents() {
     }
     const active = document.activeElement;
     const typing = active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName);
-    if (event.key === "/" && !typing && !el("group-view").hidden) {
-      event.preventDefault();
-      el("search").focus();
+    if (event.key === "/" && !typing) {
+      if (!el("tasks-view").hidden) {
+        event.preventDefault();
+        el("task-search").focus();
+      } else if (!el("group-view").hidden) {
+        event.preventDefault();
+        el("search").focus();
+      }
     }
   });
 }
@@ -1636,5 +2096,6 @@ document.addEventListener("DOMContentLoaded", () => {
     .catch(() => {});
 
   loadGroups().catch(fail);
+  refreshTaskBadge();
   pollRefresh();
 });

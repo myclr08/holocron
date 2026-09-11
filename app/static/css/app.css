@@ -1229,6 +1229,202 @@ html.crawl-open .layout { visibility: hidden; }
 
 .crawl-skip .checkbox { color: var(--muted); }
 
+/* --- Gorevlerim: kisisel kanban ---------------------------------------- */
+
+/* Kenar cubugunda gruplarin ustunde sabit satir. */
+.tasks-entry {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px 8px 0;
+  margin-bottom: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--speed) var(--ease);
+}
+
+.tasks-entry:hover { background: rgba(255, 255, 255, .03); }
+.tasks-entry.active { background: var(--panel-2); border-color: var(--line); }
+.tasks-entry:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+.tasks-entry .color-strip {
+  width: 3px;
+  height: 22px;
+  border-radius: 2px;
+  opacity: .8;
+}
+
+.tasks-entry.active .color-strip { width: 4px; opacity: 1; }
+.tasks-entry .name { flex: 1; color: var(--muted); }
+.tasks-entry.active .name { color: var(--text); font-weight: 500; }
+
+.tasks-entry .count {
+  min-width: 22px;
+  text-align: center;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+
+/* Gecikmis gorev varsa rozet kirmizi yanar. */
+.tasks-entry .count.overdue {
+  color: var(--saber-red);
+  border-color: rgba(255, 59, 59, .45);
+}
+
+#tasks-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+
+.kanban {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.kanban-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.kanban-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.kanban-name {
+  font-family: var(--display);
+  font-size: 17px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.kanban-head .count { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+
+.kanban-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 120px;
+}
+
+.kanban-body.drop-over { background: rgba(255, 232, 31, .05); }
+
+.kanban-drop {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 18px 10px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.task-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--speed) var(--ease);
+}
+
+.task-card:hover { border-color: var(--line-strong); }
+.task-card:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.task-card.dragging { opacity: .45; }
+.task-card.is-done { opacity: .6; }
+
+.task-top { display: flex; align-items: flex-start; gap: 8px; }
+.task-title { flex: 1; font-weight: 600; overflow-wrap: anywhere; }
+
+.task-arrows { display: flex; gap: 2px; flex: 0 0 auto; }
+
+.task-arrows button {
+  padding: 0 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  background: none;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.task-arrows button:hover:not(:disabled) { color: var(--accent); border-color: var(--line); }
+
+.task-line { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.due-badge {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--muted);
+}
+
+.due-badge.due-overdue { color: var(--saber-red); border-color: rgba(255, 59, 59, .45); }
+.due-badge.due-today { color: var(--accent); border-color: rgba(255, 232, 31, .45); }
+.due-badge.due-soon { color: #ffab40; border-color: rgba(255, 171, 64, .45); }
+.due-badge.due-later, .due-badge.due-none { color: var(--muted); }
+
+.task-issue { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+
+.task-key {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.task-key:hover { background: none; border: 0; text-decoration: underline; }
+.task-jira { color: var(--muted); font-size: 11px; }
+.task-summary { color: var(--muted); overflow-wrap: anywhere; }
+.task-unfetched { color: var(--muted); font-style: italic; }
+
+/* Aciklamanin ilk iki satiri; gerisi duzenleme penceresinde. */
+.task-desc {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.task-done-at { color: var(--muted); font-size: 11px; font-family: var(--mono); }
+
+/* 1024'te sutunlar yan yana kalir, yalnizca daralir. */
+@media (max-width: 1024px) {
+  .kanban { gap: 8px; }
+  .kanban-body { padding: 8px; }
+}
+
+/* 900 altinda alt alta: sutunlar artik okunacak kadar genis degil. */
+@media (max-width: 900px) {
+  .kanban { grid-template-columns: 1fr; }
+  .kanban-body { max-height: 320px; }
+}
+
 /* --- duyarli davranis --------------------------------------------------- */
 
 @media (max-width: 1024px) {

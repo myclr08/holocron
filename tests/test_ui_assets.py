@@ -342,6 +342,85 @@ def test_favicon_is_our_own_drawing(api_client):
     assert "2e9bff" in svg.lower()
 
 
+# --- Asama 6: Gorevlerim (kisisel kanban) -------------------------------
+
+
+def test_tasks_entry_sits_above_the_groups(api_client):
+    page = api_client.get("/").text
+    entry = page.split('id="group-list"')[0]
+    assert 'id="tasks-entry"' in entry, "Görevlerim satırı grup listesinin üstünde olmalı"
+    assert "Görevlerim" in entry
+    assert 'id="tasks-badge"' in entry
+    # Kilic seridi sari: gruplarin renginden ayrilsin.
+    assert "color-yellow" in entry
+
+
+def test_task_board_hooks_are_on_the_page(api_client):
+    page = api_client.get("/").text
+    for marker in (
+        'id="tasks-view"',
+        "GÖREVLERİM",
+        'id="new-task"',
+        "Yeni görev",
+        'id="task-search"',
+        'id="tasks-export"',
+        'id="tasks-old"',
+        "Eskileri göster",
+        'id="kanban"',
+    ):
+        assert marker in page, marker
+
+
+def test_task_script_covers_the_board_and_the_form(api_client):
+    script = api_client.get("/static/js/app.js").text
+    for marker in (
+        "/api/tasks",
+        "/api/tasks/summary",
+        "tasks/export.xlsx",
+        "/api/issues/keys",
+        "function taskModal",
+        "function renderKanban",
+        "function dropIndex",
+        '"Yapılacak"',
+        '"Yapılıyor"',
+        '"Yapıldı"',
+        "Buraya sürükle",
+        "Bu kayıt henüz çekilmedi",
+        "Bu kayıt için görev oluştur",
+    ):
+        assert marker in script, marker
+    # Surukle-birak ve klavye ile tasima birlikte var.
+    for marker in ("dragstart", "dragover", "drop", '"←"', '"→"'):
+        assert marker in script, marker
+    # Ctrl+Enter kaydeder.
+    assert "event.ctrlKey || event.metaKey" in script
+
+
+def test_task_board_styles_are_defined(api_client):
+    css = api_client.get("/static/css/app.css").text
+    for name in (
+        ".tasks-entry",
+        ".tasks-entry .count.overdue",
+        ".kanban",
+        ".kanban-column",
+        ".kanban-head",
+        ".kanban-drop",
+        ".task-card",
+        ".task-card.is-done",
+        ".due-badge.due-overdue",
+        ".due-badge.due-today",
+        ".due-badge.due-soon",
+    ):
+        assert name in css, name
+    # Sutun basliklari Pathway Gothic One; Star Wars dozu burada kalir.
+    head = css.split(".kanban-name {", 1)[1].split("}", 1)[0]
+    assert "font-family: var(--display);" in head
+    # 900 altinda alt alta, 1024'te hala yan yana.
+    assert "@media (max-width: 900px)" in css
+    stacked = css.split("@media (max-width: 900px)", 1)[1].split("}", 2)[0]
+    assert "grid-template-columns: 1fr" in stacked
+
+
 # --- Ag teshisi: kurum agi denetimleri ----------------------------------
 
 

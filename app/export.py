@@ -20,7 +20,7 @@ from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from . import __version__, fields as field_utils, grid, repository
+from . import __version__, fields as field_utils, grid, repository, tasks as task_utils
 
 MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -328,6 +328,118 @@ def _write_info(
     sheet.column_dimensions["B"].width = min(
         max((len(str(value)) for _, value in lines), default=20) + 2, COLUMN_WIDTH_LIMIT
     )
+
+
+# --- gorevler: tek sayfalik pano dokumu ---------------------------------
+
+TASKS_SHEET = "Görevlerim"
+TASKS_NAME = "Görevlerim"
+
+TASK_HEADERS = (
+    "Durum",
+    "Ad",
+    "Açıklama",
+    "Not",
+    "Son tarih",
+    "Jira kaydı",
+    "Jira özeti",
+    "Jira durumu",
+    "Oluşturma",
+    "Tamamlanma",
+)
+
+# Basliklarin hucre tipleri; geri kalani metin.
+TASK_KINDS = {4: KIND_DATE, 8: KIND_DATETIME, 9: KIND_DATETIME}
+
+
+def build_tasks_workbook(
+    context: Any,
+    status: str = "all",
+    q: str = "",
+    tz: tzinfo | None = None,
+    now: datetime | None = None,
+) -> bytes:
+    """Gorev panosunu tek sayfalik .xlsx olarak uretir.
+
+    Disa aktarim eski biten gorevleri de kapsar: ekranda gizlenmeleri panoyu
+    temiz tutmak icindir, dokumden dusmelerini gerektirmez.
+    """
+    board = task_utils.build_board(
+        context, q=q, include_old_done=True, now=now, status=status or "all"
+    )
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = sheet_title(TASKS_SHEET)
+    sheet.append(list(TASK_HEADERS))
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+
+    widths = [len(text) for text in TASK_HEADERS]
+    for line, task in enumerate(_ordered_tasks(board), start=2):
+        issue = task.get("issue") or {}
+        values = [
+            repository.TASK_STATUS_LABELS.get(task["status"], task["status"]),
+            task["title"],
+            task["description"],
+            task["note"],
+            task["due_date"],
+            task["issue_key"],
+            issue.get("summary", ""),
+            issue.get("status_text", ""),
+            task["created_at"],
+            task["done_at"],
+        ]
+        for index, value in enumerate(values):
+            target = sheet.cell(row=line, column=index + 1)
+            width = _write_task_cell(target, value, TASK_KINDS.get(index, KIND_TEXT), tz)
+            if index == 5 and value and issue.get("url"):
+                target.hyperlink = issue["url"]
+                target.style = "Hyperlink"
+            if width > widths[index]:
+                widths[index] = width
+
+    last_line = sum(len(column["tasks"]) for column in board.columns) + 1
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:{get_column_letter(len(TASK_HEADERS))}{last_line}"
+    for index, width in enumerate(widths):
+        letter = get_column_letter(index + 1)
+        sheet.column_dimensions[letter].width = min(
+            max(width + 2, COLUMN_WIDTH_MIN), COLUMN_WIDTH_LIMIT
+        )
+
+    buffer = io.BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
+
+
+def _ordered_tasks(board: Any) -> list[dict[str, Any]]:
+    """Sutun sirasi (yapilacak -> yapiliyor -> yapildi), icinde kart sirasi."""
+    ordered: list[dict[str, Any]] = []
+    for column in board.columns:
+        ordered.extend(column["tasks"])
+    return ordered
+
+
+def _write_task_cell(target: Any, value: Any, kind: str, tz: tzinfo | None) -> int:
+    text = "" if value is None else str(value)
+    if kind == KIND_DATE:
+        moment = field_utils.parse_moment(text)
+        if moment is not None:
+            target.value = moment.date()
+            target.number_format = EXCEL_DATE_FORMAT
+            return len(EXCEL_DATE_FORMAT)
+    elif kind == KIND_DATETIME:
+        moment = field_utils.parse_moment(text)
+        if moment is not None:
+            local = moment.astimezone(tz) if tz is not None else moment.astimezone()
+            target.value = local.replace(tzinfo=None)
+            target.number_format = EXCEL_DATETIME_FORMAT
+            return len(EXCEL_DATETIME_FORMAT)
+    if not text:
+        return 0
+    target.value = text
+    return _display_width(text)
 
 
 # --- adlandirma ---------------------------------------------------------

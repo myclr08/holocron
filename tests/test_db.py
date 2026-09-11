@@ -11,6 +11,7 @@ EXPECTED_TABLES = {
     "local_value_history",
     "groups",
     "group_items",
+    "tasks",
     "schema_version",
 }
 

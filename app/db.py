@@ -117,10 +117,41 @@ def _migration_0002_local_history(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0003_tasks(conn: sqlite3.Connection) -> None:
+    """Asama 6: kisisel kanban ("Gorevlerim").
+
+    `issue_key` bilerek yabanci anahtar degildir: henuz cekilmemis, hatta
+    hicbir grupta gecmeyen bir anahtar da goreve baglanabilsin diye yalnizca
+    bicimi dogrulanir (`repository.parse_issue_keys`).
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS tasks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            title       TEXT NOT NULL,
+            description TEXT,
+            note        TEXT,
+            due_date    TEXT,
+            status      TEXT NOT NULL DEFAULT 'todo'
+                        CHECK (status IN ('todo', 'doing', 'done')),
+            issue_key   TEXT,
+            position    INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT,
+            updated_at  TEXT,
+            done_at     TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tasks_column ON tasks(status, position, id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_issue ON tasks(issue_key);
+        """
+    )
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
     (2, "local field history", _migration_0002_local_history),
+    (3, "personal tasks", _migration_0003_tasks),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

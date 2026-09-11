@@ -50,6 +50,13 @@
         <h2>Hangar</h2>
         <button class="ghost-accent small" id="new-group" title="Yeni grup oluştur">+ Yeni Filo</button>
       </div>
+      <!-- Gorevlerim gruplarin ustunde sabit durur: kendi listesi, filo degil. -->
+      <div class="tasks-entry" id="tasks-entry" role="button" tabindex="0"
+           title="Kendi görev panonuz">
+        <span class="color-strip color-yellow"></span>
+        <span class="name">Görevlerim</span>
+        <span class="count" id="tasks-badge">0</span>
+      </div>
       <div id="group-list"></div>
     </aside>
 
@@ -121,6 +128,26 @@
             <button class="primary" id="empty-add">Kayıt ekle</button>
           </div>
         </div>
+      </section>
+
+      <section id="tasks-view" hidden>
+        <div class="group-head">
+          <div class="group-title">
+            <span class="color-strip color-yellow"></span>
+            <h2>GÖREVLERİM</h2>
+            <span class="badge" id="tasks-count"></span>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <button class="primary" id="new-task">Yeni görev</button>
+          <input type="search" id="task-search" placeholder="Ara ( / )" autocomplete="off" />
+          <button id="tasks-export" title="Görevleri Excel dosyası olarak indir">Excel'e aktar</button>
+          <button id="tasks-old" hidden>Eskileri göster</button>
+          <span class="hint" id="tasks-hint"></span>
+        </div>
+
+        <div class="kanban" id="kanban"></div>
       </section>
     </main>
   </div>
