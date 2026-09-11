@@ -304,3 +304,20 @@ def test_home_falls_back_when_the_package_folder_is_read_only(monkeypatch, tmp_p
 def test_log_and_port_files_live_in_the_data_directory(isolated_home):
     assert paths.log_path() == isolated_home / "holocron.log"
     assert paths.port_path() == isolated_home / "holocron.port"
+
+
+def test_noisy_loggers_are_pinned_to_warning(tmp_path):
+    """urllib3 DEBUG satiri kurum adresini yaziyordu; paylasilan log sizdirmasin."""
+    runlog.setup_logging(tmp_path / "holocron.log")
+    for name in ("urllib3", "urllib3.connectionpool", "asyncio"):
+        assert logging.getLogger(name).level == logging.WARNING
+    # Kendi gunlukcumuz kisilmaz.
+    assert logging.getLogger("holocron").level in (logging.NOTSET, logging.INFO)
+
+
+def test_the_host_never_reaches_the_log_through_urllib3(tmp_path):
+    log_file = runlog.setup_logging(tmp_path / "holocron.log")
+    logging.getLogger("urllib3.connectionpool").debug(
+        "Starting new HTTPS connection (1): jira.kurum.ornek:443"
+    )
+    assert "jira.kurum.ornek" not in log_file.read_text(encoding="utf-8")

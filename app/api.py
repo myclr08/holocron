@@ -9,10 +9,11 @@ from fastapi.responses import JSONResponse, Response
 
 from . import __version__, db, export, fields as field_utils, grid, repository
 from .context import AppContext
+from .diagnose import run_diagnostics
 from .jira_client import JiraError
 from .lifecycle import BEAT_INTERVAL_SECONDS
 from .repository import RepositoryError
-from .settings_store import MODE_CLOUD, MODE_SERVER
+from .settings_store import MODE_CLOUD, MODE_SERVER, PROXY_MODES
 
 router = APIRouter(prefix="/api")
 
@@ -73,8 +74,27 @@ def write_settings(request: Request, payload: dict[str, Any] = Body(default_fact
     base_url = payload.get("jira.base_url")
     if base_url and not str(base_url).startswith(("http://", "https://")):
         return error_response("invalid_base_url", "Adres http:// veya https:// ile başlamalı.")
+    proxy_mode = payload.get("net.proxy_mode")
+    if proxy_mode is not None and proxy_mode not in PROXY_MODES:
+        return error_response(
+            "invalid_proxy_mode",
+            "Vekil sunucu kipi yalnızca 'system', 'manual' veya 'direct' olabilir.",
+        )
     context.settings.apply(payload)
     return {"settings": context.settings.public_view()}
+
+
+@router.post("/settings/diagnose")
+def diagnose_connection(request: Request) -> dict[str, Any]:
+    """Adim adim ag teshisi.
+
+    "Baglanti kurulamadi" cumlesi kullaniciyi bos biraktigi icin var: DNS mi,
+    TCP mi, TLS mi, vekil sunucu mu takildi, hangi adimda kac milisaniye
+    gecti, hepsi tek listede doner. Cikti kimlik bilgisi tasimaz.
+    """
+    context = get_context(request)
+    config = context.settings.jira_config()
+    return run_diagnostics(config, client_factory=context.client_factory)
 
 
 @router.get("/settings/columns")

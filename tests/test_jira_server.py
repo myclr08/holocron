@@ -151,7 +151,8 @@ def test_proxy_ca_and_verify_are_passed_through(fake_jira, sleeps):
     call = fake_jira.calls_to("GET", "/rest/api/2/field")[0]
     assert call.kwargs["proxies"] == {"https": "http://proxy.example.com:8080"}
     assert call.kwargs["verify"] == "/tmp/ornek-ca.pem"
-    assert call.kwargs["timeout"] == 30.0
+    # (baglanti, okuma): baglanti 10 sn'de kurulmali, cevap icin 30 sn beklenir.
+    assert call.kwargs["timeout"] == (10.0, 30.0)
 
 
 def test_verify_can_be_disabled(fake_jira, sleeps):

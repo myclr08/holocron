@@ -19,6 +19,12 @@ MODE_SERVER = "server"
 AUTH_PAT = "pat"
 AUTH_BASIC = "basic"
 
+# Vekil sunucu kipi: sistemin soyledigi / elle girilen / hic kullanma.
+PROXY_SYSTEM = "system"
+PROXY_MANUAL = "manual"
+PROXY_DIRECT = "direct"
+PROXY_MODES = (PROXY_SYSTEM, PROXY_MANUAL, PROXY_DIRECT)
+
 # Sifrelenerek saklanan anahtarlar.
 SECRET_KEYS: frozenset[str] = frozenset({"jira.secret"})
 
@@ -28,10 +34,18 @@ DEFAULTS: dict[str, str] = {
     "jira.email": "",
     "jira.username": "",
     "jira.auth_type": AUTH_PAT,
+    # Kurum makinesinde https_proxy ortam degiskeni kurumsal vekile bakiyor
+    # ama ic agdaki Jira oradan gorulmuyor; "direct" o tuzagi kesiyor.
+    "net.proxy_mode": PROXY_SYSTEM,
     "net.proxy_http": "",
     "net.proxy_https": "",
     "net.ca_file": "",
     "net.verify_ssl": "1",
+    # IPv6 kaydi donen ama IPv6 yolu kapali aglarda baglanti otuz saniye
+    # asili kaliyordu; varsayilan olarak once IPv4 denenir.
+    "net.ipv4_first": "1",
+    # Vekil sunucudan muaf tutulacak adresler (virgulle ayrilir).
+    "net.no_proxy": "",
     # Gorunum: yildiz alani ve hareketler acik/kapali, acilis gorulmus mu.
     "ui.starfield": "1",
     "ui.motion": "1",
@@ -56,6 +70,9 @@ class JiraConfig:
     proxy_https: str = ""
     ca_file: str = ""
     verify_ssl: bool = True
+    proxy_mode: str = PROXY_SYSTEM
+    ipv4_first: bool = True
+    no_proxy: str = ""
 
     @property
     def has_secret(self) -> bool:
@@ -126,6 +143,7 @@ class SettingsStore:
         """Arayuze gonderilen ayar goruntusu: sir yok, yalnizca durum bayragi."""
         data: dict[str, Any] = {key: self.get(key, DEFAULTS.get(key, "")) for key in PUBLIC_KEYS}
         data["verify_ssl"] = self.get("net.verify_ssl", "1") == "1"
+        data["ipv4_first"] = self.get("net.ipv4_first", "1") == "1"
         data["secret_set"] = self.has_secret("jira.secret")
         return data
 
@@ -135,7 +153,7 @@ class SettingsStore:
             if key not in payload:
                 continue
             value = payload[key]
-            if key == "net.verify_ssl":
+            if key in ("net.verify_ssl", "net.ipv4_first"):
                 value = "1" if _as_bool(value) else "0"
             self.set(key, "" if value is None else str(value))
 
@@ -159,11 +177,20 @@ class SettingsStore:
             username=(self.get("jira.username", "") or "").strip(),
             auth_type=self.get("jira.auth_type", AUTH_PAT) or AUTH_PAT,
             secret=self.get("jira.secret", "") or "",
+            proxy_mode=_proxy_mode(self.get("net.proxy_mode", PROXY_SYSTEM)),
             proxy_http=(self.get("net.proxy_http", "") or "").strip(),
             proxy_https=(self.get("net.proxy_https", "") or "").strip(),
             ca_file=(self.get("net.ca_file", "") or "").strip(),
             verify_ssl=self.get("net.verify_ssl", "1") == "1",
+            ipv4_first=self.get("net.ipv4_first", "1") == "1",
+            no_proxy=(self.get("net.no_proxy", "") or "").strip(),
         )
+
+
+def _proxy_mode(value: str | None) -> str:
+    """Bilinmeyen deger varsayilana duser; ayar dosyasi elle bozulmus olabilir."""
+    mode = (value or "").strip().lower()
+    return mode if mode in PROXY_MODES else PROXY_SYSTEM
 
 
 def _as_bool(value: Any) -> bool:

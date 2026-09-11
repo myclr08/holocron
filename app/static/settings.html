@@ -76,6 +76,30 @@
       <div class="card">
         <h2>Ağ</h2>
         <p class="hint">Kurum ağı vekil sunucu ya da özel sertifika kullanıyorsa buraya yazın.</p>
+
+        <div class="field">
+          <span class="label-text">Vekil sunucu</span>
+          <div class="choice-group" id="proxy-mode">
+            <label class="checkbox">
+              <input type="radio" name="proxy-mode" value="system" checked />
+              Sistem ayarını kullan (ortam değişkeni ya da Windows kayıt defteri)
+            </label>
+            <label class="checkbox">
+              <input type="radio" name="proxy-mode" value="manual" />
+              Aşağıdaki alanları kullan
+            </label>
+            <label class="checkbox">
+              <input type="radio" name="proxy-mode" value="direct" />
+              Doğrudan bağlan (vekil sunucu yok)
+            </label>
+          </div>
+          <p class="hint">
+            Jira iç ağdaysa kurumsal vekil sunucu onu göremez ve tünel zaman aşımına uğrar.
+            O durumda <strong>Doğrudan bağlan</strong> seçin: <code>https_proxy</code> gibi
+            ortam değişkenleri yok sayılır.
+          </p>
+        </div>
+
         <div class="row">
           <div class="field">
             <label for="proxy-http">HTTP vekil sunucu</label>
@@ -87,6 +111,11 @@
           </div>
         </div>
         <div class="field">
+          <label for="no-proxy">Vekil sunucudan muaf adresler</label>
+          <input type="text" id="no-proxy" placeholder="jira.example.com, .kurum.local" />
+          <p class="hint">Virgülle ayırın. İç ağdaki adresler vekil sunucuya uğramadan çıkar.</p>
+        </div>
+        <div class="field">
           <label for="ca-file">Özel CA dosyası yolu</label>
           <input type="text" id="ca-file" placeholder="C:\sertifika\kurum-ca.pem" />
         </div>
@@ -94,14 +123,20 @@
           <input type="checkbox" id="verify-ssl" checked />
           SSL sertifikasını doğrula (kapatmak güvenliği düşürür)
         </label>
+        <label class="checkbox">
+          <input type="checkbox" id="ipv4-first" checked />
+          Önce IPv4 dene (IPv6 kaydı olup IPv6 yolu kapalı ağlarda beklemeyi keser)
+        </label>
 
         <div class="actions">
           <button class="primary" id="save">Kaydet</button>
           <button id="test">Bağlantıyı sına</button>
+          <button id="diagnose">Teşhis</button>
           <button id="fields">Alan kataloğunu çek</button>
           <button class="danger" id="clear-secret">Kayıtlı sırrı sil</button>
         </div>
         <div class="status" id="status" hidden></div>
+        <div class="diagnosis" id="diagnosis" hidden></div>
       </div>
 
       <div class="card" id="appearance">

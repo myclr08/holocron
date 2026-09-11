@@ -33,6 +33,17 @@ FILE_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 # eskisi temizlensin, log satirlari cift gorunmesin.
 _MARK = "_holocron_handler"
 
+# WARNING'in altini hic yazmayan gunlukculer: gurultu ve gizlilik.
+QUIET_LOGGERS: tuple[str, ...] = (
+    "uvicorn",
+    "uvicorn.error",
+    "uvicorn.access",
+    "urllib3",
+    "urllib3.connectionpool",
+    "asyncio",
+    "charset_normalizer",
+)
+
 log = logging.getLogger(LOGGER_NAME)
 
 
@@ -125,7 +136,12 @@ def setup_logging(
 
     # uvicorn kendi bicimlendiricisini kurmuyor (log_config=None); kendi
     # gunlukculeri kokten gecsin, gurultu WARNING'de kessin.
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    #
+    # urllib3 ayni sebeple degil, gizlilik icin kisiliyor: DEBUG seviyesinde
+    # "Starting new HTTPS connection (1): jira.kurum.local:443" yaziyor ve
+    # kullanici sorun bildirirken log dosyasini oldugu gibi paylasiyor. Kurum
+    # adresi oradan disari sizmasin. Kendi gunlukcumuz INFO'da kalir.
+    for name in QUIET_LOGGERS:
         logger = logging.getLogger(name)
         logger.setLevel(logging.WARNING)
         logger.propagate = True

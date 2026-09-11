@@ -6,7 +6,15 @@ import pytest
 
 from app import paths
 from app.secrets import SecretBox, SecretError, ensure_key
-from app.settings_store import AUTH_BASIC, AUTH_PAT, MODE_CLOUD, MODE_SERVER
+from app.settings_store import (
+    AUTH_BASIC,
+    AUTH_PAT,
+    MODE_CLOUD,
+    MODE_SERVER,
+    PROXY_DIRECT,
+    PROXY_MANUAL,
+    PROXY_SYSTEM,
+)
 
 TOKEN = "ornek-pat-degeri-1234"
 
@@ -128,3 +136,52 @@ def test_key_lives_in_home_dir(isolated_home):
 def test_broken_ciphertext_raises(box):
     with pytest.raises(SecretError):
         box.decrypt("bu-bir-fernet-degeri-degil")
+
+
+# --- kurum agi ayarlari --------------------------------------------------
+
+
+def test_network_defaults_are_system_proxy_and_ipv4_first(store):
+    view = store.public_view()
+    assert view["net.proxy_mode"] == PROXY_SYSTEM
+    assert view["ipv4_first"] is True
+    assert view["net.no_proxy"] == ""
+    config = store.jira_config()
+    assert config.proxy_mode == PROXY_SYSTEM
+    assert config.ipv4_first is True
+
+
+def test_proxy_mode_round_trip(store):
+    for mode in (PROXY_DIRECT, PROXY_MANUAL, PROXY_SYSTEM):
+        store.apply({"net.proxy_mode": mode})
+        assert store.jira_config().proxy_mode == mode
+
+
+def test_a_broken_proxy_mode_falls_back_to_system(store):
+    store.set("net.proxy_mode", "sacmalik")
+    assert store.jira_config().proxy_mode == PROXY_SYSTEM
+
+
+def test_ipv4_first_round_trip(store):
+    store.apply({"net.ipv4_first": False})
+    assert store.public_view()["ipv4_first"] is False
+    assert store.jira_config().ipv4_first is False
+    store.apply({"net.ipv4_first": True})
+    assert store.jira_config().ipv4_first is True
+
+
+def test_no_proxy_is_trimmed(store):
+    store.apply({"net.no_proxy": "  jira.example.com, .kurum.local  "})
+    assert store.jira_config().no_proxy == "jira.example.com, .kurum.local"
+
+
+def test_api_rejects_an_unknown_proxy_mode(api_client):
+    response = api_client.put("/api/settings", json={"net.proxy_mode": "sacmalik"})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_proxy_mode"
+
+
+def test_api_accepts_the_three_proxy_modes(api_client):
+    for mode in ("system", "manual", "direct"):
+        settings = api_client.put("/api/settings", json={"net.proxy_mode": mode}).json()["settings"]
+        assert settings["net.proxy_mode"] == mode

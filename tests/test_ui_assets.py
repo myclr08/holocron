@@ -340,3 +340,41 @@ def test_favicon_is_our_own_drawing(api_client):
     assert svg.startswith("<svg")
     assert "#ffe81f" in svg.lower()
     assert "2e9bff" in svg.lower()
+
+
+# --- Ag teshisi: kurum agi denetimleri ----------------------------------
+
+
+def test_network_controls_are_on_the_settings_page(api_client):
+    page = api_client.get("/settings").text
+    for marker in (
+        'id="proxy-mode"',
+        'value="direct"',
+        "Doğrudan bağlan",
+        'id="no-proxy"',
+        'id="ipv4-first"',
+        "Önce IPv4 dene",
+        'id="diagnose"',
+        ">Teşhis<",
+        'id="diagnosis"',
+    ):
+        assert marker in page, marker
+
+
+def test_the_diagnosis_list_is_drawn_and_styled(api_client):
+    script = api_client.get("/static/js/settings.js").text
+    assert "/api/settings/diagnose" in script
+    assert "renderDiagnosis" in script
+    assert "net.proxy_mode" in script
+    assert "net.ipv4_first" in script
+    css = api_client.get("/static/css/app.css").text
+    for name in (".diagnosis-advice", ".steps", ".step.fail", ".step-ms"):
+        assert name in css, name
+
+
+def test_the_diagnosis_is_built_from_nodes_not_html(api_client):
+    """Sunucudan gelen metin innerHTML'e girmesin: adres ve sertifika adi disaridan."""
+    script = api_client.get("/static/js/settings.js").text
+    body = script.split("function renderDiagnosis", 1)[1].split("async function diagnose", 1)[0]
+    assert "innerHTML" not in body
+    assert "textContent" in body

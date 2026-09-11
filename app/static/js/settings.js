@@ -7,8 +7,23 @@ const FIELD_IDS = {
   "jira.auth_type": "auth-type",
   "net.proxy_http": "proxy-http",
   "net.proxy_https": "proxy-https",
+  "net.no_proxy": "no-proxy",
   "net.ca_file": "ca-file",
 };
+
+const STEP_MARK = { ok: "✓", fail: "✕", skip: "–" };
+
+function proxyMode() {
+  const picked = document.querySelector("input[name='proxy-mode']:checked");
+  return picked ? picked.value : "system";
+}
+
+function setProxyMode(mode) {
+  const value = ["system", "manual", "direct"].includes(mode) ? mode : "system";
+  document.querySelectorAll("input[name='proxy-mode']").forEach((radio) => {
+    radio.checked = radio.value === value;
+  });
+}
 
 function applyModeVisibility() {
   const mode = document.getElementById("mode").value;
@@ -30,6 +45,8 @@ function fillForm(settings) {
     if (el) el.value = settings[key] || "";
   });
   document.getElementById("verify-ssl").checked = settings.verify_ssl !== false;
+  document.getElementById("ipv4-first").checked = settings.ipv4_first !== false;
+  setProxyMode(settings["net.proxy_mode"]);
   const badge = document.getElementById("secret-state");
   badge.textContent = settings.secret_set ? "ayarlı" : "ayarsız";
   badge.className = "badge" + (settings.secret_set ? " on" : "");
@@ -46,6 +63,8 @@ function collectForm() {
     if (el) payload[key] = el.value.trim();
   });
   payload["net.verify_ssl"] = document.getElementById("verify-ssl").checked;
+  payload["net.ipv4_first"] = document.getElementById("ipv4-first").checked;
+  payload["net.proxy_mode"] = proxyMode();
   const secret = document.getElementById("secret").value;
   if (secret) payload["jira.secret"] = secret;
   return payload;
@@ -127,6 +146,76 @@ async function testConnection() {
   }
 }
 
+/** Teshis sonucunu adim listesi olarak cizer; kirmizi adimda oneri metni durur. */
+function renderDiagnosis(result) {
+  const box = document.getElementById("diagnosis");
+  box.textContent = "";
+
+  const head = document.createElement("p");
+  head.className = "diagnosis-summary " + (result.ok ? "ok" : "error");
+  head.textContent = result.summary || "";
+  box.appendChild(head);
+
+  const list = document.createElement("ol");
+  list.className = "steps";
+  (result.steps || []).forEach((step) => {
+    const item = document.createElement("li");
+    item.className = "step " + step.status;
+
+    const mark = document.createElement("span");
+    mark.className = "step-mark";
+    mark.textContent = STEP_MARK[step.status] || "?";
+    item.appendChild(mark);
+
+    const body = document.createElement("div");
+    body.className = "step-body";
+
+    const title = document.createElement("div");
+    title.className = "step-title";
+    title.textContent = step.title;
+    const ms = document.createElement("span");
+    ms.className = "step-ms";
+    ms.textContent = step.ms + " ms";
+    title.appendChild(ms);
+    body.appendChild(title);
+
+    const message = document.createElement("div");
+    message.className = "step-message";
+    message.textContent = step.message || "";
+    body.appendChild(message);
+
+    item.appendChild(body);
+    list.appendChild(item);
+  });
+  box.appendChild(list);
+
+  (result.advice || []).forEach((line) => {
+    const tip = document.createElement("p");
+    tip.className = "diagnosis-advice";
+    tip.textContent = line;
+    box.appendChild(tip);
+  });
+
+  box.hidden = false;
+}
+
+async function diagnose() {
+  const status = document.getElementById("status");
+  const box = document.getElementById("diagnosis");
+  box.hidden = true;
+  setStatus(status, "Teşhis çalışıyor, her adım en çok beş saniye sürer...", null);
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify(collectForm()) });
+    document.getElementById("secret").value = "";
+    const result = await api("/api/settings/diagnose", { method: "POST" });
+    renderDiagnosis(result);
+    setStatus(status, result.ok ? "Teşhis bitti: engel yok." : "Teşhis bitti.", result.ok ? "ok" : "error");
+    await loadSettings();
+  } catch (err) {
+    setStatus(status, "Teşhis çalıştırılamadı: " + err.message, "error");
+  }
+}
+
 async function refreshFields() {
   const status = document.getElementById("status");
   setStatus(status, "Alan kataloğu çekiliyor...", null);
@@ -144,6 +233,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("auth-type").addEventListener("change", applyModeVisibility);
   document.getElementById("save").addEventListener("click", saveSettings);
   document.getElementById("test").addEventListener("click", testConnection);
+  document.getElementById("diagnose").addEventListener("click", diagnose);
   document.getElementById("fields").addEventListener("click", refreshFields);
   document
     .getElementById("ui-starfield")

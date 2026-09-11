@@ -165,6 +165,64 @@ Log dosyasındaki adresi (`http://127.0.0.1:<port>/`) elle açın. Windows'ta
 önce `os.startfile`, olmazsa `webbrowser` denenir; ikisi de olmazsa uygulama
 yine de ayakta kalır, sadece log'a uyarı düşer.
 
+### "Bağlantıyı sına" on saniye sonra hata veriyor
+
+Bağlantı zaman aşımı on saniyedir ve bağlantı kurulamadığında **yeniden
+deneme yapılmaz**: hata hemen döner, sebebini de yazar. (Eskiden üç deneme
+otuzar saniye bekliyordu; kullanıcı doksan saniye sonunda yine aynı cümleyi
+görüyordu.) Okuma zaman aşımı ayrıdır: sunucu bağlandıktan sonra yanıtı otuz
+saniye bekler ve yalnız o durumda yeniden denenir.
+
+Hata mesajı sebebi söyler: adı çözülemedi (DNS), kapı reddedildi, TCP
+kurulamadı, vekil sunucuya ulaşılamadı, sertifika doğrulanamadı. Daha
+ayrıntısı için **Ayarlar → Ağ → Teşhis**.
+
+### Teşhis
+
+**Bağlantıyı sına** düğmesinin yanındaki **Teşhis**, zinciri parçalara ayırıp
+her halkayı süresiyle gösterir:
+
+| Adım | Ne yapar |
+| --- | --- |
+| Adres ayrıştırma | `https://…` biçimi, sunucu adı, kapı numarası |
+| Vekil sunucu | Hangi kip, hangi vekil sunucu, sistemde PAC var mı |
+| Ad çözümleme | `getaddrinfo`: dönen bütün IPv4 ve IPv6 adresleri |
+| TCP (doğrudan) | Her adrese beş saniye; hangisi açıldı |
+| TCP (vekil sunucu üzerinden) | Vekil sunucuya bağlanır, `CONNECT` tüneli dener |
+| TLS | El sıkışma, sertifikanın sahibi ve vereni |
+| HTTP | Kimliksiz `GET /rest/api/2/serverInfo` (401 de olumlu sayılır) |
+| Kimlik | Token ile `myself` |
+
+Her adım yeşil/kırmızı/atlandı ve milisaniye olarak yazılır; kırmızı adımın
+altında ne yapmanız gerektiği durur. Çıktıda kullanıcı adınız ve token'ınız
+**yer almaz**, yalnız sunucu adı ve IP adresleri görünür.
+
+Sık çıkan üç sonuç:
+
+* **Doğrudan TCP açıldı, vekil sunucu tüneli zaman aşımına uğradı.** Jira iç
+  ağda, kurumsal vekil sunucu onu görmüyor. Ayarlar → Ağ → **Doğrudan bağlan**.
+* **PAC tanımlı, vekil sunucu yok.** Windows'ta `AutoConfigURL` var demektir.
+  Holocron PAC (JavaScript) dosyasını çözmez; Jira için geçerli vekil sunucuyu
+  ağ yöneticinizden öğrenip Ayarlar → Ağ'a yazın, ya da iç ağ ise Doğrudan
+  bağlan seçin.
+* **IPv6 adresi zaman aşımına uğradı, IPv4 açıldı.** "Önce IPv4 dene" zaten
+  varsayılan olarak açıktır; kapatmayın.
+
+### Kurum kök sertifikası
+
+Kurum trafiği kendi kök sertifikasıyla açıyorsa TLS adımı "sertifika
+doğrulanamadı" der. Kurumun kök sertifikasını `.pem` olarak alıp
+**Ayarlar → Ağ → Özel CA dosyası** alanına yolunu yazın. SSL doğrulamayı
+kapatmak son çaredir ve güvenliği düşürür.
+
+### Log dosyası kurum adresini yazmıyor
+
+`holocron.log` paylaşılabilir olsun diye `urllib3` ve `asyncio` günlükçüleri
+WARNING'e sabitlenmiştir; eskiden DEBUG satırları `Starting new HTTPS
+connection (1): jira.kurum.local:443` diye sunucu adını yazıyordu. Kendi
+satırlarımız INFO'da kalır ve hata metinlerinde sunucu adı yerine "Jira
+sunucusu" geçer.
+
 ## Kullanım
 
 ### Gruplar (Hangar)
@@ -292,9 +350,32 @@ Kullanıcı adı + parola ile Basic kimlik de desteklenir, ancak PAT önerilir.
 
 ### Kurum ağı
 
-Vekil sunucu, özel CA sertifikası ve SSL doğrulamayı kapatma seçenekleri
-Ayarlar ekranındadır. SSL doğrulamayı kapatmak güvenliği düşürür; mümkünse
-kurumun kök sertifikasını CA dosyası olarak verin.
+**Ayarlar → Ağ** altında vekil sunucu kipi, muaf adresler, özel CA dosyası,
+SSL doğrulaması ve IPv4 önceliği bulunur.
+
+Vekil sunucu kipi üç seçenektir:
+
+* **Sistem ayarını kullan** (varsayılan): alanlar doluysa onlar, boşsa
+  işletim sisteminin bildirdiği değer. Windows'ta bu, ortam değişkenlerinin
+  yanında kayıt defterindeki `ProxyServer` kaydını da kapsar — `requests` tek
+  başına oraya bakmaz.
+* **Aşağıdaki alanları kullan**: yalnız elle yazdığınız adresler; alanlar
+  boşsa vekil sunucu kullanılmaz.
+* **Doğrudan bağlan**: vekil sunucu hiç kullanılmaz, `https_proxy` gibi ortam
+  değişkenleri yok sayılır (`trust_env` kapatılır). Kurum makinesinde ortam
+  değişkeni kurumsal vekile bakıyor ama Jira iç ağdaysa doğru seçenek budur.
+
+**Vekil sunucudan muaf adresler** (`no_proxy`) virgülle ayrılır; `.kurum.local`
+gibi bir son ek yazabilirsiniz. Sistem ve elle kiplerinde geçerlidir.
+
+**Önce IPv4 dene** varsayılan olarak açıktır. Sunucunun AAAA (IPv6) kaydı olup
+IPv6 yolu kapalıysa Python önce IPv6'yı deneyip zaman aşımına düşer, tarayıcı
+ise IPv4'e inip çalışır — "tarayıcıda açılıyor, uygulamada açılmıyor" şikâyeti
+çoğu zaman budur. Kutu açıkken IPv4 adresleri her zaman önce denenir.
+
+SSL doğrulamayı kapatmak güvenliği düşürür; mümkünse kurumun kök sertifikasını
+CA dosyası olarak verin. Takılırsanız **Teşhis** düğmesi hangi adımda
+durduğunuzu söyler (bkz. [Sorun giderme](#teşhis)).
 
 ## Görünüm
 
@@ -330,6 +411,8 @@ değiştirilir (`tests/fake_jira.py`).
 | `holocron_run.py` | Çalışma dizininden bağımsız giriş dosyası (başlatıcılar bunu çağırır) |
 | `app/` | Uygulama kodu (API, veritabanı, Jira istemcisi, arayüz) |
 | `app/runlog.py` | Dosya logu, konsolsuz (pythonw) dayanıklılık, hata yakalama |
+| `app/net.py` | Zaman aşımları, IPv4 önceliği, vekil sunucu kipleri, hata ayrımı |
+| `app/diagnose.py` | Adım adım ağ teşhisi (DNS → TCP → TLS → HTTP → kimlik) |
 | `app/repository.py` | Gruplar, üyelikler, kayıtlar ve alan kataloğu (tüm SQL) |
 | `app/fields.py` | Alan değerlerini metne çeviren saf formatlayıcı |
 | `app/grid.py` | Grid satırlarının kurulması (ekran ve Excel ortak kaynağı) |
