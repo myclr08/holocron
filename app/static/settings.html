@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Holocron - Ayarlar</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <div class="layout">
+    <div class="brand">HOLOCRON</div>
+
+    <header class="topbar">
+      <strong>Ayarlar</strong>
+      <div class="topbar-actions">
+        <a class="button" href="/">Geri</a>
+        <button class="danger" data-action="shutdown">Kapat</button>
+      </div>
+    </header>
+
+    <aside class="sidebar">
+      <h2>Hangar</h2>
+      <div class="empty">Henuz grup yok.</div>
+    </aside>
+
+    <main class="main">
+      <div class="card">
+        <h2>Jira baglantisi</h2>
+        <p class="hint">
+          Kimlik bilgileri yalnizca bu bilgisayarda, sifreli olarak saklanir. Kaydedilen token
+          bir daha ekranda gosterilmez.
+        </p>
+
+        <div class="row">
+          <div class="field">
+            <label for="mode">Mod</label>
+            <select id="mode">
+              <option value="server">Jira Server / Data Center</option>
+              <option value="cloud">Jira Cloud</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="base-url">Jira adresi</label>
+            <input type="url" id="base-url" placeholder="https://jira.example.com" />
+          </div>
+        </div>
+
+        <div id="server-fields">
+          <div class="row">
+            <div class="field">
+              <label for="auth-type">Kimlik turu</label>
+              <select id="auth-type">
+                <option value="pat">Kisisel erisim anahtari (PAT)</option>
+                <option value="basic">Kullanici adi ve parola</option>
+              </select>
+            </div>
+            <div class="field" id="server-username" hidden>
+              <label for="username">Kullanici adi</label>
+              <input type="text" id="username" placeholder="kullanici.adi" />
+            </div>
+          </div>
+        </div>
+
+        <div id="cloud-fields" hidden>
+          <div class="field">
+            <label for="email">Atlassian e-postasi</label>
+            <input type="text" id="email" placeholder="kullanici@example.com" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="secret"><span id="secret-label">Kisisel erisim anahtari (PAT)</span>
+            <span class="badge" id="secret-state">ayarsiz</span></label>
+          <input type="password" id="secret" autocomplete="off" placeholder="Deger girin" />
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Ag</h2>
+        <p class="hint">Kurum agi vekil sunucu ya da ozel sertifika kullaniyorsa buraya yazin.</p>
+        <div class="row">
+          <div class="field">
+            <label for="proxy-http">HTTP vekil sunucu</label>
+            <input type="text" id="proxy-http" placeholder="http://proxy.example.com:8080" />
+          </div>
+          <div class="field">
+            <label for="proxy-https">HTTPS vekil sunucu</label>
+            <input type="text" id="proxy-https" placeholder="http://proxy.example.com:8080" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="ca-file">Ozel CA dosyasi yolu</label>
+          <input type="text" id="ca-file" placeholder="C:\\sertifika\\kurum-ca.pem" />
+        </div>
+        <label class="checkbox">
+          <input type="checkbox" id="verify-ssl" checked />
+          SSL sertifikasini dogrula (kapatmak guvenligi dusurur)
+        </label>
+
+        <div class="actions">
+          <button class="primary" id="save">Kaydet</button>
+          <button id="test">Baglantiyi sina</button>
+          <button id="fields">Alan katalogunu cek</button>
+          <button class="danger" id="clear-secret">Kayitli siri sil</button>
+        </div>
+        <div class="status" id="status" hidden></div>
+      </div>
+    </main>
+  </div>
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/settings.js"></script>
+</body>
+</html>

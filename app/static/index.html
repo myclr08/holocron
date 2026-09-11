@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Holocron</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <div class="layout">
+    <div class="brand">HOLOCRON <span class="badge" id="version"></span></div>
+
+    <header class="topbar">
+      <button id="refresh" disabled title="Kayit gruplari eklendiginde etkinlesir">Guncelle</button>
+      <div class="topbar-actions">
+        <a class="button" href="/settings">Ayarlar</a>
+        <button class="danger" data-action="shutdown">Kapat</button>
+      </div>
+    </header>
+
+    <aside class="sidebar">
+      <h2>Hangar</h2>
+      <div class="empty" id="group-list">Henuz grup yok.</div>
+    </aside>
+
+    <main class="main">
+      <div class="card">
+        <h2>Holocron hazir</h2>
+        <p class="hint" id="connection-hint">Baglanti durumu okunuyor...</p>
+        <p class="hint">
+          Bu asamada yalnizca baglanti ayarlari ve alan katalogu var. Gruplar, sutun secimi ve
+          Excel'e aktarim sonraki asamalarda gelecek.
+        </p>
+      </div>
+    </main>
+  </div>
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+# Sanal ortam
+.venv/
+
+# Yerel veri ve sirlar: asla depoya girmez
+holocron.db
+holocron.db-journal
+holocron.db-wal
+holocron.db-shm
+holocron.key
+
+# Tasinabilir paket artifaktlari
+python-embed/
+wheels/
+dist/
+build/
+*.zip
+
+# Disa aktarim ciktilari
+*.xlsx
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+
+# Editor
+.idea/
+.vscode/
