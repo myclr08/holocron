@@ -53,7 +53,10 @@ DEFAULTS: dict[str, str] = {
     "ui.crawl_seen": "",
     # E-posta (Outlook COM): sifre saklanmaz, acik oturum kullanilir.
     "mail.enabled": "0",
-    "mail.addresses": "",
+    # Uc ayri liste: gonderen, alicilar, CC. Uc "VEYA" ile birlestirilir.
+    "mail.from_addresses": "",
+    "mail.to_addresses": "",
+    "mail.cc_addresses": "",
     "mail.folders": '["Gelen Kutusu"]',
     "mail.days": "30",
     "mail.body_limit": "4000",

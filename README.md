@@ -356,21 +356,35 @@ Doğrudan da indirilebilir: `GET /api/tasks/export.xlsx?status=all|todo|doing|do
 
 ### E-posta (yalnız Windows)
 
-**Ayarlar → E-posta**, Outlook'taki postalarınızdan görev üretir. Kimden, Kime
-ya da CC alanında sizin yazdığınız adreslerden biri geçen her e-posta
-**Görevlerim → Yapılacak** sütununun en üstüne düşer: konu görevin adı, gövde
-açıklaması, altına da "Kimden / Alındı" satırı yazılır. Kart zarf ikonu ve
-**e-posta** rozetiyle gelir, penceresinde **Outlook'ta aç** düğmesi durur.
+**Ayarlar → E-posta**, Outlook'taki postalarınızdan görev üretir. Sizin
+tanımladığınız adres listelerinden birine uyan her e-posta **Görevlerim →
+Yapılacak** sütununun en üstüne düşer: konu görevin adı, gövde açıklaması,
+altına da "Kimden / Alındı" satırı yazılır. Kart zarf ikonu ve **e-posta**
+rozetiyle gelir, penceresinde **Outlook'ta aç** düğmesi durur.
 
 Nasıl çalışır:
 
 - **Bağlantı**: masaüstündeki klasik Outlook'a COM ile bağlanılır (`pywin32`).
   Açık olan oturumunuz kullanılır: **parola sorulmaz, hiçbir yere yazılmaz**,
   sunucu adresi girilmez. Outlook kapalıysa "Bağlantıyı sına" bunu söyler.
-- **Adresler**: virgülle ayrılır. `*@example.com` yazarsanız o alan adının
-  tamamı sayılır. Büyük/küçük harf ayrımı yoktur. Kurum içi adresler Exchange'de
-  `/O=.../CN=...` biçiminde gelir; Holocron bunları birincil SMTP adresine
-  çevirir, çeviremezse o alıcıyı yok sayar (postayı düşürmez).
+- **Adresler**: üç ayrı liste vardır ve her biri yalnızca kendi başlığına bakar.
+
+  | Liste | Ne zaman tutar |
+  | --- | --- |
+  | **Kimden** | Gönderen bu adreslerden biriyse |
+  | **Kime** | Alıcılar arasında bu adreslerden biri varsa |
+  | **CC** | CC'de bu adreslerden biri varsa |
+
+  Üçünden birinin tutması yeter (VEYA). Listeler çapraz tutmaz: **Kimden**
+  listesindeki bir adres postanın Kime alanında geçiyor diye eşleşme saymaz.
+  Böylece "bana gelenler" ile "patronun yazdıkları" ayrı ayrı seçilebilir.
+  Her liste virgülle ayrılır, `*@example.com` alan adının tamamını kapsar,
+  büyük/küçük harf ayrımı yoktur. **Üçü de boşsa** tarama "adres tanımlı
+  değil" der ve hiçbir posta eşleşmez.
+
+  Kurum içi adresler Exchange'de `/O=.../CN=...` biçiminde gelir; Holocron
+  bunları birincil SMTP adresine çevirir, çeviremezse o alıcıyı yok sayar
+  (postayı düşürmez).
 - **Klasörler**: varsayılan Gelen Kutusu'dur. **Klasörleri getir** Outlook'tan
   ağacı çeker, işaretlediğiniz klasörler `Gelen Kutusu\Alt\Klasör` yoluyla
   saklanır.
@@ -387,6 +401,10 @@ Nasıl çalışır:
 - **Ne zaman taranır**: **Şimdi tara** düğmesiyle elle, ya da **Güncelle**
   işinin son aşaması olarak (kapatılabilir). Jira hatası e-posta taramasını
   engellemez, tersi de geçerlidir; özet balonunda "N görev e-postadan" yazar.
+
+Daha önceki sürümde tek bir adres listesi vardı (hem gönderende hem alıcıda
+aranıyordu). Yükseltmede o değer üç listeye de kopyalanır, davranış birebir
+aynı kalır; sonra istediğiniz listeyi boşaltabilirsiniz.
 
 Windows dışında kart "Bu özellik yalnız Windows'ta Outlook ile çalışır" der ve
 düğmeler pasiftir; uçlar `feature_unavailable` döner. `pywin32` yalnızca Windows

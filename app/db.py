@@ -198,12 +198,33 @@ def _migration_0004_mail(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0005_mail_address_lists(conn: sqlite3.Connection) -> None:
+    """Tek adres listesi -> ucu ayri (Kimden / Kime / CC).
+
+    Eski `mail.addresses` hem gonderende hem alicida araniyordu; kullanici
+    "bana gelenler" ile "benim yazdiklarim" arasini ayirmak isteyince liste
+    uce bolundu. Eski deger uc anahtara da kopyalanir (davranis birebir ayni
+    kalir), sonra silinir; goc bir kez calisir.
+    """
+    row = conn.execute("SELECT value FROM settings WHERE key = 'mail.addresses'").fetchone()
+    value = (row["value"] if row else None) or ""
+    if value.strip():
+        for key in ("mail.from_addresses", "mail.to_addresses", "mail.cc_addresses"):
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+    conn.execute("DELETE FROM settings WHERE key = 'mail.addresses'")
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
     (2, "local field history", _migration_0002_local_history),
     (3, "personal tasks", _migration_0003_tasks),
     (4, "mail intake", _migration_0004_mail),
+    (5, "mail address lists", _migration_0005_mail_address_lists),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

@@ -157,12 +157,28 @@
         </label>
 
         <div class="field">
-          <label for="mail-addresses">Takip edilen adresler</label>
-          <input type="text" id="mail-addresses" placeholder="ornek@example.com, *@example.com" />
-          <p class="hint">
-            Virgülle ayırın. <code>*@example.com</code> yazarsanız o alan adının tamamı sayılır.
-          </p>
+          <label for="mail-from">Kimden</label>
+          <input type="text" id="mail-from" placeholder="patron@example.com, *@example.com" />
+          <p class="hint">Gönderen bu adreslerden biriyse.</p>
         </div>
+
+        <div class="field">
+          <label for="mail-to">Kime</label>
+          <input type="text" id="mail-to" placeholder="ornek@example.com" />
+          <p class="hint">Alıcılar arasında bu adreslerden biri varsa.</p>
+        </div>
+
+        <div class="field">
+          <label for="mail-cc">CC</label>
+          <input type="text" id="mail-cc" placeholder="ekip@example.com" />
+          <p class="hint">CC'de bu adreslerden biri varsa.</p>
+        </div>
+
+        <p class="hint">
+          Üçü ayrı çalışır, biri tutması yeter. Virgülle ayırın;
+          <code>*@example.com</code> yazarsanız o alan adının tamamı sayılır.
+          Üçü de boşsa tarama "adres tanımlı değil" der ve hiçbir posta eşleşmez.
+        </p>
 
         <div class="row">
           <div class="field">

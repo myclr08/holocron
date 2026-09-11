@@ -2,9 +2,11 @@
 
 Iki soru burada cevaplanir:
 
-1. **Bu posta beni ilgilendiriyor mu?** Kimden/Kime/CC alanlarindan biri
-   kullanicinin yazdigi adres listesine uyuyorsa evet (`*@example.com` jokeri
-   desteklenir).
+1. **Bu posta beni ilgilendiriyor mu?** Uc ayri liste vardir -- Kimden, Kime,
+   CC -- ve her biri yalnizca kendi alanina bakar: gonderen `from` listesinde
+   VEYA alicilardan biri `to` listesinde VEYA CC'dekilerden biri `cc`
+   listesinde. `*@example.com` jokeri desteklenir. Ucu de bossa hicbir posta
+   eslesmez.
 2. **Bu konusmadan daha once gorev uretildi mi?** Otorite `mail_conversations`
    tablosudur: satir varsa bir daha gorev uretilmez. Gorev silinmis olsa bile
    satir durur, yoksa silinen gorev bir sonraki taramada geri gelirdi.
@@ -17,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable
 
 from .. import fields as field_utils, repository
 from .source import (
@@ -42,19 +44,30 @@ NO_SUBJECT = "(konusuz)"
 
 @dataclass(frozen=True)
 class MailConfig:
-    """Ayarlardan tureyen tarama yapilandirmasi."""
+    """Ayarlardan tureyen tarama yapilandirmasi.
+
+    Uc adres listesi birbirinden bagimsizdir: `from_addresses` yalnizca
+    gonderene, `to_addresses` yalnizca alicilara, `cc_addresses` yalnizca
+    CC'ye bakar.
+    """
 
     enabled: bool = False
-    addresses: tuple[str, ...] = ()
+    from_addresses: tuple[str, ...] = ()
+    to_addresses: tuple[str, ...] = ()
+    cc_addresses: tuple[str, ...] = ()
     folders: tuple[str, ...] = DEFAULT_FOLDERS
     days: int = DEFAULT_DAYS
     body_limit: int = BODY_LIMIT
     scan_on_refresh: bool = True
 
     @property
+    def has_addresses(self) -> bool:
+        return bool(self.from_addresses or self.to_addresses or self.cc_addresses)
+
+    @property
     def ready(self) -> bool:
-        """Tarama anlamli mi? Adres yoksa hicbir sey eslesmez."""
-        return self.enabled and bool(self.addresses)
+        """Tarama anlamli mi? Uc liste de bossa hicbir sey eslesmez."""
+        return self.enabled and self.has_addresses
 
     def since(self, now: datetime | None = None) -> datetime:
         return (now or utc_now()) - timedelta(days=max(1, int(self.days or DEFAULT_DAYS)))
@@ -85,11 +98,12 @@ class ScanSummary:
 def load_config(settings: Any) -> MailConfig:
     """`settings` tablosundan yapilandirma; bozuk deger varsayilana duser."""
     enabled = str(settings.get("mail.enabled", "0") or "0") == "1"
-    addresses = tuple(parse_addresses(settings.get("mail.addresses", "")))
     folders = tuple(parse_folders(settings.get("mail.folders", "")))
     return MailConfig(
         enabled=enabled,
-        addresses=addresses,
+        from_addresses=tuple(parse_addresses(settings.get("mail.from_addresses", ""))),
+        to_addresses=tuple(parse_addresses(settings.get("mail.to_addresses", ""))),
+        cc_addresses=tuple(parse_addresses(settings.get("mail.cc_addresses", ""))),
         folders=folders or DEFAULT_FOLDERS,
         days=_as_int(settings.get("mail.days", DEFAULT_DAYS), DEFAULT_DAYS, low=1, high=365),
         body_limit=_as_int(
@@ -139,13 +153,18 @@ def _as_int(value: Any, fallback: int, low: int, high: int) -> int:
 # --- eslestirme ----------------------------------------------------------
 
 
-def message_matches(message: MailMessage, addresses: Sequence[str]) -> bool:
-    """Gonderen ya da alicilardan biri listedeyse posta bizi ilgilendirir."""
-    if not addresses:
-        return False
-    if address_matches(message.sender_smtp, addresses):
+def message_matches(message: MailMessage, config: MailConfig) -> bool:
+    """Uc yoldan biri tutuyorsa posta bizi ilgilendirir.
+
+    Yollar ayridir: `to` listesindeki bir adres yalnizca Kime alaninda,
+    `cc` listesindeki yalnizca CC alaninda aranir. Boylece "bana gelenler"
+    ile "benim gonderdiklerim" ayri ayri secilebilir.
+    """
+    if address_matches(message.sender_smtp, config.from_addresses):
         return True
-    return any(address_matches(person, addresses) for person in message.recipients)
+    if any(address_matches(person, config.to_addresses) for person in message.to_smtp):
+        return True
+    return any(address_matches(person, config.cc_addresses) for person in message.cc_smtp)
 
 
 def collect(
@@ -183,7 +202,7 @@ def collect(
             moment = as_aware(message.received_at)
             if moment is None or moment < since:
                 continue
-            if not message_matches(message, config.addresses):
+            if not message_matches(message, config):
                 continue
             key = message.message_id or message.entry_id
             if not key or key in picked:

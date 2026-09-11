@@ -39,7 +39,14 @@ def moment(hours_ago: float = 0) -> datetime:
 
 
 def config(**extra) -> intake.MailConfig:
-    values = {"enabled": True, "addresses": (ME,), "folders": ("Gelen Kutusu",), "days": 30}
+    values = {
+        "enabled": True,
+        "from_addresses": (ME,),
+        "to_addresses": (ME,),
+        "cc_addresses": (ME,),
+        "folders": ("Gelen Kutusu",),
+        "days": 30,
+    }
     values.update(extra)
     return intake.MailConfig(**values)
 
@@ -47,7 +54,9 @@ def config(**extra) -> intake.MailConfig:
 def enable_mail(api_client, addresses: str = ME, **extra) -> dict:
     payload = {
         "mail.enabled": "1",
-        "mail.addresses": addresses,
+        "mail.from_addresses": addresses,
+        "mail.to_addresses": addresses,
+        "mail.cc_addresses": addresses,
         "mail.folders": '["Gelen Kutusu"]',
     }
     payload.update(extra)
@@ -106,6 +115,75 @@ def test_conversation_state_is_constrained(conn):
         )
 
 
+# --- goc 0005: tek liste -> uc liste -------------------------------------
+
+
+def old_schema_connection(tmp_path):
+    """Asama 7'nin ilk hali (surum 4): tek `mail.addresses` ayari."""
+    conn = db.connect(tmp_path / "eski.db")
+    db.migrate(conn, db.MIGRATIONS[:4])
+    return conn
+
+
+def test_the_old_single_list_is_copied_into_three(tmp_path):
+    conn = old_schema_connection(tmp_path)
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('mail.addresses', 'ornek@example.com, *@example.com')"
+    )
+    conn.commit()
+
+    db.migrate(conn)
+
+    values = dict(conn.execute("SELECT key, value FROM settings").fetchall())
+    for key in ("mail.from_addresses", "mail.to_addresses", "mail.cc_addresses"):
+        assert values[key] == "ornek@example.com, *@example.com", key
+    # Eski anahtar kalmaz: iki kaynak dogru olmaz.
+    assert "mail.addresses" not in values
+    conn.close()
+
+
+def test_the_migration_keeps_the_old_behaviour(tmp_path):
+    """Tek listeyle eslesecek her posta gocten sonra da eslesir."""
+    conn = old_schema_connection(tmp_path)
+    conn.execute("INSERT INTO settings (key, value) VALUES ('mail.addresses', ?)", (ME,))
+    conn.commit()
+    db.migrate(conn)
+
+    from app.secrets import SecretBox
+    from app.settings_store import SettingsStore
+    from cryptography.fernet import Fernet
+
+    cfg = intake.load_config(SettingsStore(conn, SecretBox(key=Fernet.generate_key())))
+    assert cfg.has_addresses
+    for item in (message("<1>", sender=ME), message("<2>", to=[ME]), message("<3>", cc=[ME])):
+        assert intake.message_matches(item, cfg)
+    conn.close()
+
+
+def test_the_migration_writes_nothing_when_there_was_no_address(tmp_path):
+    conn = old_schema_connection(tmp_path)
+    db.migrate(conn)
+    keys = {row["key"] for row in conn.execute("SELECT key FROM settings").fetchall()}
+    assert not any(key.startswith("mail.") for key in keys)
+    conn.close()
+
+
+def test_the_migration_runs_only_once(tmp_path):
+    conn = old_schema_connection(tmp_path)
+    conn.execute("INSERT INTO settings (key, value) VALUES ('mail.addresses', ?)", (ME,))
+    conn.commit()
+    db.migrate(conn)
+    # Kullanici gocten sonra listeleri degistirir; ikinci acilis bunu ezmemeli.
+    conn.execute("UPDATE settings SET value = 'baska@example.com' WHERE key = 'mail.from_addresses'")
+    conn.commit()
+
+    db.migrate(conn)
+
+    values = dict(conn.execute("SELECT key, value FROM settings").fetchall())
+    assert values["mail.from_addresses"] == "baska@example.com"
+    conn.close()
+
+
 # --- adres eslestirme (saf) ---------------------------------------------
 
 
@@ -126,16 +204,59 @@ def test_wildcard_matches_a_whole_domain():
     assert not address_matches("biri@baska.com", patterns)
 
 
-def test_sender_recipient_or_cc_is_enough():
-    addresses = [ME]
-    assert intake.message_matches(message("<1>", sender=ME), addresses)
-    assert intake.message_matches(message("<2>", to=[ME]), addresses)
-    assert intake.message_matches(message("<3>", cc=[ME]), addresses)
-    assert not intake.message_matches(message("<4>", to=["baska@example.com"]), addresses)
+def test_any_of_the_three_lists_is_enough():
+    assert intake.message_matches(message("<1>", sender=ME), config())
+    assert intake.message_matches(message("<2>", to=[ME]), config())
+    assert intake.message_matches(message("<3>", cc=[ME]), config())
+    assert not intake.message_matches(message("<4>", to=["baska@example.com"]), config())
 
 
-def test_no_address_means_no_match():
-    assert not intake.message_matches(message("<1>", sender=ME), [])
+def test_the_from_list_only_looks_at_the_sender():
+    only_from = config(from_addresses=(ME,), to_addresses=(), cc_addresses=())
+    assert intake.message_matches(message("<1>", sender=ME), only_from)
+    assert not intake.message_matches(message("<2>", sender="baska@example.com", to=[ME]), only_from)
+    assert not intake.message_matches(message("<3>", sender="baska@example.com", cc=[ME]), only_from)
+
+
+def test_the_to_list_only_looks_at_the_recipients():
+    only_to = config(from_addresses=(), to_addresses=(ME,), cc_addresses=())
+    assert intake.message_matches(message("<1>", sender="baska@example.com", to=[ME]), only_to)
+    assert not intake.message_matches(message("<2>", sender=ME), only_to)
+    # CC'de gecen adres "Kime" listesini tetiklemez.
+    assert not intake.message_matches(message("<3>", sender="baska@example.com", cc=[ME]), only_to)
+
+
+def test_the_cc_list_only_looks_at_the_carbon_copies():
+    only_cc = config(from_addresses=(), to_addresses=(), cc_addresses=(ME,))
+    assert intake.message_matches(message("<1>", sender="baska@example.com", cc=[ME]), only_cc)
+    assert not intake.message_matches(message("<2>", sender=ME), only_cc)
+    assert not intake.message_matches(message("<3>", sender="baska@example.com", to=[ME]), only_cc)
+
+
+def test_the_three_lists_can_hold_different_addresses():
+    cfg = config(
+        from_addresses=("patron@example.com",),
+        to_addresses=("ben@example.com",),
+        cc_addresses=("ekip@example.com",),
+    )
+    assert intake.message_matches(message("<1>", sender="patron@example.com"), cfg)
+    assert intake.message_matches(message("<2>", sender="x@example.com", to=["ben@example.com"]), cfg)
+    assert intake.message_matches(message("<3>", sender="x@example.com", cc=["ekip@example.com"]), cfg)
+    # Listeler capraz tutmaz: patron "Kime" alaninda gecse bile eslesmez.
+    assert not intake.message_matches(message("<4>", sender="x@example.com", to=["patron@example.com"]), cfg)
+
+
+def test_wildcards_work_in_every_list():
+    cfg = config(from_addresses=(), to_addresses=("*@example.com",), cc_addresses=())
+    assert intake.message_matches(message("<1>", sender="x@baska.com", to=["biri@example.com"]), cfg)
+    assert not intake.message_matches(message("<2>", sender="x@baska.com", to=["biri@baska.com"]), cfg)
+
+
+def test_three_empty_lists_match_nothing():
+    empty = config(from_addresses=(), to_addresses=(), cc_addresses=())
+    assert empty.has_addresses is False
+    assert empty.ready is False
+    assert not intake.message_matches(message("<1>", sender=ME, to=[ME], cc=[ME]), empty)
 
 
 # --- takvim / sistem ogeleri --------------------------------------------
@@ -395,7 +516,8 @@ def test_the_same_mail_in_two_folders_is_counted_once(conn):
 def test_a_disabled_config_scans_nothing(conn):
     source = FakeMailSource([message("<1>", sender=ME, received_at=moment(1))])
     assert scan(conn, source, config(enabled=False))["scanned"] == 0
-    assert scan(conn, source, config(addresses=()))["scanned"] == 0
+    empty = config(from_addresses=(), to_addresses=(), cc_addresses=())
+    assert scan(conn, source, empty)["scanned"] == 0
 
 
 # --- yapilandirma -------------------------------------------------------
@@ -405,7 +527,9 @@ def test_config_comes_from_the_settings_table(store):
     store.apply(
         {
             "mail.enabled": "1",
-            "mail.addresses": "ornek@example.com, *@example.com",
+            "mail.from_addresses": "patron@example.com",
+            "mail.to_addresses": "ornek@example.com, *@example.com",
+            "mail.cc_addresses": "ekip@example.com",
             "mail.folders": '["Gelen Kutusu", "Arşiv\\\\2026"]',
             "mail.days": "7",
             "mail.body_limit": "1200",
@@ -414,7 +538,9 @@ def test_config_comes_from_the_settings_table(store):
     )
     cfg = intake.load_config(store)
     assert cfg.enabled is True
-    assert cfg.addresses == ("ornek@example.com", "*@example.com")
+    assert cfg.from_addresses == ("patron@example.com",)
+    assert cfg.to_addresses == ("ornek@example.com", "*@example.com")
+    assert cfg.cc_addresses == ("ekip@example.com",)
     assert cfg.folders == ("Gelen Kutusu", "Arşiv\\2026")
     assert cfg.days == 7
     assert cfg.body_limit == 1200
@@ -423,7 +549,7 @@ def test_config_comes_from_the_settings_table(store):
 
 
 def test_broken_settings_fall_back_to_the_defaults(store):
-    store.apply({"mail.enabled": "1", "mail.addresses": ME, "mail.days": "sallama",
+    store.apply({"mail.enabled": "1", "mail.to_addresses": ME, "mail.days": "sallama",
                  "mail.folders": "[bozuk"})
     cfg = intake.load_config(store)
     assert cfg.days == intake.DEFAULT_DAYS
@@ -434,6 +560,7 @@ def test_the_defaults_are_conservative(store):
     cfg = intake.load_config(store)
     assert cfg.enabled is False
     assert cfg.ready is False
+    assert cfg.has_addresses is False
     assert cfg.days == 30
     assert cfg.body_limit == 4000
 
@@ -460,11 +587,31 @@ def test_scan_is_refused_when_the_feature_is_off(api_client):
     assert response.json()["error"]["code"] == "mail_disabled"
 
 
-def test_scan_is_refused_without_an_address(api_client):
-    api_client.put("/api/settings", json={"mail.enabled": "1", "mail.addresses": ""})
+def test_scan_is_refused_when_all_three_lists_are_empty(api_client):
+    api_client.put(
+        "/api/settings",
+        json={
+            "mail.enabled": "1",
+            "mail.from_addresses": "",
+            "mail.to_addresses": "",
+            "mail.cc_addresses": "",
+        },
+    )
     response = api_client.post("/api/mail/scan")
     assert response.status_code == 400
-    assert response.json()["error"]["code"] == "mail_no_address"
+    error = response.json()["error"]
+    assert error["code"] == "mail_no_address"
+    assert "Adres tanımlı değil" in error["message"]
+
+
+def test_one_filled_list_is_enough_to_scan(api_client, fake_mail):
+    api_client.put(
+        "/api/settings", json={"mail.enabled": "1", "mail.cc_addresses": "ekip@example.com"}
+    )
+    fake_mail.add(message("<1>", subject="Kopya", sender="patron@example.com",
+                          to=["biri@example.com"], cc=["ekip@example.com"]))
+    summary = api_client.post("/api/mail/scan").json()["summary"]
+    assert summary["created"] == 1
 
 
 def test_the_test_endpoint_reports_the_account(api_client, fake_mail):
@@ -505,6 +652,10 @@ def test_open_mail_on_a_manual_task_is_a_clean_404(api_client):
 def test_settings_expose_the_mail_keys(api_client):
     settings = api_client.get("/api/settings").json()["settings"]
     assert settings["mail.enabled"] == "0"
+    assert settings["mail.from_addresses"] == ""
+    assert settings["mail.to_addresses"] == ""
+    assert settings["mail.cc_addresses"] == ""
+    assert "mail.addresses" not in settings
     assert settings["mail.folders"] == '["Gelen Kutusu"]'
     assert settings["mail.days"] == "30"
     assert "mail_supported" in settings
@@ -548,7 +699,7 @@ def test_endpoints_answer_feature_unavailable_outside_windows(context, monkeypat
 
     monkeypatch.setattr(mail_package, "is_supported", lambda: False)
     context.mail_factory = lambda body_limit=None: default_source(body_limit)
-    context.settings.apply({"mail.enabled": "1", "mail.addresses": ME})
+    context.settings.apply({"mail.enabled": "1", "mail.to_addresses": ME})
 
     with TestClient(create_app(context)) as client:
         for path in ("/api/mail/test", "/api/mail/scan"):
@@ -564,9 +715,9 @@ def test_endpoints_answer_feature_unavailable_outside_windows(context, monkeypat
 
 
 def test_refresh_scans_the_mail_as_its_last_stage(context, conn, fake_mail):
-    context.settings.apply({"mail.enabled": "1", "mail.addresses": ME})
+    context.settings.apply({"mail.enabled": "1", "mail.to_addresses": ME})
     quiet_jira(context, conn)
-    fake_mail.add(message("<1>", subject="Güncelle sırasında", sender=ME))
+    fake_mail.add(message("<1>", subject="Güncelle sırasında", sender="patron@example.com", to=[ME]))
 
     status = context.refresh.run_blocking(context)
 
@@ -577,9 +728,9 @@ def test_refresh_scans_the_mail_as_its_last_stage(context, conn, fake_mail):
 
 def test_refresh_does_not_scan_when_the_switch_is_off(context, conn, fake_mail):
     context.settings.apply(
-        {"mail.enabled": "1", "mail.addresses": ME, "mail.scan_on_refresh": "0"}
+        {"mail.enabled": "1", "mail.to_addresses": ME, "mail.scan_on_refresh": "0"}
     )
-    fake_mail.add(message("<1>", sender=ME))
+    fake_mail.add(message("<1>", sender="patron@example.com", to=[ME]))
 
     status = context.refresh.run_blocking(context)
 
@@ -594,12 +745,12 @@ def test_a_jira_failure_does_not_block_the_mail_scan(context, conn, fake_mail):
             "jira.base_url": "https://jira.example.com",
             "jira.secret": "ornek-pat",
             "mail.enabled": "1",
-            "mail.addresses": ME,
+            "mail.to_addresses": ME,
         }
     )
     group = repo.create_group(conn, "Takip", repo.KIND_MANUAL)
     repo.add_items(conn, group["id"], ["DEMO-1"])
-    fake_mail.add(message("<1>", subject="Yine de geldim", sender=ME))
+    fake_mail.add(message("<1>", subject="Yine de geldim", sender="patron@example.com", to=[ME]))
 
     status = context.refresh.run_blocking(context)
 
@@ -609,7 +760,7 @@ def test_a_jira_failure_does_not_block_the_mail_scan(context, conn, fake_mail):
 
 
 def test_a_mail_failure_does_not_break_the_refresh(context, conn):
-    context.settings.apply({"mail.enabled": "1", "mail.addresses": ME})
+    context.settings.apply({"mail.enabled": "1", "mail.to_addresses": ME})
     quiet_jira(context, conn)
 
     def explode(body_limit=None):

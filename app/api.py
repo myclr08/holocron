@@ -538,8 +538,11 @@ def scan_mail(request: Request, payload: dict[str, Any] = Body(default_factory=d
     config = mail_intake.load_config(context.settings)
     if not config.enabled:
         return error_response("mail_disabled", "Önce Ayarlar → E-posta'dan taramayı açın.")
-    if not config.addresses:
-        return error_response("mail_no_address", "Önce takip edilecek e-posta adreslerini girin.")
+    if not config.has_addresses:
+        return error_response(
+            "mail_no_address",
+            "Adres tanımlı değil: Kimden, Kime ya da CC listelerinden en az birine adres yazın.",
+        )
     source = mail_source(context, config)
     with context.db_lock:
         summary = mail_intake.scan(context.connection(), source, config)

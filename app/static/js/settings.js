@@ -255,13 +255,22 @@ function parseFolders(value) {
     .filter(Boolean);
 }
 
+// Uc adres listesi ayri alanlarda durur; her biri yalnizca kendi basligina bakar.
+const MAIL_ADDRESS_FIELDS = [
+  ["mail.from_addresses", "mail-from"],
+  ["mail.to_addresses", "mail-to"],
+  ["mail.cc_addresses", "mail-cc"],
+];
+
 function fillMail(settings) {
   mailState.supported = settings.mail_supported !== false;
   mailState.selected = parseFolders(settings["mail.folders"]);
   if (!mailState.selected.length) mailState.selected = ["Gelen Kutusu"];
 
   document.getElementById("mail-enabled").checked = settings["mail.enabled"] === "1";
-  document.getElementById("mail-addresses").value = settings["mail.addresses"] || "";
+  MAIL_ADDRESS_FIELDS.forEach(([key, id]) => {
+    document.getElementById(id).value = settings[key] || "";
+  });
   document.getElementById("mail-days").value = settings["mail.days"] || "30";
   document.getElementById("mail-body-limit").value = settings["mail.body_limit"] || "4000";
   document.getElementById("mail-scan-on-refresh").checked =
@@ -275,14 +284,17 @@ function fillMail(settings) {
 }
 
 function collectMail() {
-  return {
+  const payload = {
     "mail.enabled": document.getElementById("mail-enabled").checked ? "1" : "0",
-    "mail.addresses": document.getElementById("mail-addresses").value.trim(),
     "mail.folders": JSON.stringify(mailState.selected),
     "mail.days": document.getElementById("mail-days").value.trim() || "30",
     "mail.body_limit": document.getElementById("mail-body-limit").value.trim() || "4000",
     "mail.scan_on_refresh": document.getElementById("mail-scan-on-refresh").checked ? "1" : "0",
   };
+  MAIL_ADDRESS_FIELDS.forEach(([key, id]) => {
+    payload[key] = document.getElementById(id).value.trim();
+  });
+  return payload;
 }
 
 /** Secili klasorler; agac cekilmediyse yalnizca secim listesi cizilir. */
