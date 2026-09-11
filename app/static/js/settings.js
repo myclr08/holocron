@@ -313,7 +313,9 @@ function renderFolders() {
 
   const draw = (nodes, depth) => {
     nodes.forEach((node) => {
-      box.appendChild(folderRow(node.path, `${node.name} (${node.count})`, depth, false));
+      // "Arama Klasörleri" başlığı gerçek bir klasör değil: seçilemez.
+      const label = node.selectable === false ? node.name : `${node.name} (${node.count})`;
+      box.appendChild(folderRow(node.path, label, depth, false, node.selectable !== false));
       if (node.children && node.children.length) draw(node.children, depth + 1);
     });
   };
@@ -321,15 +323,15 @@ function renderFolders() {
   hint.textContent = `${mailState.selected.length} klasör seçili.`;
 }
 
-function folderRow(path, label, depth, standalone) {
+function folderRow(path, label, depth, standalone, selectable = true) {
   const row = document.createElement("label");
-  row.className = "checkbox folder-row";
+  row.className = "checkbox folder-row" + (selectable ? "" : " is-virtual");
   row.style.paddingLeft = depth * 14 + "px";
 
   const box = document.createElement("input");
   box.type = "checkbox";
-  box.checked = mailState.selected.includes(path);
-  box.disabled = !mailState.supported && !standalone;
+  box.checked = selectable && mailState.selected.includes(path);
+  box.disabled = !selectable || (!mailState.supported && !standalone);
   box.addEventListener("change", () => {
     const next = mailState.selected.filter((item) => item !== path);
     if (box.checked) next.push(path);

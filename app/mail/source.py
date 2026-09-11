@@ -104,12 +104,16 @@ class MailFolder:
     path: str
     count: int = 0
     children: list["MailFolder"] = field(default_factory=list)
+    # Sanal dugumler (ornegin "Arama Klasörleri" basligi) taranamaz: arayuz
+    # onay kutusunu kapatir, yoksa kullanici cozulemeyecek bir yol secerdi.
+    selectable: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "path": self.path,
             "count": self.count,
+            "selectable": self.selectable,
             "children": [child.to_dict() for child in self.children],
         }
 

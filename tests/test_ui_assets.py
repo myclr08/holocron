@@ -566,3 +566,12 @@ def test_mail_card_styles_are_defined(api_client):
         ".folder-row",
     ):
         assert name in css, name
+
+
+def test_the_search_folder_root_cannot_be_ticked(api_client):
+    """Outlook'un "Arama Klasörleri" başlığı gerçek klasör değil: seçilemez."""
+    script = api_client.get("/static/js/settings.js").text
+    assert "node.selectable === false" in script
+    assert "selectable !== false" in script
+    css = api_client.get("/static/css/app.css").text
+    assert ".folder-row.is-virtual" in css

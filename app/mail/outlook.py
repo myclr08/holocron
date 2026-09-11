@@ -17,6 +17,9 @@ Bilinmesi gerekenler:
   dolasilir ve pencerenin disina cikilinca durulur.
 * **Is parcacigi.** Guncelle arka planda dondugu icin her oturumda
   `pythoncom.CoInitialize()` / `CoUninitialize()` cagrilir.
+* **Arama klasorleri.** Outlook'un "Arama Klasorleri" agaci `Folders`
+  koleksiyonunda YOKTUR; `Store.GetSearchFolders()` icinde yasar. Bu yuzden
+  ayrica toplanir ve agaca `Arama Klasörleri\\<ad>` yolu ile eklenir.
 """
 
 from __future__ import annotations
@@ -53,6 +56,11 @@ RECIPIENT_BCC = 3
 DEFAULT_FOLDER_NAMES = {"", "gelen kutusu", "inbox"}
 
 PATH_SEPARATOR = "\\"
+
+# Arama klasorlerinin agactaki sanal ust dugumu. Outlook'ta gercek bir klasor
+# degildir; yol bu onekle yazilir ve `_resolve` onu taniyip magazanin
+# `GetSearchFolders()` koleksiyonuna gider.
+SEARCH_ROOT = "Arama Klasörleri"
 
 
 # --- COM'a dokunmayan yardimcilar ---------------------------------------
@@ -216,6 +224,37 @@ def is_default_inbox(folder_path: str) -> bool:
     return str(folder_path or "").strip().casefold() in DEFAULT_FOLDER_NAMES
 
 
+def store_of(folder: Any) -> Any:
+    """Klasorun magazasi; okunamazsa None."""
+    try:
+        return getattr(folder, "Store", None)
+    except Exception:
+        return None
+
+
+def search_folders_of(store: Any) -> list[Any]:
+    """`Store.GetSearchFolders()`; desteklemeyen magaza sessizce bos doner.
+
+    POP3/PST gibi bazi magazalarda bu cagri ya hic yoktur ya da istisna atar;
+    tek bir magazanin patlamasi tum agaci dusurmemeli.
+    """
+    if store is None:
+        return []
+    getter = getattr(store, "GetSearchFolders", None)
+    if not callable(getter):
+        return []
+    try:
+        return [folder for folder in getter() if folder is not None]
+    except Exception:
+        return []
+
+
+def is_search_path(folder_path: str) -> bool:
+    """Yol bir arama klasorunu mu gosteriyor?"""
+    marker = SEARCH_ROOT.casefold()
+    return any(part.strip().casefold() == marker for part in split_path(folder_path))
+
+
 def _child_folder(container: Any, name: str) -> Any:
     """Bir klasor koleksiyonunda ada gore (buyuk/kucuk harf ayirmadan) arar."""
     marker = str(name or "").strip().casefold()
@@ -330,11 +369,39 @@ class OutlookSource:
             stores = list(namespace.Folders)
         except Exception as exc:  # pragma: no cover - COM
             raise MailError("folders_failed", "Klasör ağacı okunamadı.") from exc
-        for store in stores:
-            node = self._folder_node(store, "")
+        for root in stores:
+            node = self._folder_node(root, "")
             if node is not None:
                 tree.append(node)
+            # Arama klasorleri `Folders` agacinda gorunmez; ayri toplanir.
+            search = self._search_node(root, prefixed=len(stores) > 1)
+            if search is not None:
+                tree.append(search)
         return tree
+
+    def _search_node(self, root: Any, prefixed: bool = False) -> MailFolder | None:
+        """Bir magazanin arama klasorleri; yoksa None."""
+        folders = search_folders_of(store_of(root))
+        if not folders:
+            return None
+
+        store_name = str(getattr(root, "Name", "") or "")
+        base = f"{store_name}{PATH_SEPARATOR}{SEARCH_ROOT}" if prefixed and store_name else SEARCH_ROOT
+        label = f"{SEARCH_ROOT} ({store_name})" if prefixed and store_name else SEARCH_ROOT
+        node = MailFolder(name=label, path=base, selectable=False)
+        for folder in folders:
+            name = str(getattr(folder, "Name", "") or "")
+            if not name:
+                continue
+            try:
+                count = int(folder.Items.Count)
+            except Exception:
+                count = 0
+            node.children.append(
+                MailFolder(name=name, path=f"{base}{PATH_SEPARATOR}{name}", count=count)
+            )
+            node.count += count
+        return node if node.children else None
 
     def _folder_node(self, folder: Any, parent_path: str, depth: int = 0) -> MailFolder | None:
         """Klasor agacini kurar; cok derin agaclarda dordunculerde durur."""
@@ -368,6 +435,9 @@ class OutlookSource:
                 raise MailError("folder_not_found", "Gelen Kutusu bulunamadı.") from exc
 
         parts = split_path(folder_path)
+        if is_search_path(folder_path):
+            return self._resolve_search(namespace, folder_path, parts)
+
         current: Any = None
         containers: Any = namespace.Folders
         for index, part in enumerate(parts):
@@ -387,15 +457,47 @@ class OutlookSource:
             raise MailError("folder_not_found", f"'{folder_path}' klasörü bulunamadı.")
         return current
 
+    def _resolve_search(self, namespace: Any, folder_path: str, parts: list[str]) -> Any:
+        """`[Mağaza\\]Arama Klasörleri\\<ad>` -> arama klasoru nesnesi."""
+        marker = SEARCH_ROOT.casefold()
+        index = next(i for i, part in enumerate(parts) if part.strip().casefold() == marker)
+        wanted = parts[index + 1].strip().casefold() if len(parts) > index + 1 else ""
+        store_name = parts[index - 1].strip().casefold() if index > 0 else ""
+        if not wanted:
+            raise MailError(
+                "folder_not_found",
+                f"'{folder_path}' bir arama klasörü adı taşımıyor.",
+            )
+
+        try:
+            roots = list(namespace.Folders)
+        except Exception as exc:  # pragma: no cover - COM
+            raise MailError("folder_not_found", f"'{folder_path}' klasörü bulunamadı.") from exc
+
+        for root in roots:
+            if store_name and str(getattr(root, "Name", "") or "").strip().casefold() != store_name:
+                continue
+            for folder in search_folders_of(store_of(root)):
+                if str(getattr(folder, "Name", "") or "").strip().casefold() == wanted:
+                    return folder
+        raise MailError("folder_not_found", f"'{folder_path}' arama klasörü bulunamadı.")
+
     def _walk(
         self, folder: Any, folder_path: str, store_id: str, since: datetime
     ) -> Iterator[MailMessage]:
-        """Yeniden eskiye dolasir, pencerenin disina cikinca durur."""
+        """Yeniden eskiye dolasir, pencerenin disina cikinca durur.
+
+        Arama klasorlerinde de ayni yol isler: ogeler baska fiziksel
+        klasorlerden gelse bile `[ReceivedTime]` siralamasi gecerlidir.
+        Siralama yapilamadiysa pencere kesmesi KAPATILIR: sirasiz listede ilk
+        eski ogede durmak yeni postalari yutardi.
+        """
         items = folder.Items
+        ordered = True
         try:
             items.Sort("[ReceivedTime]", True)
         except Exception:
-            pass  # siralanamadiysa dogal sirada dolasilir, sadece yavastir
+            ordered = False  # sirasiz dolasilir; yalnizca yavastir
 
         for item in items:
             try:
@@ -403,6 +505,8 @@ class OutlookSource:
             except Exception:
                 continue
             if received is not None and received < since:
+                if not ordered:
+                    continue
                 # Sirali listede ilk eski ogede durmak taramayi kisa tutar.
                 break
             try:

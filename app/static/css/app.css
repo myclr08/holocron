@@ -1472,6 +1472,8 @@ html.crawl-open .layout { visibility: hidden; }
 
 .folder-tree:empty { display: none; }
 .folder-row { margin: 0; font-size: 12px; }
+/* Sanal baslik (Arama Klasorleri): secilemez, yalnizca gruplar. */
+.folder-row.is-virtual { color: var(--muted); font-weight: 600; }
 
 /* 1024'te sutunlar yan yana kalir, yalnizca daralir. */
 @media (max-width: 1024px) {

@@ -387,7 +387,10 @@ Nasıl çalışır:
   (postayı düşürmez).
 - **Klasörler**: varsayılan Gelen Kutusu'dur. **Klasörleri getir** Outlook'tan
   ağacı çeker, işaretlediğiniz klasörler `Gelen Kutusu\Alt\Klasör` yoluyla
-  saklanır.
+  saklanır. Outlook'un **Arama Klasörleri** (Search Folders) listesi normal
+  klasör ağacında yer almaz; ayrıca toplanıp `Arama Klasörleri\<ad>` yoluyla
+  ağacın altına eklenir ve normal klasör gibi taranabilir (başlığın kendisi
+  gerçek bir klasör olmadığı için işaretlenemez).
 - **Pencere**: varsayılan son 30 gün. Klasör yeniden eskiye taranır ve
   pencerenin dışına çıkılınca durulur.
 - **Takvim yok**: toplantı davetleri ve yanıtları, görev istekleri, teslim

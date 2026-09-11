@@ -962,3 +962,271 @@ def test_the_body_normalises_line_endings_and_trailing_space():
 
 def test_an_empty_body_stays_empty():
     assert clean_body(None) == ""
+
+
+# --- arama klasorleri (Search Folders) ----------------------------------
+#
+# Outlook'un "Arama Klasorleri" agaci `Folders` koleksiyonunda GORUNMEZ;
+# `Store.GetSearchFolders()` icinde yasar. Saha bulgusu buydu.
+
+
+class FakeItems(list):
+    """COM `Items`: sayilabilir, siralanabilir, dolasalabilir."""
+
+    def __init__(self, items=(), sortable: bool = True) -> None:
+        super().__init__(items)
+        self.sortable = sortable
+        self.sorted_by = None
+
+    @property
+    def Count(self):  # noqa: N802 - COM adi
+        return len(self)
+
+    def Sort(self, field, descending):  # noqa: N802 - COM adi
+        if not self.sortable:
+            raise RuntimeError("bu klasor siralanamaz")
+        self.sorted_by = (field, descending)
+        self.sort(key=lambda item: item.ReceivedTime, reverse=bool(descending))
+
+
+class FakeFolder:
+    def __init__(self, name, items=(), children=(), store=None, sortable=True) -> None:
+        self.Name = name
+        self.Items = FakeItems(items, sortable=sortable)
+        self.Folders = list(children)
+        self.Store = store
+
+
+class FakeStore:
+    """`GetSearchFolders()` olan mağaza."""
+
+    def __init__(self, search=(), store_id="ST") -> None:
+        self._search = list(search)
+        self.StoreID = store_id
+
+    def GetSearchFolders(self):  # noqa: N802 - COM adi
+        return list(self._search)
+
+
+class AngryStore:
+    """Bazi mağazalarda cagri istisna atar (POP3/PST)."""
+
+    StoreID = "ST-ANGRY"
+
+    def GetSearchFolders(self):  # noqa: N802 - COM adi
+        raise RuntimeError("bu magaza arama klasoru desteklemiyor")
+
+
+class PlainStore:
+    """Eski Outlook: cagri hic yok."""
+
+    StoreID = "ST-PLAIN"
+
+
+class FakeNamespace:
+    def __init__(self, roots, inbox=None) -> None:
+        self.Folders = list(roots)
+        self._inbox = inbox
+
+    def GetDefaultFolder(self, index):  # noqa: N802 - COM adi
+        if self._inbox is None:
+            raise RuntimeError("gelen kutusu yok")
+        return self._inbox
+
+
+@pytest.fixture
+def source(monkeypatch):
+    """Windows disinda da kurulabilen `OutlookSource` (COM'a hic dokunulmaz)."""
+    monkeypatch.setattr(outlook.sys, "platform", "win32")
+    return outlook.OutlookSource()
+
+
+def mailbox(search=(), name="ornek@example.com", children=()):
+    """Bir mağaza koku: normal klasorler + arama klasorleri."""
+    store = FakeStore(search)
+    root = FakeFolder(name, children=children, store=store)
+    return root
+
+
+def test_search_folders_show_up_in_the_tree(source):
+    takip = FakeFolder("Takip ettiklerim", items=[FakeItem(), FakeItem()])
+    root = mailbox(search=[takip], children=[FakeFolder("Gelen Kutusu")])
+
+    tree = source._folders(FakeNamespace([root]))
+
+    node = next(item for item in tree if item.name == outlook.SEARCH_ROOT)
+    assert node.path == "Arama Klasörleri"
+    assert [child.path for child in node.children] == ["Arama Klasörleri\\Takip ettiklerim"]
+    assert node.children[0].count == 2
+    assert node.count == 2
+    # Normal agac da yerinde durur.
+    assert any(item.name == "ornek@example.com" for item in tree)
+
+
+def test_search_folders_are_not_hidden_inside_the_normal_tree(source):
+    """Regresyon: arama klasoru `Folders` altinda aranirsa hic gorunmez."""
+    takip = FakeFolder("Takip ettiklerim")
+    root = mailbox(search=[takip], children=[FakeFolder("Gelen Kutusu")])
+
+    tree = source._folders(FakeNamespace([root]))
+
+    mailbox_node = next(item for item in tree if item.name == "ornek@example.com")
+    assert [child.name for child in mailbox_node.children] == ["Gelen Kutusu"]
+
+
+def test_a_second_store_gets_its_name_in_the_path(source):
+    first = mailbox(search=[FakeFolder("Takip")], name="ornek@example.com")
+    second = mailbox(search=[FakeFolder("Arşiv taraması")], name="Arşiv PST")
+
+    tree = source._folders(FakeNamespace([first, second]))
+
+    paths = [node.path for node in tree if outlook.SEARCH_ROOT in node.path]
+    assert paths == ["ornek@example.com\\Arama Klasörleri", "Arşiv PST\\Arama Klasörleri"]
+    labels = [node.name for node in tree if outlook.SEARCH_ROOT in node.path]
+    assert labels == [
+        "Arama Klasörleri (ornek@example.com)",
+        "Arama Klasörleri (Arşiv PST)",
+    ]
+
+
+def test_a_store_without_search_folders_is_skipped_quietly(source):
+    plain = FakeFolder("Eski PST", store=PlainStore())
+    angry = FakeFolder("Kızgın PST", store=AngryStore())
+    empty = FakeFolder("Boş", store=FakeStore([]))
+    nothing = FakeFolder("Mağazasız", store=None)
+
+    tree = source._folders(FakeNamespace([plain, angry, empty, nothing]))
+
+    assert not any(outlook.SEARCH_ROOT in node.path for node in tree)
+    # Mağazaların kendisi yine listede: yalnizca arama dugumu atlanir.
+    assert [node.name for node in tree] == ["Eski PST", "Kızgın PST", "Boş", "Mağazasız"]
+
+
+def test_one_broken_store_does_not_hide_the_others(source):
+    angry = FakeFolder("Kızgın PST", store=AngryStore())
+    good = mailbox(search=[FakeFolder("Takip")], name="ornek@example.com")
+
+    tree = source._folders(FakeNamespace([angry, good]))
+
+    paths = [node.path for node in tree if outlook.SEARCH_ROOT in node.path]
+    assert paths == ["ornek@example.com\\Arama Klasörleri"]
+
+
+def test_the_search_root_is_a_virtual_node(source):
+    """Baslik gercek bir klasor degil: isaretlenirse cozulemez, kapali gelir."""
+    takip = FakeFolder("Takip")
+    tree = source._folders(FakeNamespace([mailbox(search=[takip])]))
+
+    node = next(item for item in tree if item.name == outlook.SEARCH_ROOT)
+    assert node.selectable is False
+    assert node.children[0].selectable is True
+    payload = node.to_dict()
+    assert payload["selectable"] is False
+    assert payload["children"][0]["selectable"] is True
+
+
+def test_normal_folders_stay_selectable(source):
+    tree = source._folders(FakeNamespace([mailbox(children=[FakeFolder("Gelen Kutusu")])]))
+    assert all(node.to_dict()["selectable"] for node in tree)
+
+
+def test_a_search_path_is_recognised():
+    assert outlook.is_search_path("Arama Klasörleri\\Takip")
+    assert outlook.is_search_path("ornek@example.com\\Arama Klasörleri\\Takip")
+    assert not outlook.is_search_path("Gelen Kutusu\\Takip")
+
+
+def test_a_search_path_resolves_to_the_search_folder(source):
+    takip = FakeFolder("Takip ettiklerim")
+    namespace = FakeNamespace([mailbox(search=[takip])])
+
+    assert source._resolve(namespace, "Arama Klasörleri\\Takip ettiklerim") is takip
+    # Buyuk/kucuk harf ayrimi yok.
+    assert source._resolve(namespace, "arama klasörleri\\takip ettiklerim") is takip
+
+
+def test_a_store_prefixed_search_path_resolves(source):
+    first = mailbox(search=[FakeFolder("Takip")], name="ornek@example.com")
+    second_target = FakeFolder("Takip")
+    second = mailbox(search=[second_target], name="Arşiv PST")
+    namespace = FakeNamespace([first, second])
+
+    found = source._resolve(namespace, "Arşiv PST\\Arama Klasörleri\\Takip")
+    assert found is second_target
+
+
+def test_an_unknown_search_folder_says_so(source):
+    namespace = FakeNamespace([mailbox(search=[FakeFolder("Takip")])])
+    with pytest.raises(MailError) as error:
+        source._resolve(namespace, "Arama Klasörleri\\Yok böyle")
+    assert error.value.code == "folder_not_found"
+    assert "arama klasörü" in error.value.message
+
+
+def test_a_bare_search_root_is_not_a_folder(source):
+    namespace = FakeNamespace([mailbox(search=[FakeFolder("Takip")])])
+    with pytest.raises(MailError) as error:
+        source._resolve(namespace, "Arama Klasörleri")
+    assert error.value.code == "folder_not_found"
+
+
+def test_messages_are_read_from_a_search_folder(source):
+    """Arama klasorunun ogeleri baska klasorlerden gelir; yol yine arama yoludur."""
+    fresh = FakeItem(subject="Yeni", entry_id="E1", received_at=NOW - timedelta(hours=1))
+    older = FakeItem(subject="Dün", entry_id="E2", received_at=NOW - timedelta(hours=20))
+    stale = FakeItem(subject="Çok eski", entry_id="E3", received_at=NOW - timedelta(days=90))
+    takip = FakeFolder("Takip ettiklerim", items=[stale, fresh, older],
+                       store=FakeStore(store_id="ST-1"))
+    root = mailbox(search=[takip])
+    root.Store = FakeStore([takip], store_id="ST-1")
+
+    messages = list(source._walk(takip, "Arama Klasörleri\\Takip ettiklerim", "ST-1",
+                                 NOW - timedelta(days=30)))
+
+    assert [item.subject for item in messages] == ["Yeni", "Dün"]
+    assert takip.Items.sorted_by == ("[ReceivedTime]", True)
+    assert {item.folder_path for item in messages} == {"Arama Klasörleri\\Takip ettiklerim"}
+    assert {item.store_id for item in messages} == {"ST-1"}
+
+
+def test_an_unsortable_folder_still_returns_every_fresh_mail(source):
+    """Siralama yapilamazsa pencere kesmesi kapanir; yoksa yeniler yutulurdu."""
+    stale = FakeItem(subject="Çok eski", entry_id="E1", received_at=NOW - timedelta(days=90))
+    fresh = FakeItem(subject="Yeni", entry_id="E2", received_at=NOW - timedelta(hours=1))
+    folder = FakeFolder("Takip", items=[stale, fresh], sortable=False)
+
+    messages = list(source._walk(folder, "Arama Klasörleri\\Takip", "ST",
+                                 NOW - timedelta(days=30)))
+
+    assert [item.subject for item in messages] == ["Yeni"]
+    assert folder.Items.sorted_by is None
+
+
+def test_the_search_folder_scan_goes_through_intake(conn, source):
+    """Uctan uca: arama klasorunden gelen posta da gorev uretir."""
+    takip = FakeFolder(
+        "Takip ettiklerim",
+        items=[FakeItem(subject="Arama klasöründen", entry_id="E1",
+                        received_at=NOW - timedelta(hours=2),
+                        recipients=[FakeRecipient(outlook.RECIPIENT_TO, FakeEntry(exchange=ME))])],
+        store=FakeStore(store_id="ST-1"),
+    )
+    root = mailbox(search=[takip])
+    namespace = FakeNamespace([root])
+
+    class Bound:
+        """`_namespace()` yerine sahte namespace veren kaynak."""
+
+        def messages(self, folder_path, since):
+            folder = source._resolve(namespace, folder_path)
+            return list(source._walk(folder, folder_path, "ST-1", since))
+
+    summary = intake.scan(
+        conn,
+        Bound(),
+        config(folders=("Arama Klasörleri\\Takip ettiklerim",)),
+        now=NOW,
+    )
+    assert summary["created"] == 1
+    task = repo.list_tasks(conn)[0]
+    assert task["title"] == "Arama klasöründen"
