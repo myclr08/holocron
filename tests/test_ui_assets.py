@@ -508,7 +508,8 @@ def test_calls_script_covers_the_strip_the_tabs_and_the_drawer(api_client):
         assert marker in script, marker
     # Teshis: eslesmeyenler dugmesi, nedenler ve takvim adaylari.
     for marker in ("/api/calls/unmatched", "function openUnmatched", "function renderUnmatched",
-                   "only_time_gap:", "no_thread_id", "matches_now", "recurring_matched"):
+                   "only_time_gap:", "no_thread_id", "matches_now", "recurring_matched",
+                   "group_chat_thread", 'thread_kind !== "group_chat"'):
         assert marker in script, marker
     css_markers = (".unmatched", ".unmatched-why", ".unmatched-candidate")
     css = api_client.get("/static/css/app.css").text

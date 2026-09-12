@@ -17,6 +17,7 @@ Uc soru burada cevaplanir:
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field as dataclass_field
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Sequence
@@ -264,6 +265,15 @@ def event_pools(calendar: Iterable[CalendarRecord]) -> EventPools:
     return EventPools(identity=identity_events(records), time=usable_events(records))
 
 
+# `19:<32 hex>@thread.v2` bir grup SOHBETIDIR: planli toplanti degil, sohbetten
+# baslatilmis arama. Takvimde karsiligi olmasi beklenmez.
+GROUP_CHAT_CORE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
+
+THREAD_MEETING = "meeting"
+THREAD_GROUP_CHAT = "group_chat"
+THREAD_OTHER = "other"
+
+
 def thread_core(thread_id: Any) -> str:
     """`19:meeting_ABC123@thread.v2` -> `ABC123`.
 
@@ -293,6 +303,37 @@ def thread_matches(thread_id: Any, event: CalendarRecord) -> bool:
         return False
     url = clean_text(getattr(event, "meeting_url", ""))
     return bool(url and core in url)
+
+
+def row_threads(row: dict[str, Any]) -> list[str]:
+    """Satirin tasidigi sohbet kimlikleri (toplanti ve grup sohbeti)."""
+    markers = [clean_text(row.get("thread_id")), clean_text(row.get("group_thread_id"))]
+    return [marker for marker in markers if marker]
+
+
+def core_kind(thread_id: Any) -> str:
+    """Bu kimlik planli bir toplantiya mi, grup sohbetine mi ait?"""
+    marker = clean_text(thread_id)
+    if not marker:
+        return ""
+    if "meeting_" in marker.casefold():
+        return THREAD_MEETING
+    if GROUP_CHAT_CORE.match(thread_core(marker)):
+        return THREAD_GROUP_CHAT
+    return THREAD_OTHER
+
+
+def thread_kind(record: dict[str, Any]) -> str:
+    """Satirin sohbet turu: `meeting`, `group_chat`, `other` ya da bos.
+
+    Toplanti kimligi (`19:meeting_...`) once gelir: ikisi birden varsa arama
+    bir toplantiya aittir.
+    """
+    kinds = [core_kind(marker) for marker in row_threads(record)]
+    for wanted in (THREAD_MEETING, THREAD_GROUP_CHAT, THREAD_OTHER):
+        if wanted in kinds:
+            return wanted
+    return ""
 
 
 def call_threads(call: CallRecord) -> list[str]:
@@ -563,6 +604,9 @@ def view(row: dict[str, Any], names: dict[str, str] | None = None) -> dict[str, 
         else ""
     )
     card["connected"] = is_connected(row)
+    # Grup sohbetinden baslatilan aramanin takvimde karsiligi beklenmez;
+    # arayuz "eslesmeyen" rozetine bunlari saymaz.
+    card["thread_kind"] = thread_kind(row)
     return card
 
 
@@ -902,14 +946,10 @@ MAX_CANDIDATES = 3
 CANDIDATE_WINDOW_HOURS = 24
 
 REASON_NO_THREAD = "no_thread_id"
+REASON_GROUP_CHAT = "group_chat_thread"
 REASON_NO_CORE = "no_calendar_with_core"
 REASON_TIME_GAP = "only_time_gap"
 REASON_MATCHES_NOW = "matches_now"
-
-
-def row_threads(row: dict[str, Any]) -> list[str]:
-    markers = [clean_text(row.get("thread_id")), clean_text(row.get("group_thread_id"))]
-    return [marker for marker in markers if marker]
 
 
 def event_view(event: CalendarRecord, gap_minutes: int | None = None) -> dict[str, Any]:
@@ -967,7 +1007,12 @@ def diagnose_unmatched(
     pools = event_pools(calendar)
 
     entries: list[dict[str, Any]] = []
-    counts = {REASON_NO_THREAD: 0, REASON_NO_CORE: 0, REASON_MATCHES_NOW: 0}
+    counts = {
+        REASON_NO_THREAD: 0,
+        REASON_NO_CORE: 0,
+        REASON_MATCHES_NOW: 0,
+        REASON_GROUP_CHAT: 0,
+    }
     for row in stored:
         if row.get("kind") != KIND_GROUP or not in_window(row, since):
             continue
@@ -982,12 +1027,18 @@ def diagnose_unmatched(
         )
         candidates = candidates_for(row, pools.time or pools.identity)
 
+        kind = thread_kind(row)
         if not markers:
             reason = REASON_NO_THREAD
             counts[REASON_NO_THREAD] += 1
         elif fresh is not None:
             reason = REASON_MATCHES_NOW
             counts[REASON_MATCHES_NOW] += 1
+        elif kind == THREAD_GROUP_CHAT:
+            # Grup sohbetinden baslatilmis arama: takvimde karsiligi yok,
+            # olmasi da beklenmez. "Eslesmeyen" degil, "eslesmesi gerekmeyen".
+            reason = REASON_GROUP_CHAT
+            counts[REASON_GROUP_CHAT] += 1
         elif candidates and candidates[0]["gap_minutes"] is not None:
             reason = f"{REASON_TIME_GAP}:{candidates[0]['gap_minutes']}"
             counts[REASON_NO_CORE] += 1
@@ -1003,6 +1054,7 @@ def diagnose_unmatched(
                 "thread_id": clean_text(row.get("thread_id")),
                 "group_thread_id": clean_text(row.get("group_thread_id")),
                 "thread_core": thread_core(markers[0]) if markers else "",
+                "thread_kind": kind,
                 "participants": participant_labels(row, known),
                 "title": display_party(row, known),
                 "reason": reason,
@@ -1020,6 +1072,10 @@ def diagnose_unmatched(
             "no_thread_id": counts[REASON_NO_THREAD],
             "core_not_in_calendar": counts[REASON_NO_CORE],
             "matched_after_fix": counts[REASON_MATCHES_NOW],
+            # Grup sohbeti aramalari: beklenen durum, sorun degil.
+            "group_chat": counts[REASON_GROUP_CHAT],
+            # Gercekten bakilmasi gerekenler.
+            "suspicious": len(entries) - counts[REASON_GROUP_CHAT],
         },
         "calls": entries,
     }

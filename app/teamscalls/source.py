@@ -317,12 +317,19 @@ def parse_utc(value: Any) -> datetime | None:
 def parse_local(value: Any) -> datetime | None:
     """Takvim damgasi -> saat dilimli an.
 
-    Takvim store'u **`datetime`** yaziyor (JS `Date`); metin ("YYYY-MM-DD
-    HH:MM:SS", yerel saat) ve epoch milisaniye de gorulur. Saat dilimsiz
-    `datetime` ve metin YEREL saat sayilir.
+    Takvim store'u **`datetime`** yaziyor (JS `Date`) ve okuyucu bunu saat
+    dilimsiz veriyor; degerin kendisi **UTC**'dir (epoch'tan uretilmis).
+    Saat dilimsiz bir `datetime`i yerel saat sanmak butun takvimi UTC ile
+    yerel saat arasindaki fark kadar kaydiriyordu -- 10:00'daki toplanti
+    07:00 gorunuyor, ±10 dakikalik eslesme hic tutmuyordu. Kayittaki
+    `utcOffset` / `eventTimeZone` alanlari bu yuzden UYGULANMAZ: deger zaten
+    UTC, cift cevrim olurdu.
+
+    Epoch milisaniye de UTC'dir. Yalnizca METIN bicimi ("YYYY-MM-DD
+    HH:MM:SS") yerel saat sayilir; o bicim disa aktarimlardan gelir.
     """
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.astimezone()
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     stamped = epoch_moment(value)
     if stamped is not None:
         return stamped

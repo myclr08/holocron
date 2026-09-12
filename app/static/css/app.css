@@ -1760,6 +1760,8 @@ html.crawl-open .layout { visibility: hidden; }
 .unmatched-head .what { flex: 1; overflow-wrap: anywhere; }
 .unmatched-head .much { color: var(--muted); font-family: var(--mono); white-space: nowrap; }
 .unmatched-why { color: var(--accent); margin-top: 2px; }
+/* Beklenen durum (grup sohbeti): uyari rengi almasin. */
+.unmatched-why.is-fine { color: var(--muted); }
 .unmatched-id { color: var(--muted); font-family: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
 
 .unmatched-candidate {

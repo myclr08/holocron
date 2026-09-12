@@ -175,10 +175,14 @@ function renderCallWindows() {
 
 function renderCalls() {
   el("calls-count").textContent = `${callsState.calls.length} arama`;
-  // Eslesmeyenler: takvimle eslesmemis grup aramalari (yoksa dugme gizli).
-  const orphans = callsState.calls.filter((call) => call.kind === "group_call").length;
+  // Eslesmeyenler rozeti yalnizca SUPHELI olanlari sayar: grup sohbetinden
+  // baslatilan aramalarin takvimde karsiligi zaten beklenmez.
+  const orphans = callsState.calls.filter(
+    (call) => call.kind === "group_call" && call.thread_kind !== "group_chat"
+  ).length;
   el("calls-unmatched").hidden = orphans === 0;
   el("calls-unmatched-count").textContent = String(orphans);
+  el("calls-unmatched").title = `${orphans} arama toplantıyla eşleşmedi (grup sohbetleri sayılmaz)`;
   el("calls-hint").textContent = callsHint();
   el("calls-scan").disabled = !callsState.supported;
   el("calls-tab-list").classList.toggle("on", callsState.tab === "list");
@@ -427,6 +431,7 @@ const UNMATCHED_REASONS = {
   no_thread_id: "Aramada toplantı kimliği yok",
   no_calendar_with_core: "Bu kimlik takvimde bulunamadı",
   matches_now: "Yeniden çekilince eşleşecek",
+  group_chat_thread: "Bu bir grup sohbeti araması, takvimde karşılığı beklenmez",
 };
 
 function reasonText(reason) {
@@ -455,6 +460,8 @@ function renderUnmatched(body, data) {
   const summary = data.summary || {};
   const lines = [
     ["Eşleşmeyen", String(summary.unmatched || 0)],
+    ["Bakılması gereken", String(summary.suspicious || 0)],
+    ["Grup sohbeti", String(summary.group_chat || 0)],
     ["Kimliği yok", String(summary.no_thread_id || 0)],
     ["Takvimde yok", String(summary.core_not_in_calendar || 0)],
     ["Yeniden çekince düzelir", String(summary.matched_after_fix || 0)],
@@ -482,7 +489,10 @@ function renderUnmatched(body, data) {
         h("span", { class: "what", text: call.title }),
         h("span", { class: "much", text: call.duration_text }),
       ]),
-      h("div", { class: "unmatched-why", text: reasonText(call.reason) }),
+      h("div", {
+        class: "unmatched-why" + (call.thread_kind === "group_chat" ? " is-fine" : ""),
+        text: reasonText(call.reason),
+      }),
     ]);
     if (call.thread_core) {
       box.appendChild(h("div", { class: "unmatched-id", text: "kimlik: " + call.thread_core }));

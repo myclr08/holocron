@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.6.2** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.6.3** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -585,6 +585,11 @@ Nasıl çalışır:
 - **Grup sohbetleri.** Aramanın `groupChatThreadId` değeri bir sohbete
   denk geliyorsa başlık o sohbetin **kendi adı** olur ("Grup araması" yerine
   "Proje ekibi"); katılımcı listesi boşsa sohbetin üyeleri yedeğe geçer.
+- **Saatler.** Takvim kayıtlarındaki saat alanları saat dilimi taşımaz ama
+  değerleri **UTC**'dir; Holocron bunları UTC kabul edip ekranda yerel saate
+  çevirir. (Yerel saat sayıldıklarında bütün takvim UTC farkı kadar kayıyor,
+  10:00'daki toplantı 07:00 görünüyor ve ± 10 dakikalık eşleşme hiç
+  tutmuyordu.)
 - **Katılanlar ve davetliler ayrıdır.** Aramaya gerçekten katılanlar arama
   kaydının `participantList` alanından, davetliler ise takvim kaydının
   `attendees` alanından gelir; çekmecede ve Excel'de iki ayrı başlıktır.
@@ -618,7 +623,10 @@ Nasıl çalışır:
   görünmüyorsa, araç çubuğundaki **Eşleşmeyenler** düğmesi (eşleşmeyen varsa
   görünür) takvimi yeniden okuyup her arama için nedeni yazar: aramada
   toplantı kimliği yok, kimlik takvimde bulunamadı, takvimdeki en yakın kayıt
-  N dakika uzakta, ya da "yeniden çekilince eşleşecek". Her aramanın altında
+  N dakika uzakta, ya da "yeniden çekilince eşleşecek". **Grup sohbetinden
+  başlatılan aramalar** (`19:<32 onaltılık>@thread.v2`) ayrı işaretlenir ve
+  rozete sayılmaz: bunlar planlı toplantı değildir, takvimde karşılıkları
+  beklenmez. Her aramanın altında
   en yakın üç takvim kaydı (konu, tür, saat farkı) listelenir. Aynı döküm
   uçtan da alınabilir: `GET /api/calls/unmatched?days=30`
 - **Pencere.** 7 / 30 / 90 gün. Arama kutusu (`/` kısayolu) kişi adı, toplantı
@@ -894,7 +902,7 @@ kilitler. Üçüncüsü etikettir: `v<sürüm>` biçiminde itilir ve release iş
 yanlış numaralı bir release çıkmaz.
 
 ```bash
-git tag v0.6.2 && git push origin v0.6.2
+git tag v0.6.3 && git push origin v0.6.3
 ```
 
 ### Teams sondası
@@ -951,6 +959,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.6.3** | 12 Eylül 2026 | Teams Aramalar: takvim saatleri UTC olarak okunur (3 saatlik kayma düzeltildi); grup sohbeti aramaları teşhiste ayrı sayılır, rozet yalnız şüphelileri gösterir |
 | **v0.6.2** | 12 Eylül 2026 | Teams Aramalar: tekrarlayan toplantı serileri (RecurringMaster) kimlikle eşleşir, iptal edilmiş seriler dahil; "Eşleşmeyenler" teşhis çekmecesi; taramada tekrarlayan sayısı |
 | **v0.6.1** | 12 Eylül 2026 | Kime/CC adres kutusu: rehberden seçim tek çip, boşlukta bölme yok, `Ad Soyad <adres>` ayrıştırma, geçersiz adres uyarısı |
 | **v0.6.0** | 12 Eylül 2026 | **E-posta ile gönder**: grid'de onay kutusu sütunu, Kime/CC taşıyan e-posta şablonları, çipli adres kutusu (`Ad Soyad <adres>`), Outlook uyumlu HTML tablo, Excel eki, "Outlook'ta aç" / "Doğrudan gönder" kipleri, gönderim geçmişi |

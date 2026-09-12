@@ -103,16 +103,22 @@ def event(
 ) -> CalendarRecord:
     """Takvim kaydi.
 
-    Gercek onbellekte saat alanlari `datetime` nesnesidir; `as_text=True`
-    eski metin bicimini ("YYYY-MM-DD HH:MM:SS", yerel saat) uretir.
+    `start` YEREL duvar saatidir ("2026-09-11 10:00"). Gercek onbellekte saat
+    alanlari saat dilimsiz `datetime` nesnesidir ve degerleri **UTC** tasir;
+    sahte kaynak da ayni seyi uretir, yoksa testler gercege benzemez.
+    `as_text=True` ise eski metin bicimini (yerel saat) uretir.
     """
     started = datetime.fromisoformat(start)
     ended = started + timedelta(minutes=minutes)
     stamp = "%Y-%m-%d %H:%M:%S"
+
+    def as_utc(moment: datetime) -> datetime:
+        """Yerel duvar saati -> saat dilimsiz UTC (ccl'in verdigi bicim)."""
+        return moment.astimezone(timezone.utc).replace(tzinfo=None)
     return CalendarRecord(
         event_id=f"event-{subject}",
-        start_time=started.strftime(stamp) if as_text else started,
-        end_time=ended.strftime(stamp) if as_text else ended,
+        start_time=started.strftime(stamp) if as_text else as_utc(started),
+        end_time=ended.strftime(stamp) if as_text else as_utc(ended),
         cid=cid,
         meeting_url=meeting_url,
         subject=subject,

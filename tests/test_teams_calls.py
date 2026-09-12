@@ -26,6 +26,7 @@ from openpyxl import load_workbook
 
 from app import db, repository as repo
 from app.teamscalls import CallsError, default_source, intake, teams_cache
+from app.teamscalls import source as source_module
 from app.teamscalls.fake import (
     ME,
     PERSON_ONE,
@@ -824,7 +825,7 @@ def test_a_call_whose_core_is_missing_from_the_calendar_says_so():
 
 def test_a_near_miss_reports_the_gap_in_minutes():
     rows = intake.normalize(
-        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=GROUP_THREAD)]
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)]
     )
     near = event("Yakın toplantı", local_text(moment(1) + timedelta(minutes=42)))
     data = intake.diagnose_unmatched(rows, [near], days=30, now=NOW)
@@ -882,6 +883,117 @@ def test_the_diagnosis_endpoint_needs_the_cache(api_client, context, monkeypatch
     response = api_client.get("/api/calls/unmatched")
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "feature_unavailable"
+
+
+# --- takvim saat dilimi ---------------------------------------------------
+#
+# Saha: takvim adaylari uc saat geride gorunuyordu. ccl `datetime` nesnesini
+# saat dilimsiz veriyor ama degeri UTC; biz yerel saat saniyorduk.
+
+
+def test_a_naive_calendar_datetime_is_read_as_utc():
+    naive = datetime(2026, 9, 11, 7, 0)  # ccl boyle verir: saat dilimsiz UTC
+    moment = source_module.parse_local(naive)
+    assert moment == datetime(2026, 9, 11, 7, 0, tzinfo=timezone.utc)
+    # Yerel saat sanilsaydi an UTC ofseti kadar kayardi.
+    assert moment.timestamp() == naive.replace(tzinfo=timezone.utc).timestamp()
+
+
+def test_a_calendar_epoch_is_read_as_utc():
+    assert source_module.parse_local(1789000000000) == datetime.fromtimestamp(
+        1789000000, tz=timezone.utc
+    )
+
+
+def test_a_calendar_text_is_still_local():
+    """Disa aktarimlardan gelen metin bicimi yerel saattir."""
+    moment = source_module.parse_local("2026-09-11 10:00:00")
+    assert moment == datetime(2026, 9, 11, 10, 0).astimezone()
+
+
+def test_a_meeting_at_ten_matches_a_call_at_ten():
+    """Gercek hata buydu: 10:00 toplantisi 07:00 gorunup hic eslesmiyordu."""
+    started = datetime(2026, 9, 11, 10, 0).astimezone()
+    utc_naive = started.astimezone(timezone.utc).replace(tzinfo=None)
+    meeting = CalendarRecord(start_time=utc_naive, subject="Hayat Daily")
+    rows = intake.normalize(
+        [call("a", started, call_type=TYPE_MULTI_PARTY)], [meeting]
+    )
+    assert rows[0]["kind"] == intake.KIND_MEETING
+    assert rows[0]["meeting_subject"] == "Hayat Daily"
+
+
+def test_the_candidate_hour_is_reported_in_real_time():
+    started = datetime(2026, 9, 11, 10, 0).astimezone()
+    meeting = CalendarRecord(
+        start_time=started.astimezone(timezone.utc).replace(tzinfo=None),
+        subject="SurfacePlus",
+    )
+    view = intake.event_view(meeting)
+    assert view["start_time"] == started.astimezone(timezone.utc).isoformat()
+
+
+# --- grup sohbeti aramalari (takvimde karsiligi beklenmez) ---------------
+
+CHAT_THREAD = "19:67f9abee1234567890abcdef12345678@thread.v2"
+
+
+@pytest.mark.parametrize(
+    "thread_id,kind",
+    [
+        (MEETING_THREAD, "meeting"),
+        (CHAT_THREAD, "group_chat"),
+        ("19:kisa@thread.v2", "other"),
+        ("", ""),
+    ],
+)
+def test_a_thread_id_is_classified(thread_id, kind):
+    assert intake.core_kind(thread_id) == kind
+
+
+def test_a_meeting_thread_wins_over_a_chat_thread():
+    row = {"thread_id": MEETING_THREAD, "group_thread_id": CHAT_THREAD}
+    assert intake.thread_kind(row) == "meeting"
+
+
+def test_a_group_chat_call_is_not_counted_as_a_problem():
+    rows = intake.normalize(
+        [
+            call("sohbet", moment(1), call_type=TYPE_MULTI_PARTY, group_thread_id=CHAT_THREAD),
+            call("toplanti", moment(2), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD),
+        ]
+    )
+    data = intake.diagnose_unmatched(rows, [], days=30, now=NOW)
+    chat = next(item for item in data["calls"] if item["call_id"] == "sohbet")
+    assert chat["reason"] == "group_chat_thread"
+    assert chat["thread_kind"] == "group_chat"
+
+    assert data["summary"]["unmatched"] == 2
+    assert data["summary"]["group_chat"] == 1
+    # Bakilmasi gereken yalnizca toplanti cekirdekli olan.
+    assert data["summary"]["suspicious"] == 1
+    assert data["summary"]["core_not_in_calendar"] == 1
+
+
+def test_the_row_carries_its_thread_kind_to_the_screen():
+    rows = intake.normalize(
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, group_thread_id=CHAT_THREAD)]
+    )
+    assert intake.view(rows[0])["thread_kind"] == "group_chat"
+
+
+def test_the_badge_ignores_group_chat_calls(api_client, fake_calls):
+    fake_calls.calls = [
+        call("sohbet", moment(1), call_type=TYPE_MULTI_PARTY, group_thread_id=CHAT_THREAD),
+        call("kimliksiz", moment(2), call_type=TYPE_MULTI_PARTY),
+    ]
+    api_client.post("/api/calls/scan")
+    kinds = [item["thread_kind"] for item in api_client.get("/api/calls?days=90").json()["calls"]]
+    assert sorted(kinds) == ["", "group_chat"]
+
+    summary = api_client.get("/api/calls/unmatched?days=90").json()["summary"]
+    assert summary["group_chat"] == 1
+    assert summary["suspicious"] == 1
 
 
 # --- tekillestirme --------------------------------------------------------
