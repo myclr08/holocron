@@ -14,6 +14,7 @@ import pytest
 from openpyxl import load_workbook
 
 from app import db
+from app import desktop
 from app import repository as repo
 from app import teams
 from app.mail import GalEntry, MailError
@@ -190,9 +191,10 @@ def test_blank_addresses_are_dropped():
     assert query_of(link["url"])["users"] == [ORNEK]
 
 
-def test_links_are_https_not_the_msteams_protocol():
-    assert teams.CHAT_BASE.startswith("https://")
-    assert not teams.CHAT_BASE.startswith("msteams:")
+def test_the_two_bases_are_the_web_and_the_app_forms():
+    # Yedek yol tarayicidan gecer, asil yol isletim sisteminden.
+    assert teams.CHAT_BASE.startswith("https://teams.microsoft.com/")
+    assert teams.APP_BASE.startswith("msteams:")
 
 
 # --- kisiler ve adres defteri -------------------------------------------
@@ -532,12 +534,16 @@ def test_drawer_carries_the_teams_section(api_client):
         "sendTeamsLink",
         "askStatus",
         '"Teams\'te aç"',
-        "teams-link",
+        # Acmayi sunucu yapar; sekme yalnizca yedek yolda acilir.
+        "teams-open",
         "message-preview",
     ):
         assert marker in script, marker
     # Kirpilan mesajin tamami panoya gider; kanal yolu yok.
     assert "tamamı panoya kopyalandı" in script
+    assert "Teams'te açıldı" in script
+    # Sekme yalnizca sunucu acamadiysa acilir.
+    assert "if (!data.opened) window.open(" in script
     assert "channel" not in script
     common = api_client.get("/static/js/common.js").text
     assert "copyText" in common and "navigator.clipboard" in common
@@ -846,3 +852,175 @@ def test_directory_lists_can_be_attached_to_an_issue(api_client, conn, fake_mail
     saved = add_contacts(api_client, contacts=["tedarik@example.com"])
     # Dagitim listesi oldugu arayuze de gecer (rozet icin).
     assert saved == [{"email": "tedarik@example.com", "name": "Tedarik Ekibi", "kind": "list"}]
+
+
+# --- sunucudan acma (msteams:) ------------------------------------------
+#
+# Tarayicidan acmak geride bos bir sekme birakiyordu; adres artik isletim
+# sistemine veriliyor. Testlerde hicbir sey gercekten acilmaz.
+
+
+@pytest.fixture
+def opener(monkeypatch):
+    """`desktop.open_url` yerine sayac: ne cagrildi, ne dondu."""
+    calls: list[str] = []
+
+    def fake(url, calls=calls):
+        calls.append(url)
+        return fake.result
+
+    fake.result = True
+    monkeypatch.setattr(desktop, "open_url", fake)
+    fake.calls = calls
+    return fake
+
+
+def test_app_link_uses_the_msteams_protocol():
+    link = teams.build_app_link([ORNEK], "Merhaba")
+    assert link["url"].startswith("msteams:/l/chat/0/0?users=")
+    assert link["url"] == f"msteams:/l/chat/0/0?users={ORNEK}&message=Merhaba"
+    assert link["truncated"] is False
+
+
+def test_app_link_carries_the_same_parameters_as_the_web_link():
+    app_link = teams.build_app_link([ORNEK, IKINCI], "Durum?", topic="DEMO-1")
+    web_link = teams.build_chat_link([ORNEK, IKINCI], "Durum?", topic="DEMO-1")
+    assert app_link["url"].split("?", 1)[1] == web_link["url"].split("?", 1)[1]
+    assert query_of(app_link["url"])["topicName"] == ["DEMO-1"]
+
+
+def test_both_links_trim_to_the_very_same_text():
+    long_text = "ç" * 4000
+    app_link = teams.build_app_link([ORNEK], long_text)
+    web_link = teams.build_chat_link([ORNEK], long_text)
+    # Kirpma her zaman daha uzun olan https tabanina gore hesaplanir.
+    assert app_link["message"] == web_link["message"]
+    assert app_link["truncated"] and web_link["truncated"]
+    assert len(app_link["url"]) <= teams.URL_LIMIT
+
+
+def test_teams_open_hands_the_protocol_link_to_the_system(api_client, conn, opener):
+    setup_group(api_client, conn)
+    add_contacts(api_client)
+
+    data = api_client.post("/api/issues/DEMO-1/teams-open", json={}).json()
+    assert data["opened"] is True
+    assert data["app_url"].startswith("msteams:/l/chat/0/0?users=")
+    # Yedek adres yine yaninda: acilamasaydi arayuz sekme acacakti.
+    assert data["url"].startswith("https://teams.microsoft.com/")
+    assert opener.calls == [data["app_url"]]
+
+    history = api_client.get("/api/issues/DEMO-1/messages").json()["messages"]
+    assert len(history) == 1
+    assert history[0]["body"] == data["message"]
+
+
+def test_teams_open_reports_failure_so_the_browser_can_take_over(api_client, conn, opener):
+    setup_group(api_client, conn)
+    add_contacts(api_client)
+    opener.result = False
+
+    data = api_client.post("/api/issues/DEMO-1/teams-open", json={}).json()
+    assert data["opened"] is False
+    assert query_of(data["url"])["users"] == [ORNEK]
+    # Acilamasa da "acildi" kaydi bir kez yazilir: kullanici yine gonderecek.
+    assert len(api_client.get("/api/issues/DEMO-1/messages").json()["messages"]) == 1
+
+
+def test_teams_open_accepts_a_template_or_a_body(api_client, conn, opener):
+    setup_group(api_client, conn)
+    add_contacts(api_client)
+    second = api_client.get("/api/templates").json()["templates"][1]
+
+    picked = api_client.post(
+        "/api/issues/DEMO-1/teams-open", json={"template_id": second["id"]}
+    ).json()
+    assert picked["message"].startswith("DEMO-1 için kısa bir güncelleme")
+
+    written = api_client.post(
+        "/api/issues/DEMO-1/teams-open", json={"body": "{key} ne durumda?"}
+    ).json()
+    assert written["message"] == "DEMO-1 ne durumda?"
+
+
+def test_teams_open_without_contacts_is_refused_and_opens_nothing(api_client, conn, opener):
+    setup_group(api_client, conn)
+    response = api_client.post("/api/issues/DEMO-1/teams-open", json={})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "no_contacts"
+    assert opener.calls == []
+
+
+def test_teams_open_for_an_unknown_issue_is_404(api_client, conn, opener):
+    setup_group(api_client, conn)
+    assert api_client.post("/api/issues/DEMO-404/teams-open", json={}).status_code == 404
+    assert opener.calls == []
+
+
+def test_teams_link_still_works_and_opens_nothing(api_client, conn, opener):
+    """Onizleme/yedek yolu duruyor: yalnizca adresi doner, hicbir sey acmaz."""
+    setup_group(api_client, conn)
+    add_contacts(api_client)
+    data = api_client.post("/api/issues/DEMO-1/teams-link", json={}).json()
+    assert data["url"].startswith("https://teams.microsoft.com/")
+    assert "app_url" not in data and "opened" not in data
+    assert opener.calls == []
+
+
+def test_long_message_is_copied_and_trimmed_on_the_open_path(api_client, conn, opener):
+    setup_group(api_client, conn)
+    add_contacts(api_client)
+    long_body = "ç" * 3000
+    data = api_client.post("/api/issues/DEMO-1/teams-open", json={"body": long_body}).json()
+    assert data["truncated"] is True
+    assert data["clipboard"] == long_body
+    assert len(data["app_url"]) <= teams.URL_LIMIT
+
+
+# --- adresi isletim sistemine verme -------------------------------------
+
+
+def test_open_url_uses_startfile_on_windows(monkeypatch):
+    opened: list[str] = []
+    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    monkeypatch.setattr(desktop.os, "startfile", opened.append, raising=False)
+    assert desktop.open_url("msteams:/l/chat/0/0?users=a@example.com") is True
+    assert opened == ["msteams:/l/chat/0/0?users=a@example.com"]
+
+
+def test_open_url_survives_a_windows_failure(monkeypatch):
+    def angry(url):
+        raise OSError("kayitli isleyici yok")
+
+    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    monkeypatch.setattr(desktop.os, "startfile", angry, raising=False)
+    # Hata disari sizmaz: arayuz `opened: false` gorup sekmeye duser.
+    assert desktop.open_url("msteams:/l/chat") is False
+
+
+def test_open_url_uses_the_desktop_helper_elsewhere(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(desktop.subprocess, "Popen", lambda command, **kw: calls.append(command))
+
+    monkeypatch.setattr(desktop.sys, "platform", "linux")
+    assert desktop.open_url("msteams:/l/chat") is True
+    monkeypatch.setattr(desktop.sys, "platform", "darwin")
+    assert desktop.open_url("msteams:/l/chat") is True
+    assert calls == [["xdg-open", "msteams:/l/chat"], ["open", "msteams:/l/chat"]]
+
+
+def test_open_url_without_a_helper_is_false(monkeypatch):
+    def missing(command, **kw):
+        raise FileNotFoundError(command[0])
+
+    monkeypatch.setattr(desktop.sys, "platform", "linux")
+    monkeypatch.setattr(desktop.subprocess, "Popen", missing)
+    assert desktop.open_url("msteams:/l/chat") is False
+
+
+def test_open_url_ignores_an_empty_address(monkeypatch):
+    monkeypatch.setattr(desktop.sys, "platform", "linux")
+    monkeypatch.setattr(
+        desktop.subprocess, "Popen", lambda *a, **k: pytest.fail("boş adres açılmamalı")
+    )
+    assert desktop.open_url("   ") is False

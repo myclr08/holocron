@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, Response
 from . import (
     __version__,
     db,
+    desktop,
     export,
     fields as field_utils,
     grid,
@@ -700,8 +701,51 @@ def preview_message(
 def build_teams_link(
     request: Request, key: str, payload: dict[str, Any] = Body(default_factory=dict)
 ):
-    """Teams baglantisini kurar ve "acildi" kaydini duser."""
+    """Teams baglantisini kurar ve "acildi" kaydini duser.
+
+    Tarayici yolu: arayuz donen `https` adresini `window.open` ile acar.
+    `teams-open` calisamadiginda yedek olarak da kullanilir.
+    """
     context = get_context(request)
+    prepared = _prepare_teams_message(context, key, payload)
+    if isinstance(prepared, JSONResponse):
+        return prepared
+
+    link = teams.build_chat_link(prepared["emails"], prepared["message"], prepared["topic"])
+    _record_open(context, prepared)
+    return _link_payload(prepared, link)
+
+
+@router.post("/issues/{key}/teams-open")
+def open_teams_chat(
+    request: Request, key: str, payload: dict[str, Any] = Body(default_factory=dict)
+):
+    """Sohbeti SUNUCUDAN acar: `msteams:` adresi isletim sistemine verilir.
+
+    Tarayicidan acmak geride bos bir sekme birakiyordu. Acilis basarisizsa
+    (`opened: false`) yanit yine `https` adresini tasir; arayuz o zaman eski
+    yolla `window.open` yapar. "Acildi" kaydi her iki durumda da bir kez
+    yazilir.
+    """
+    context = get_context(request)
+    prepared = _prepare_teams_message(context, key, payload)
+    if isinstance(prepared, JSONResponse):
+        return prepared
+
+    link = teams.build_chat_link(prepared["emails"], prepared["message"], prepared["topic"])
+    app_link = teams.build_app_link(prepared["emails"], prepared["message"], prepared["topic"])
+    _record_open(context, prepared)
+
+    result = _link_payload(prepared, link)
+    result["app_url"] = app_link["url"]
+    result["opened"] = desktop.open_url(app_link["url"])
+    return result
+
+
+def _prepare_teams_message(
+    context: AppContext, key: str, payload: dict[str, Any]
+) -> Any:
+    """Iki ucun ortak hazirligi: kayit, govde, kisiler, konu adi."""
     conn = context.connection()
     clean_key = str(key).strip().upper()
     if not repository.issue_is_known(conn, clean_key):
@@ -710,34 +754,50 @@ def build_teams_link(
     body = _template_body(conn, payload)
     if isinstance(body, JSONResponse):
         return body
-    message = _render_issue_message(context, conn, clean_key, body)
 
     contacts = repository.list_issue_contacts(conn, clean_key)
     if not contacts:
         return error_response("no_contacts", "Önce bu kayda bir Teams kişisi ekleyin.")
+
     emails = [item["email"] for item in contacts]
-    topic = _render_issue_message(
-        context,
-        conn,
-        clean_key,
-        context.settings.get("teams.topic_format", teams.DEFAULT_TOPIC_FORMAT)
-        or teams.DEFAULT_TOPIC_FORMAT,
-    )
-    link = teams.build_chat_link(emails, message, topic)
+    return {
+        "key": clean_key,
+        "message": _render_issue_message(context, conn, clean_key, body),
+        "emails": emails,
+        "target": ", ".join(emails),
+        "topic": _render_issue_message(
+            context,
+            conn,
+            clean_key,
+            context.settings.get("teams.topic_format", teams.DEFAULT_TOPIC_FORMAT)
+            or teams.DEFAULT_TOPIC_FORMAT,
+        ),
+    }
+
+
+def _record_open(context: AppContext, prepared: dict[str, Any]) -> None:
+    """Kayit notu tam metni tutar, kirpilmis halini degil."""
     with context.db_lock:
         repository.record_sent_message(
-            conn, clean_key, teams.TARGET_PEOPLE, ", ".join(emails), message
+            context.connection(),
+            prepared["key"],
+            teams.TARGET_PEOPLE,
+            prepared["target"],
+            prepared["message"],
         )
+
+
+def _link_payload(prepared: dict[str, Any], link: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {
         "kind": teams.TARGET_PEOPLE,
         "url": link["url"],
         "message": link["message"],
         "truncated": link["truncated"],
-        "target": ", ".join(emails),
+        "target": prepared["target"],
     }
     if link["truncated"]:
         # Adres uzunlugu yuzunden kirpildi: tam metin panodan yapistirilir.
-        result["clipboard"] = message
+        result["clipboard"] = prepared["message"]
     return result
 
 

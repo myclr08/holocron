@@ -1,15 +1,18 @@
-"""Teams derin baglantilari: sablon cozumu ve sohbet/kanal baglantisi.
+"""Teams derin baglantilari: sablon cozumu ve sohbet baglantisi.
 
 Modul saf tutulur: veritabani, ag ya da saat okumasi yok. Graph API
 KULLANILMAZ; kurum makinesinde IT izni gerektirmeyen tek yol derin
-baglantidir:
+baglantidir. Iki bicimi de uretilir, parametreleri birebir aynidir:
 
-    https://teams.microsoft.com/l/chat/0/0?users=...&message=...
+    msteams:/l/chat/0/0?users=...&message=...        (sunucu acar, sekme yok)
+    https://teams.microsoft.com/l/chat/0/0?users=... (yedek: tarayici acar)
 
-Baglanti Teams'i acar ve mesaji yazma kutusuna koyar. **Gonder'e kullanici
-basar**; uygulama gonderimi ne yapar ne de dogrulayabilir. `msteams:`
-protokolu yerine `https` kullanilir: tarayici zaten Teams uygulamasina
-yonlendirir, kurulu degilse web arayuzu acilir.
+Once `msteams:` denenir ve adresi isletim sistemine `app/desktop.py` verir;
+tarayicidan acmak geride bos bir sekme birakiyordu. Acilamazsa arayuz `https`
+surumunu yeni sekmede acar, tarayici da Teams uygulamasina yonlendirir.
+
+Baglanti mesaji yalnizca yazma kutusuna koyar. **Gonder'e kullanici basar**;
+uygulama gonderimi ne yapar ne de dogrulayabilir.
 """
 
 from __future__ import annotations
@@ -25,6 +28,9 @@ CONTACTS_COLUMN = "teams:contacts"
 CONTACTS_COLUMN_NAME = "Teams kişileri"
 
 CHAT_BASE = "https://teams.microsoft.com/l/chat/0/0"
+# Uygulama protokolu: sunucu tarafinda acildiginda tarayicida bos bir sekme
+# birakmaz. Windows adresi kayitli isleyiciye verir, Teams dogrudan acilir.
+APP_BASE = "msteams:/l/chat/0/0"
 
 # Tarayici ve Teams uzun adreslerde takiliyor; guvenli sinir 2.000 karakter.
 # Asilirsa mesaj kirpilir, tamami ayrica panoya kopyalanir.
@@ -189,7 +195,7 @@ def _local_text(values: dict[Any, Any], marker: str) -> str:
 def build_chat_link(
     emails: list[str], message: str, topic: str | None = None
 ) -> dict[str, Any]:
-    """Kisilere sohbet baglantisi.
+    """Kisilere `https://` sohbet baglantisi (tarayici yolu, yedek).
 
     Tek kisiyse dogrudan sohbet, birden fazlaysa grup sohbeti acilir; grup
     sohbetinde `topicName` verilir ki pencerenin bir adi olsun. Adres
@@ -197,34 +203,57 @@ def build_chat_link(
     kodlanir. Adres uzunlugu tek basina siniri asiyorsa mesaj tamamen duser
     (baglanti yine acilir, metin panodan yapistirilir).
     """
+    return _build_link(CHAT_BASE, emails, message, topic)
+
+
+def build_app_link(
+    emails: list[str], message: str, topic: str | None = None
+) -> dict[str, Any]:
+    """Ayni sohbetin `msteams:` karsiligi.
+
+    Sunucu bunu isletim sistemine verir; tarayici araya girmedigi icin geride
+    bos bir sekme kalmaz. Parametreler ve kirpma siniri `https` surumuyle
+    birebir ayni: iki adresin metni de hep ayni ciksin diye kirpma HER ZAMAN
+    daha uzun olan `https` tabanina gore hesaplanir.
+    """
+    return _build_link(APP_BASE, emails, message, topic)
+
+
+def _build_link(
+    base: str, emails: list[str], message: str, topic: str | None
+) -> dict[str, Any]:
     people = [clean_email(item) for item in emails or []]
     people = [item for item in people if item]
     users = ",".join(people)
     text = str(message or "")
     label = str(topic or "").strip() if len(people) > 1 else ""
 
-    full = _chat_url(users, text, label)
-    if len(full) <= URL_LIMIT:
-        return {"url": full, "message": text, "truncated": False}
+    short, truncated = _fit_message(users, text, label)
+    return {"url": _chat_url(base, users, short, label), "message": short, "truncated": truncated}
 
-    if len(_chat_url(users, "", label)) > URL_LIMIT:
-        return {"url": _chat_url(users, "", label), "message": "", "truncated": True}
+
+def _fit_message(users: str, text: str, topic: str) -> tuple[str, bool]:
+    """Adres sinirina sigan en uzun mesaj parcasi (ve kirpildi mi)."""
+    if len(_chat_url(CHAT_BASE, users, text, topic)) <= URL_LIMIT:
+        return text, False
+    if len(_chat_url(CHAT_BASE, users, "", topic)) > URL_LIMIT:
+        # Adresler tek basina siniri asiyor: mesaj tamamen duser.
+        return "", True
 
     # Kodlanmis uzunluk karakter basina degismiyor: ikili arama ile en uzun
     # sigan parca bulunur.
     low, high = 0, len(text)
     while low < high:
         middle = (low + high + 1) // 2
-        if len(_chat_url(users, text[:middle] + ELLIPSIS, label)) <= URL_LIMIT:
+        if len(_chat_url(CHAT_BASE, users, text[:middle] + ELLIPSIS, topic)) <= URL_LIMIT:
             low = middle
         else:
             high = middle - 1
-    short = text[:low].rstrip() + ELLIPSIS
-    return {"url": _chat_url(users, short, label), "message": short, "truncated": True}
+    return text[:low].rstrip() + ELLIPSIS, True
 
 
-def _chat_url(users: str, message: str, topic: str = "") -> str:
-    url = f"{CHAT_BASE}?users={quote(users, safe='@,')}"
+def _chat_url(base: str, users: str, message: str, topic: str = "") -> str:
+    url = f"{base}?users={quote(users, safe='@,')}"
     if message:
         url += "&message=" + quote(message, safe="")
     if topic:

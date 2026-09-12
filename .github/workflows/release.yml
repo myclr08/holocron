@@ -34,10 +34,17 @@ jobs:
       - name: Paketi uret
         run: python tools/build_portable.py --target linux --wheels wheels --version ${{ github.ref_name }}
 
+      # Teams yapi sondasi: saf Python, tekerlek gerektirmez. Uygulama
+      # paketlerine girmez, kendi zip'iyle release'e eklenir.
+      - name: Teams sondasini paketle
+        run: python tools/build_portable.py --probe
+
       - uses: actions/upload-artifact@v4
         with:
           name: holocron-linux
-          path: dist/holocron-linux-x64.zip
+          path: |
+            dist/holocron-linux-x64.zip
+            dist/holocron-teams-probe.zip
 
   windows:
     runs-on: windows-latest

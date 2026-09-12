@@ -1147,29 +1147,31 @@ async function pickTemplate(value) {
   renderDrawerBody();
 }
 
-/** Baglantiyi kurar, gerekirse panoya kopyalar, Teams'i acar. */
+/** Mesaji hazirlar ve Teams'i acar.
+ *
+ * Acma isini SUNUCU yapar (`msteams:` adresi isletim sistemine verilir):
+ * tarayicidan acmak geride bos bir sekme birakiyordu. Sunucu acamazsa yanit
+ * `opened: false` doner ve eski yola, `window.open`'a duseriz.
+ */
 async function sendTeamsLink(key, payload) {
   try {
-    const data = await api(`/api/issues/${encodeURIComponent(key)}/teams-link`, {
+    const data = await api(`/api/issues/${encodeURIComponent(key)}/teams-open`, {
       method: "POST",
       body: JSON.stringify(payload || {}),
     });
     // Pano yalnizca kirpma durumunda devreye girer: adres sinirina sigmayan
     // metnin tamami kaybolmasin.
     const copied = data.truncated ? await copyText(data.clipboard || data.message) : false;
-    window.open(data.url, "_blank", "noopener");
+    if (!data.opened) window.open(data.url, "_blank", "noopener");
 
-    if (data.truncated) {
-      toast(
-        "Teams açılıyor",
-        copied
-          ? "Mesaj adres sınırına sığmadı ve kısaltıldı; tamamı panoya kopyalandı."
-          : "Mesaj adres sınırına sığmadı ve kısaltıldı.",
-        ""
-      );
-    } else {
-      toast("Teams açılıyor", "Göndermek için Teams'te Gönder'e basın.", "ok");
-    }
+    const trimmed = copied
+      ? "Mesaj adres sınırına sığmadı ve kısaltıldı; tamamı panoya kopyalandı."
+      : "Mesaj adres sınırına sığmadı ve kısaltıldı.";
+    toast(
+      data.opened ? "Teams'te açıldı" : "Teams açılıyor",
+      data.truncated ? trimmed : "Göndermek için Teams'te Gönder'e basın.",
+      data.truncated ? "" : "ok"
+    );
 
     if (state.drawerKey === key && state.teams && state.teams.ready) {
       const fresh = await api(`/api/issues/${encodeURIComponent(key)}/messages`);

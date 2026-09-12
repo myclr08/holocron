@@ -368,10 +368,15 @@ sohbet balonu düğmesi ("Son durumu sor") mesajı Teams'te hazır açar.
 Nasıl çalışır:
 
 - **Kurulum gerekmez.** Graph API, uygulama kaydı, IT izni yok. Kullanılan tek
-  şey derin bağlantıdır: `https://teams.microsoft.com/l/chat/0/0?users=...&message=...`
-  Tarayıcı bunu kurulu Teams uygulamasına devreder, Teams yoksa web arayüzü açılır.
+  şey derin bağlantıdır: `msteams:/l/chat/0/0?users=...&message=...`
   Hedef yalnızca **kişilerdir**: kanala yazma denendi ve kaldırıldı, çünkü Teams
   kanal bağlantıları mesaj ön doldurmayı kabul etmiyor.
+- **Sekme açılmaz.** Adresi tarayıcı değil **Holocron'un kendisi** açar
+  (Windows'ta `os.startfile`, macOS'ta `open`, Linux'ta `xdg-open`): Windows adresi
+  kayıtlı işleyiciye verdiği için kurulu Teams doğrudan öne gelir, arkada boş bir
+  sekme kalmaz. Açılamazsa uç `opened: false` der ve arayüz eski yola döner:
+  `https://teams.microsoft.com/l/chat/0/0?...` adresini yeni sekmede açar. İki
+  adresin parametreleri ve kırpma sınırı birebir aynıdır.
 - **Kişiler.** Detay çekmecesindeki **Teams** bölümünde kişi eklersiniz (e-posta ya
   da adres defterinden ad). Tek kişi varsa doğrudan sohbet, birden fazlaysa **grup
   sohbeti** açılır; grup sohbetinin adı **Ayarlar → Teams → Konu adı biçimi** ile
@@ -583,6 +588,7 @@ değiştirilir (`tests/fake_jira.py`).
 | `app/grid.py` | Grid satırlarının kurulması (ekran ve Excel ortak kaynağı) |
 | `app/tasks.py` | Görev panosunun kurulması (sütunlar, son tarih durumu) |
 | `app/teams.py` | Teams derin bağlantısı ve şablon çözümü (saf mantık) |
+| `app/desktop.py` | Adresi işletim sistemine açtırır (`msteams:` protokolü dahil) |
 | `app/export.py` | Grup → Excel (.xlsx) dosyası |
 | `app/refresh.py` | Arka planda çalışan Güncelle işi |
 | `app/mail/` | Outlook'tan görev üretme (kaynak sözleşmesi, COM sarmalayıcı, iş mantığı) |
