@@ -54,6 +54,34 @@ _ELEMENT_ENDED = re.compile(r"<ended\b", re.IGNORECASE)
 _ELEMENT_ICAL = re.compile(r"<icaluid\b[^>]*>\s*([^<]*)\s*</icaluid\s*>", re.IGNORECASE)
 
 
+MATCH_EXACT = "exact"
+MATCH_GUID = "guid"
+MATCH_NONE = ""
+
+
+def guid_of(mri: Any) -> str:
+    """`8:orgid:<guid>` / `8:<guid>` / `<guid>` -> yalnizca GUID (kucuk harf)."""
+    text = clean_text(mri).casefold()
+    return text.rsplit(":", 1)[-1] if text else ""
+
+
+def identity_match(candidate: Any, mine: Any) -> str:
+    """Bu kimlik benim mi? `exact`, `guid` ya da bos.
+
+    Sahada `part identity` bazen `8:orgid:<guid>`, bazen `8:<guid>` ya da
+    farkli harf buyuklugunde geliyor; katilim kaydinin dusmesinin nedeni
+    tam esleme sartiydi.
+    """
+    left = clean_text(candidate).casefold()
+    right = clean_text(mine).casefold()
+    if not left or not right:
+        return MATCH_NONE
+    if left == right:
+        return MATCH_EXACT
+    guid = guid_of(right)
+    return MATCH_GUID if guid and guid_of(left) == guid else MATCH_NONE
+
+
 @dataclass
 class MeetingPart:
     """Toplantida bir kisi ve kac saniye kaldigi."""
@@ -69,6 +97,8 @@ class MeetingAttendance:
     thread_id: str = ""
     call_id: str = ""
     ended_at: Any = ""
+    # Olay turu: "ended", "started" ya da bos (yazmayan bloklar).
+    kind: str = ""
     parts: list[MeetingPart] = field(default_factory=list)
     # `meetingdetails` altindan: takvim eslemesinin en kesin yolu.
     ical_uid: str = ""
@@ -76,15 +106,22 @@ class MeetingAttendance:
     end_time: Any = ""
     meeting_type: str = ""
 
+    def match_for(self, mri: Any) -> tuple[MeetingPart | None, str]:
+        """(benim part'im, eslesme yolu). Once tam, sonra GUID eslemesi."""
+        if not clean_text(mri):
+            return None, MATCH_NONE
+        for wanted in (MATCH_EXACT, MATCH_GUID):
+            for part in self.parts:
+                if identity_match(part.mri, mri) == wanted:
+                    return part, wanted
+        return None, MATCH_NONE
+
     def part_for(self, mri: Any) -> MeetingPart | None:
-        marker = clean_text(mri)
-        if not marker:
-            return None
-        return next((part for part in self.parts if part.mri == marker), None)
+        return self.match_for(mri)[0]
 
     @property
-    def longest(self) -> int:
-        return max((part.seconds for part in self.parts), default=0)
+    def has_duration(self) -> bool:
+        return any(part.seconds > 0 for part in self.parts)
 
 
 # --- thread suzgeci ------------------------------------------------------
@@ -291,24 +328,23 @@ def _parse_with_regex(text: str) -> Partlist:
 
 
 def attendance_of(message: Any, thread_id: Any = "") -> MeetingAttendance | None:
-    """Tek mesaj -> katilim kaydi. Yalnizca `type="ended"` isler.
+    """Tek mesaj -> katilim kaydi (SUZMEDEN).
 
-    `started` mesaji sure tasimaz; islenirse her toplanti iki kez sayilirdi.
+    Burada karar verilmez: `started` mesaji da, suresiz blok da oldugu gibi
+    doner ve `kind` alaninda turu yazar. Hangisinin kayit uretecegine
+    `intake.plan_attendance` karar verir -- boylece teshis ekrani atlanan
+    mesajlari da gorebilir.
     """
     if not isinstance(message, dict):
         return None
     content = message.get("content")
-    if not (is_call_event(message.get("messageType")) or has_partlist(content)):
+    # `messageType` her zaman "Event/Call" degil (`RichText/Media_*` de
+    # gorulebiliyor): icinde `<partlist` gecen HER mesaj adaydir.
+    if not (has_partlist(content) or is_call_event(message.get("messageType"))):
         return None
 
     block = parse_partlist(content)
     if not block.parts:
-        return None
-    if block.kind == PARTLIST_STARTED:
-        return None
-    if block.kind != PARTLIST_ENDED and not block.has_duration:
-        # Turu yazmayan bloklarda sure varsa toplanti bitmistir; yoksa bu
-        # yalnizca "basladi" mesajidir ve katilim bilgisi tasimaz.
         return None
 
     ended = (
@@ -323,6 +359,7 @@ def attendance_of(message: Any, thread_id: Any = "") -> MeetingAttendance | None
         thread_id=clean_text(thread_id) or clean_text(message.get("conversationId")),
         call_id=block.call_id or clean_text(message.get("callId")),
         ended_at=ended,
+        kind=block.kind,
         parts=block.parts,
         ical_uid=block.ical_uid,
         start_time=block.start_time,

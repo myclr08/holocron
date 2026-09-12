@@ -3,7 +3,7 @@
 // app.js ve common.js icinden gelir, cerceve ve CDN yok.
 
 const CALL_WINDOWS = [7, 30, 90];
-const CALL_SEARCH_MS = 200;
+const CALL_SEARCH_MS = 250;
 
 // Uc dilimin cizim sirasi ve renk sinifi (CSS'te .split-<kind>).
 const CALL_SPLIT_ORDER = ["meeting", "group_call", "one_to_one"];
@@ -20,6 +20,9 @@ const callsState = {
   peopleSort: { key: "ms", dir: "desc" },
   searchTimer: null,
   drawerId: null,
+  // Ayni anda yalnizca en son istegin yaniti cizilir.
+  request: 0,
+  unmatched: 0,
 };
 
 // --- gorunum acma / kapama ----------------------------------------------
@@ -53,25 +56,32 @@ function callParams(extra) {
   return params;
 }
 
+/** Pencere ve arama degisiminde TEK istek: liste, kisiler ve istatistik
+ * ayni yanittan gelir. (Iki ayri istek, her tusa basista butun tabloyu iki
+ * kez okutuyordu.) */
 async function loadCalls() {
+  const token = ++callsState.request;
   try {
-    const [list, stats] = await Promise.all([
-      api("/api/calls?" + callParams().toString()),
-      api("/api/calls/stats?days=" + callsState.days),
-    ]);
-    callsState.calls = list.calls || [];
-    callsState.people = list.people || [];
-    callsState.scannedAt = list.scanned_at || "";
-    callsState.supported = list.supported !== false;
-    callsState.stats = stats;
-    setCallsBadge(list.count || 0);
+    const data = await api("/api/calls/view?" + callParams().toString());
+    // Gecikmis yanit taze olani ezmesin.
+    if (token !== callsState.request) return;
+    callsState.calls = data.calls || [];
+    callsState.people = data.people || [];
+    callsState.scannedAt = data.scanned_at || "";
+    callsState.supported = data.supported !== false;
+    callsState.stats = data.stats || null;
+    callsState.unmatched = data.unmatched || 0;
+    setCallsBadge(data.count || 0);
     renderCalls();
   } catch (err) {
     fail(err);
   }
 }
 
-/** Rozet: pencere icindeki arama sayisi. Ekran acilmadan da okunur. */
+/** Kenar cubugu rozeti: pencere icindeki arama sayisi.
+ *
+ * Ekran acilmadan bir kez cagrilir; istatistik ucu yalnizca sayilari doner,
+ * satirlari cizmez. */
 async function refreshCallsBadge() {
   try {
     const stats = await api("/api/calls/stats?days=" + callsState.days);
@@ -176,10 +186,9 @@ function renderCallWindows() {
 function renderCalls() {
   el("calls-count").textContent = `${callsState.calls.length} arama`;
   // Eslesmeyenler rozeti yalnizca SUPHELI olanlari sayar: grup sohbetinden
-  // baslatilan aramalarin takvimde karsiligi zaten beklenmez.
-  const orphans = callsState.calls.filter(
-    (call) => call.kind === "group_call" && call.thread_kind !== "group_chat"
-  ).length;
+  // baslatilan aramalarin takvimde karsiligi zaten beklenmez. Sayi listenin
+  // kendi yanitindan gelir; ayri bir istek ATILMAZ.
+  const orphans = callsState.unmatched;
   el("calls-unmatched").hidden = orphans === 0;
   el("calls-unmatched-count").textContent = String(orphans);
   el("calls-unmatched").title = `${orphans} arama toplantıyla eşleşmedi (grup sohbetleri sayılmaz)`;
@@ -524,6 +533,89 @@ function renderUnmatched(body, data) {
   });
 }
 
+// --- katilim teshisi ----------------------------------------------------
+
+const ATTENDANCE_DECISIONS = {
+  created: "Kayıt oluştu",
+  "skipped:no_me": "Katılımcı listesinde yokum",
+  "skipped:no_duration": "Süre yazmıyor",
+  "skipped:started": "Yalnızca başlama mesajı",
+  "deduped:history": "Arama geçmişinde zaten var",
+};
+
+function decisionText(decision) {
+  const marker = String(decision || "");
+  if (marker.startsWith("merged:")) return "Aynı toplantıya eklendi";
+  return ATTENDANCE_DECISIONS[marker] || marker;
+}
+
+function decisionClass(decision) {
+  const marker = String(decision || "");
+  if (marker === "created") return "is-good";
+  if (marker.startsWith("merged:")) return "is-fine";
+  return "is-skip";
+}
+
+async function openAttendance() {
+  const body = openCallsDrawer("Katılım teşhisi", "Teşhis");
+  clear(body);
+  body.appendChild(h("p", { class: "hint", text: "Toplantı sohbetleri okunuyor..." }));
+  try {
+    const data = await api("/api/calls/attendance-diagnose?days=" + callsState.days);
+    renderAttendance(body, data);
+  } catch (err) {
+    clear(body);
+    body.appendChild(h("p", { class: "hint", text: err.message }));
+  }
+}
+
+function renderAttendance(body, data) {
+  clear(body);
+  const summary = data.summary || {};
+  const lines = [
+    ["Mesaj", String(data.messages || 0)],
+    ["Kayıt oluşan", String(data.created || 0)],
+    ["Atlanan", String(summary.skipped || 0)],
+    ["Birleşen", String(summary.merged || 0)],
+    ["Kimliğim", data.my_mri_known ? "bulundu" : "bulunamadı"],
+  ];
+  lines.forEach(([label, value]) =>
+    body.appendChild(
+      h("div", { class: "detail-row" }, [
+        h("div", { class: "label", text: label }),
+        h("div", { class: "value", text: value }),
+      ])
+    )
+  );
+
+  if (!(data.meetings || []).length) {
+    body.appendChild(h("p", { class: "hint", text: "Bu pencerede katılım mesajı yok." }));
+    return;
+  }
+
+  body.appendChild(h("h3", { text: "Toplantılar" }));
+  data.meetings.forEach((item) => {
+    const box = h("div", { class: "unmatched" }, [
+      h("div", { class: "unmatched-head" }, [
+        h("span", { class: "when", text: stamp(item.ended_at) }),
+        h("span", { class: "what", text: item.subject || item.thread_core || "(konusuz)" }),
+        h("span", { class: "much", text: item.my_seconds ? `${Math.round(item.my_seconds / 60)} dk` : "—" }),
+      ]),
+      h("div", {
+        class: "unmatched-why " + decisionClass(item.decision),
+        text: decisionText(item.decision),
+      }),
+      h("div", {
+        class: "unmatched-id",
+        text:
+          `tür: ${item.event_kind} · katılımcı: ${item.part_count}` +
+          ` · ben: ${item.me_present || "yok"}`,
+      }),
+    ]);
+    body.appendChild(box);
+  });
+}
+
 // --- cekmece -------------------------------------------------------------
 
 function openCallsDrawer(title, kindLabel) {
@@ -695,6 +787,7 @@ function bindCalls() {
   el("calls-scan").addEventListener("click", scanCalls);
   el("calls-export").addEventListener("click", exportCalls);
   el("calls-unmatched").addEventListener("click", openUnmatched);
+  el("calls-attendance").addEventListener("click", openAttendance);
   el("calls-drawer-close").addEventListener("click", closeCallsDrawer);
   el("calls-tab-list").addEventListener("click", () => {
     callsState.tab = "list";

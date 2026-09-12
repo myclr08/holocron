@@ -414,3 +414,30 @@ def test_the_probe_tells_how_it_found_the_identity_not_what_it_is():
     text = probe.render_meetings(Path("x/leveldb"), [meeting_report()], "veritabani adi", 1.0)
     assert "Kendi kimligim    : veritabani adi" in text
     assert USER_GUID not in text
+
+
+@pytest.mark.parametrize(
+    "identity,path",
+    [
+        ("8:orgid:benim", "tam"),
+        ("8:ORGID:BENIM", "tam"),
+        ("8:benim", "guid"),
+        ("8:orgid:baskasi", "yok"),
+    ],
+)
+def test_the_identity_path_is_reported(identity, path):
+    assert probe.identity_path([identity], "8:orgid:benim") == path
+
+
+def test_the_meeting_report_says_how_the_identity_matched():
+    report = probe.ChainReport("t")
+    probe.scan_message(
+        report,
+        {"messageType": "Event/Call", "content": MEETING_XML.replace("8:orgid:benim", "8:benim")},
+        "8:orgid:benim",
+    )
+    assert report.mine == 1
+    assert report.mine_guid == 1
+    assert report.mine_exact == 0
+    text = probe.render_meetings(Path("x"), [report], "veritabani adi", 1.0)
+    assert "kendim gecen      : 1 (tam 0, guid 1)" in text

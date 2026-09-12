@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.7.1** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.7.2** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -569,8 +569,13 @@ Nasıl çalışır:
   sistem mesajı yazar ve içinde **kişi başına saniye** vardır. Holocron o
   bloktan kendi katılımınızı çıkarır — süreniz *sizin* `duration`'ınızdır,
   listede **sohbetten** rozetiyle görünür. **Katılmadığınız toplantı kayıt
-  üretmez**: kabul edip gitmediğiniz toplantıda katılımcı listesinde yoksunuz.
-  Aynı arama zaten arama geçmişinde varsa ikinci kayıt oluşmaz.
+  üretmez**: katılımcı listesinde yoksanız ya da süreniz yazmıyorsa satır
+  oluşmaz — yedek olarak "toplantının en uzun katılımı" kullanılmaz, bu
+  katılmadığınız toplantıların listelenmesine yol açıyordu. Kimliğiniz listede
+  `8:orgid:<guid>` yerine `8:<guid>` ya da farklı harf büyüklüğüyle geçse de
+  tanınır; çok oturumlu bir toplantının parçaları tek kayıtta **toplanır**;
+  `<partlist>` taşıyan her mesaj adaydır (tür alanının `Event/Call` olması
+  şart değil). Aynı arama zaten arama geçmişinde varsa ikinci kayıt oluşmaz.
 
   Mesajın yapısı iki biçimde geliyor: eskisi olay türünü `type="ended"`
   özniteliğinde, yenisi `<calleventtype>` elemanında taşır; ikisi de okunur.
@@ -643,6 +648,16 @@ Nasıl çalışır:
   çekmecesini açar: özet (toplam süre, sayı, giden/gelen, kaçırılan, en uzun,
   son görüşme), o kişiyle bütün görüşmeler ve katıldığı grup/toplantılar.
   Toplantı satırı organizatör, yanıt ve (kayıtta varsa) katılımcıları gösterir.
+- **Katılım teşhisi.** Araç çubuğundaki **Katılım teşhisi** düğmesi toplantı
+  sohbetlerini yeniden okuyup her katılım mesajının ne olduğunu yazar: kayıt
+  oluştu, katılımcı listesinde yokum, süre yazmıyor, yalnızca başlama mesajı,
+  aynı toplantıya eklendi, arama geçmişinde zaten var. Kimliğinizin nasıl
+  eşleştiği (tam / guid) da görünür. Uçtan da alınabilir:
+  `GET /api/calls/attendance-diagnose?days=30`
+- **Hız.** Pencere değiştirmek ve arama kutusuna yazmak **hiçbir zaman**
+  Teams önbelleğini okumaz: ekranın tamamı tek bir SQLite sorgusundan gelir
+  (`GET /api/calls/view?days=&q=` — liste, kişiler ve istatistik aynı
+  yanıtta). Önbelleği yalnızca **Aramaları çek** ve iki teşhis düğmesi açar.
 - **Eşleşmeyenler.** Bir grup araması toplantı olması gerekirken öyle
   görünmüyorsa, araç çubuğundaki **Eşleşmeyenler** düğmesi (eşleşmeyen varsa
   görünür) takvimi yeniden okuyup her arama için nedeni yazar: aramada
@@ -926,7 +941,7 @@ kilitler. Üçüncüsü etikettir: `v<sürüm>` biçiminde itilir ve release iş
 yanlış numaralı bir release çıkmaz.
 
 ```bash
-git tag v0.7.1 && git push origin v0.7.1
+git tag v0.7.2 && git push origin v0.7.2
 ```
 
 ### Teams sondası
@@ -983,6 +998,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.7.2** | 12 Eylül 2026 | Teams Aramalar: tek `view` isteği, SQL pencere ve indeks (1.000 kayıtta < 30 ms), önbellek yalnız çekim ve teşhiste; katılım kuralı sertleşti (kendi süre yoksa kayıt yok, GUID eşleşme, oturum toplama); "Katılım teşhisi" çekmecesi |
 | **v0.7.1** | 12 Eylül 2026 | Toplantı katılımı: yeni partlist biçimi (calleventtype, ended, meetingdetails), iCalUid ile takvim eşleşmesi, kendi kimlik veritabanı adından; sonda iskelet çıktısı |
 | **v0.7.0** | 12 Eylül 2026 | Teams Aramalar: toplantı sohbetlerindeki katılım kayıtlarından (partlist) gerçek katılım süresiyle toplantılar; "sohbetten" rozeti; Kendi Teams kimliğim ayarı; sonda `--meetings` |
 | **v0.6.3** | 12 Eylül 2026 | Teams Aramalar: takvim saatleri UTC olarak okunur (3 saatlik kayma düzeltildi); grup sohbeti aramaları teşhiste ayrı sayılır, rozet yalnız şüphelileri gösterir |

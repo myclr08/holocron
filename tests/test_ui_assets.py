@@ -459,6 +459,8 @@ def test_calls_view_hooks_are_on_the_page(api_client):
         'id="calls-stats"',
         'id="calls-unmatched"',
         "Eşleşmeyenler",
+        'id="calls-attendance"',
+        "Katılım teşhisi",
         'id="calls-tab-list"',
         'id="calls-tab-people"',
         ">Liste<",
@@ -473,7 +475,7 @@ def test_calls_view_hooks_are_on_the_page(api_client):
 def test_calls_script_covers_the_strip_the_tabs_and_the_drawer(api_client):
     script = api_client.get("/static/js/calls.js").text
     for marker in (
-        "/api/calls",
+        "/api/calls/view",
         "/api/calls/stats",
         "/api/calls/scan",
         "/api/calls/person/",
@@ -506,10 +508,20 @@ def test_calls_script_covers_the_strip_the_tabs_and_the_drawer(api_client):
     # Katilanlar (arama kaydi) ile davetliler (takvim) ayri baslikta.
     for marker in ('"Katılanlar"', '"Davetliler"', "call.attendees"):
         assert marker in script, marker
+    # Pencere/arama degisiminde TEK istek ve 250 ms bekleme.
+    assert "CALL_SEARCH_MS = 250" in script
+    assert script.count('api("/api/calls/view?') == 1
+    assert 'api("/api/calls?' not in script
+    # Rozet listenin yanitindan gelir, ek istek yok.
+    assert "callsState.unmatched" in script
+    # Katilim teshisi ayri dugmeye bagli.
+    for marker in ("/api/calls/attendance-diagnose", "function openAttendance",
+                   "skipped:no_duration", "skipped:no_me"):
+        assert marker in script, marker
     # Teshis: eslesmeyenler dugmesi, nedenler ve takvim adaylari.
     for marker in ("/api/calls/unmatched", "function openUnmatched", "function renderUnmatched",
                    "only_time_gap:", "no_thread_id", "matches_now", "recurring_matched",
-                   "group_chat_thread", 'thread_kind !== "group_chat"'):
+                   "group_chat_thread"):
         assert marker in script, marker
     # Toplanti sohbetinden gelen kayitlar rozetle isaretlenir.
     for marker in ('"sohbetten"', 'call.source === "chat"', "call-source"):

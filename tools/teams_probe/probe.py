@@ -645,6 +645,9 @@ class ChainReport:
     parts_max: int = 0
     with_duration: int = 0
     mine: int = 0
+    # Kendi kimligimin nasil eslestigi: tam mi, yalnizca GUID mi.
+    mine_exact: int = 0
+    mine_guid: int = 0
     event_types: Counter = field(default_factory=Counter)
     meeting_types: Counter = field(default_factory=Counter)
     skeletons: dict = field(default_factory=dict)
@@ -661,6 +664,26 @@ class ChainReport:
     @property
     def parts_average(self) -> float:
         return round(self.parts_total / self.partlists, 1) if self.partlists else 0.0
+
+
+def identity_path(values: Iterable[str], my_mri: str) -> str:
+    """Kendi kimligim bu listede nasil geciyor: `tam`, `guid` ya da `yok`.
+
+    `part identity` bazen `8:orgid:<guid>`, bazen `8:<guid>` ya da farkli
+    harf buyuklugunde geliyor; tam esleme sarti kayit dusuruyordu.
+    """
+    mine = str(my_mri or "").strip().casefold()
+    if not mine:
+        return "yok"
+    guid = mine.rsplit(":", 1)[-1]
+    found = ""
+    for value in values:
+        candidate = str(value or "").strip().casefold()
+        if candidate == mine:
+            return "tam"
+        if guid and candidate.rsplit(":", 1)[-1] == guid:
+            found = "guid"
+    return found or "yok"
 
 
 def content_tags(text: str) -> set:
@@ -705,8 +728,14 @@ def scan_message(report: ChainReport, message: Any, my_mri: str) -> None:
     report.parts_max = max(report.parts_max, count)
     if _HAS_DURATION.search(text):
         report.with_duration += 1
-    if my_mri and any(my_mri == value.strip() for value in _IDENTITY.findall(text)):
-        report.mine += 1
+    if my_mri:
+        how = identity_path(_IDENTITY.findall(text), my_mri)
+        if how == "tam":
+            report.mine += 1
+            report.mine_exact += 1
+        elif how == "guid":
+            report.mine += 1
+            report.mine_guid += 1
 
 
 _MRI_IN_TEXT = re.compile(
@@ -882,7 +911,10 @@ def render_meetings(
             add("  icerik etiketleri : " + ", ".join(sorted(report.tags)))
         add(f"  part sayisi       : ort {report.parts_average} / maks {report.parts_max}")
         add(f"  duration tasiyan  : {report.with_duration}")
-        add(f"  kendim gecen      : {report.mine}")
+        add(
+            f"  kendim gecen      : {report.mine} "
+            f"(tam {report.mine_exact}, guid {report.mine_guid})"
+        )
         if report.oldest is not None:
             add(f"  tarih araligi     : {format_moment(report.oldest)} .. {format_moment(report.newest)}")
         if report.event_types:

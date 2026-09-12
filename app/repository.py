@@ -2108,11 +2108,11 @@ CALL_COLUMNS: tuple[str, ...] = (
 )
 
 
-def _call_dict(row: sqlite3.Row) -> dict[str, Any]:
-    data = {name: row[name] for name in CALL_COLUMNS}
-    data["duration_ms"] = int(data["duration_ms"] or 0)
-    data["source"] = str(data["source"] or "history")
-    for name in CALL_COLUMNS:
+def _call_dict(row: sqlite3.Row, columns: Sequence[str] = CALL_COLUMNS) -> dict[str, Any]:
+    data = {name: row[name] for name in columns}
+    data["duration_ms"] = int(data.get("duration_ms") or 0)
+    data["source"] = str(data.get("source") or "history")
+    for name in columns:
         if name != "duration_ms" and data[name] is None:
             data[name] = ""
     return data
@@ -2168,19 +2168,38 @@ def import_calls(conn: sqlite3.Connection, rows: Iterable[dict[str, Any]]) -> di
     return {"scanned": len(prepared), "new": new, "updated": len(prepared) - new}
 
 
-def list_calls(conn: sqlite3.Connection, since: str = "") -> list[dict[str, Any]]:
-    """Kayitli aramalar (yeniden eskiye). `since` ISO metnidir, bos = hepsi."""
+# Listede ve istatistikte gerekmeyen agir sutun: ham kayit yalnizca
+# cekmecede okunur (kayit basina kilobaytlar tutabiliyor).
+HEAVY_CALL_COLUMNS: tuple[str, ...] = ("raw_json",)
+
+LIGHT_CALL_COLUMNS: tuple[str, ...] = tuple(
+    name for name in CALL_COLUMNS if name not in HEAVY_CALL_COLUMNS
+)
+
+
+def list_calls(
+    conn: sqlite3.Connection, since: str = "", with_raw: bool = False
+) -> list[dict[str, Any]]:
+    """Kayitli aramalar (yeniden eskiye).
+
+    `since` ISO metnidir ve suzgec SQL tarafinda uygulanir (`started_at`
+    indeksi var); `with_raw` kapaliyken `raw_json` hic okunmaz -- ekran ve
+    istatistik onu kullanmaz, okumak bos yere megabaytlar tasir.
+    """
+    columns = CALL_COLUMNS if with_raw else LIGHT_CALL_COLUMNS
+    names = ", ".join(columns)
     marker = str(since or "").strip()
     if marker:
         rows = conn.execute(
-            "SELECT * FROM teams_calls WHERE started_at >= ? ORDER BY started_at DESC, call_id",
+            f"SELECT {names} FROM teams_calls WHERE started_at >= ? "
+            "ORDER BY started_at DESC, call_id",
             (marker,),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM teams_calls ORDER BY started_at DESC, call_id"
+            f"SELECT {names} FROM teams_calls ORDER BY started_at DESC, call_id"
         ).fetchall()
-    return [_call_dict(row) for row in rows]
+    return [_call_dict(row, columns) for row in rows]
 
 
 def get_call(conn: sqlite3.Connection, call_id: str) -> dict[str, Any] | None:

@@ -1049,9 +1049,13 @@ def test_an_ended_partlist_becomes_attendance():
     ]
 
 
-def test_a_started_partlist_is_ignored():
+def test_a_started_partlist_creates_no_row():
     """`started` sure tasimaz; islenirse her toplanti iki kez sayilirdi."""
-    assert attendance.attendance_of({"messageType": "Event/Call", "content": STARTED_XML}) is None
+    record = attendance.attendance_of({"messageType": "Event/Call", "content": STARTED_XML})
+    assert record.kind == "started"
+    plan = intake.plan_attendance([record], MY_MRI)
+    assert plan.rows == []
+    assert plan.decisions[0]["decision"] == "skipped:started"
 
 
 def test_a_broken_partlist_falls_back_to_the_regex():
@@ -1168,9 +1172,11 @@ def test_the_duration_is_my_own_not_the_meetings():
     assert rows[0]["duration_ms"] == 600 * 1000
 
 
-def test_the_longest_part_stands_in_when_my_duration_is_missing():
-    rows = intake.normalize_attendance([fake_attended(seconds=0)], MY_MRI)
-    assert rows[0]["duration_ms"] == 1800 * 1000
+def test_no_duration_means_no_row():
+    """"En uzun part" yedegi KALDIRILDI: katilmadigim toplantiyi listeliyordu."""
+    plan = intake.plan_attendance([fake_attended(seconds=0)], MY_MRI)
+    assert plan.rows == []
+    assert plan.decisions[0]["decision"] == "skipped:no_duration"
 
 
 def test_a_meeting_i_did_not_attend_makes_no_row():
@@ -1325,7 +1331,9 @@ def test_the_identity_can_be_a_child_element():
 
 
 def test_the_new_started_message_is_ignored():
-    assert attendance.attendance_of({"messageType": "Event/Call", "content": NEW_STARTED_XML}) is None
+    record = attendance.attendance_of({"messageType": "Event/Call", "content": NEW_STARTED_XML})
+    assert record.kind == "started"
+    assert intake.normalize_attendance([record], MY_MRI) == []
 
 
 def test_a_block_without_a_type_but_with_durations_counts_as_ended():
@@ -1336,6 +1344,7 @@ def test_a_block_without_a_type_but_with_durations_counts_as_ended():
     record = attendance.attendance_of({"messageType": "Event/Call", "content": bare})
     assert record is not None
     assert record.part_for(MY_MRI).seconds == 1863
+    assert intake.normalize_attendance([record], MY_MRI)[0]["duration_ms"] == 1863 * 1000
 
 
 def test_a_block_without_a_type_and_without_durations_is_skipped():
@@ -1343,7 +1352,8 @@ def test_a_block_without_a_type_and_without_durations_is_skipped():
         '<partlist alt="x"><callid>c</callid>'
         f'<part identity="{MY_MRI}"><name>Ben</name></part></partlist>'
     )
-    assert attendance.attendance_of({"messageType": "Event/Call", "content": bare}) is None
+    record = attendance.attendance_of({"messageType": "Event/Call", "content": bare})
+    assert intake.normalize_attendance([record], MY_MRI) == []
 
 
 def test_the_old_format_still_works():
@@ -1398,6 +1408,217 @@ def test_the_calendar_record_carries_its_ical_uid():
         {"startTime": datetime(2026, 9, 11, 7, 0), "iCalUid": "ICAL-42", "subject": "Toplantı"}
     )
     assert record.ical_uid == "ICAL-42"
+
+
+# --- hiz: ekran yalnizca SQLite okur -------------------------------------
+
+
+def test_the_screen_endpoints_never_touch_the_cache(api_client, fake_calls):
+    """Pencere degistirmek ya da arama yazmak onbellegi ACMAMALI."""
+    seed_api(api_client, fake_calls)
+    before = fake_calls.reads
+
+    api_client.get("/api/calls/view?days=7")
+    api_client.get("/api/calls/view?days=90&q=örnek")
+    api_client.get("/api/calls?days=30")
+    api_client.get("/api/calls/stats?days=30")
+    api_client.get(f"/api/calls/person/{PERSON_ONE}?days=30")
+    assert fake_calls.reads == before
+
+    # Teshis uclari bilerek okur; yalnizca dugmeye basinca cagrilir.
+    api_client.get("/api/calls/unmatched?days=30")
+    assert fake_calls.reads == before + 1
+    api_client.get("/api/calls/attendance-diagnose?days=30")
+    assert fake_calls.reads == before + 2
+
+
+def test_the_view_endpoint_answers_the_whole_screen(api_client, fake_calls):
+    seed_api(api_client, fake_calls)
+    data = api_client.get("/api/calls/view?days=90").json()
+    for key in ("calls", "people", "stats", "count", "unmatched", "windows", "scanned_at"):
+        assert key in data, key
+    assert data["stats"]["total_ms"] > 0
+    # Rozet sayisi da burada: ayri istek gerekmez.
+    assert data["unmatched"] == sum(
+        1
+        for card in data["calls"]
+        if card["kind"] == "group_call" and card["thread_kind"] != "group_chat"
+    )
+
+
+def test_the_list_does_not_carry_the_raw_record(api_client, fake_calls):
+    """`raw_json` yalnizca cekmecede gerekir; listede okunmaz bile."""
+    seed_api(api_client, fake_calls)
+    data = api_client.get("/api/calls/view?days=90").json()
+    assert "raw_json" not in data["calls"][0]
+
+
+def test_the_window_is_filtered_in_sql(conn):
+    intake.scan(
+        conn,
+        FakeCallSource(calls=[call("eski", moment(200)), call("yeni", moment(1))]),
+    )
+    since = intake.iso_text(intake.since_of(30, NOW))
+    assert [row["call_id"] for row in repo.list_calls(conn, since=since)] == ["yeni"]
+    assert len(repo.list_calls(conn)) == 2
+
+
+def test_the_calls_table_is_indexed_by_time(conn):
+    indexes = {row["name"] for row in conn.execute("PRAGMA index_list(teams_calls)")}
+    assert "idx_teams_calls_started" in indexes
+    plan = conn.execute(
+        "EXPLAIN QUERY PLAN SELECT call_id FROM teams_calls WHERE started_at >= ? "
+        "ORDER BY started_at DESC",
+        ("2026-01-01",),
+    ).fetchall()
+    assert any("idx_teams_calls_started" in str(row["detail"]) for row in plan)
+
+
+def test_a_thousand_rows_render_in_well_under_a_second(api_client, fake_calls):
+    """Saha: pencere degisimi cok yavasti. Hedef: 1.000 kayitta < 300 ms."""
+    import time
+
+    fake_calls.calls = [
+        call(f"c{index}", moment(index % 80, hours=index % 12), minutes=index % 30 + 1)
+        for index in range(1000)
+    ]
+    api_client.post("/api/calls/scan")
+
+    started = time.perf_counter()
+    data = api_client.get("/api/calls/view?days=90").json()
+    elapsed = (time.perf_counter() - started) * 1000
+    assert data["count"] > 0
+    assert elapsed < 300, f"{elapsed:.0f} ms"
+
+    started = time.perf_counter()
+    api_client.get("/api/calls/view?days=7&q=örnek")
+    assert (time.perf_counter() - started) * 1000 < 300
+
+
+# --- katilim: sert kurallar ve teshis ------------------------------------
+
+
+def ended_message(seconds: int = 1863, identity: str = MY_MRI, call_id: str = "cagri-1",
+                  kind: str = "ended", message_type: str = "Event/Call") -> dict:
+    content = (
+        f'<partlist alt="x"><calleventtype>{kind}</calleventtype>'
+        f"<callid>{call_id}</callid>"
+        f'<part identity="{identity}"><name>Ben</name><duration>{seconds}</duration></part>'
+        f'<part identity="{PERSON_ONE}"><duration>1800</duration></part>'
+        "</partlist>"
+    )
+    return {
+        "messageType": message_type,
+        "content": content,
+        "originalArrivalTime": int((NOW - timedelta(days=1)).timestamp() * 1000),
+    }
+
+
+def record_of(**kwargs):
+    return attendance.attendance_of(ended_message(**kwargs), "19:meeting_ABC123456789@thread.v2")
+
+
+def test_a_partlist_inside_another_message_type_still_counts():
+    """`messageType` her zaman Event/Call degil (Media_CallRecording gorulur)."""
+    record = record_of(message_type="RichText/Media_CallRecording")
+    assert record is not None
+    assert intake.normalize_attendance([record], MY_MRI)[0]["duration_ms"] == 1863 * 1000
+
+
+def test_my_identity_matches_without_the_orgid_prefix():
+    """Sahada `part identity` bazen `8:<guid>` geliyor; kayit dusuyordu."""
+    record = record_of(identity="8:" + MY_GUID)
+    part, how = record.match_for(MY_MRI)
+    assert how == "guid"
+    assert intake.normalize_attendance([record], MY_MRI)[0]["duration_ms"] == 1863 * 1000
+
+
+def test_my_identity_matches_in_any_case():
+    record = record_of(identity=MY_MRI.upper())
+    assert record.match_for(MY_MRI)[1] == "exact"
+
+
+def test_several_sessions_of_one_meeting_are_summed():
+    """Cok oturumlu toplanti: ayni `callid`, sureler toplanir, tek satir."""
+    plan = intake.plan_attendance(
+        [record_of(seconds=600), record_of(seconds=900), record_of(seconds=300)], MY_MRI
+    )
+    assert len(plan.rows) == 1
+    assert plan.rows[0]["duration_ms"] == 1800 * 1000
+    assert [note["decision"] for note in plan.decisions] == [
+        "created",
+        "merged:cagri-1",
+        "merged:cagri-1",
+    ]
+
+
+def test_without_a_call_id_the_key_is_the_ical_and_the_day():
+    record = attendance.attendance_of(
+        {
+            "messageType": "Event/Call",
+            "content": (
+                '<partlist><calleventtype>ended</calleventtype>'
+                "<meetingdetails><icaluid>ICAL-7</icaluid></meetingdetails>"
+                f'<part identity="{MY_MRI}"><duration>60</duration></part></partlist>'
+            ),
+            "originalArrivalTime": int((NOW - timedelta(days=1)).timestamp() * 1000),
+        },
+        "19:meeting_x@thread.v2",
+    )
+    key = intake.attendance_key(record)
+    assert key.startswith("ICAL-7:")
+    assert intake.normalize_attendance([record], MY_MRI)[0]["call_id"] == key
+
+
+def test_every_decision_code_is_reported():
+    records = [
+        record_of(call_id="olusan"),
+        record_of(call_id="baskasi", identity=PERSON_TWO),
+        record_of(call_id="suresiz", seconds=0),
+        record_of(call_id="baslangic", kind="started"),
+        record_of(call_id="gecmiste"),
+    ]
+    plan = intake.plan_attendance(records, MY_MRI, known_ids={"gecmiste"})
+    assert [note["decision"] for note in plan.decisions] == [
+        "created",
+        "skipped:no_me",
+        "skipped:no_duration",
+        "skipped:started",
+        "deduped:history",
+    ]
+    assert len(plan.rows) == 1
+
+
+def test_the_diagnosis_groups_and_counts(api_client, fake_calls):
+    fake_calls.calls = []
+    fake_calls.attendance = [
+        record_of(call_id="olusan"),
+        record_of(call_id="baskasi", identity=PERSON_TWO),
+        record_of(call_id="suresiz", seconds=0),
+    ]
+    fake_calls.my_mri = MY_MRI
+    api_client.post("/api/calls/scan")
+
+    data = api_client.get("/api/calls/attendance-diagnose?days=90").json()
+    assert data["messages"] == 3
+    assert data["my_mri_known"] is True
+    assert data["summary"]["created"] == 1
+    assert data["summary"]["skipped"] == 2
+    first = data["meetings"][0]
+    for key in ("thread_core", "ended_at", "event_kind", "part_count", "me_present",
+                "my_seconds", "decision"):
+        assert key in first, key
+
+
+def test_the_diagnosis_names_the_meeting_when_the_calendar_knows_it(api_client, fake_calls):
+    fake_calls.calls = []
+    fake_calls.attendance = [record_of()]
+    fake_calls.calendar = [
+        event("Sabah daily", local_text(moment(9)), cid="19:meeting_ABC123456789@thread.v2")
+    ]
+    fake_calls.my_mri = MY_MRI
+    data = api_client.get("/api/calls/attendance-diagnose?days=90").json()
+    assert data["meetings"][0]["subject"] == "Sabah daily"
 
 
 # --- tekillestirme --------------------------------------------------------

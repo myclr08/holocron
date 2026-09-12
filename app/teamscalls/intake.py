@@ -23,7 +23,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Sequence
 
 from .. import fields as field_utils, repository
-from .attendance import MeetingAttendance, within
+from .attendance import PARTLIST_STARTED, MeetingAttendance, within
 from .source import (
     DIRECTION_IN,
     DIRECTION_OUT,
@@ -1151,6 +1151,160 @@ def match_attendance(record: MeetingAttendance, pools: Any) -> CalendarRecord | 
     )
 
 
+DECISION_CREATED = "created"
+DECISION_NO_ME = "skipped:no_me"
+DECISION_NO_DURATION = "skipped:no_duration"
+DECISION_STARTED = "skipped:started"
+DECISION_HISTORY = "deduped:history"
+DECISION_MERGED = "merged"
+
+
+def attendance_key(record: MeetingAttendance) -> str:
+    """Ayni toplantinin parcalarini birlestiren anahtar.
+
+    Cok oturumlu toplantida ayni `callid` icin birden fazla `ended` mesaji
+    duser; sureler TOPLANIR, tek kayit olur. `callid` yoksa `icaluid` + gun.
+    """
+    call_id = clean_text(record.call_id)
+    if call_id:
+        return call_id
+    ical = clean_text(record.ical_uid)
+    moment = parse_utc(record.ended_at)
+    day = moment.astimezone().date().isoformat() if moment is not None else ""
+    if ical:
+        return f"{ical}:{day}"
+    return f"{clean_text(record.thread_id)}:{day or clean_text(record.ended_at)}"
+
+
+@dataclass
+class AttendancePlan:
+    """Katilim kayitlarinin islenmis hali ve her mesaj icin verilen karar."""
+
+    rows: list[dict[str, Any]] = dataclass_field(default_factory=list)
+    decisions: list[dict[str, Any]] = dataclass_field(default_factory=list)
+
+
+def plan_attendance(
+    records: Iterable[MeetingAttendance],
+    mri: Any,
+    events: Any = (),
+    names: dict[str, str] | None = None,
+    seen_at: str | None = None,
+    known_ids: Iterable[str] = (),
+) -> AttendancePlan:
+    """Katilim mesajlarini satira cevirir ve her mesajin kaderini yazar.
+
+    Kurallar sert:
+
+    * Kullanici katilimci listesinde YOKSA kayit yok (katilmamis).
+    * Kullanicinin `duration` degeri yok ya da sifirsa kayit yok. ("En uzun
+      part" yedegi KALDIRILDI: katilmadigi toplantilarin listelenmesinin
+      nedeni oydu.)
+    * `started` mesaji ve turu yazmayan suresiz blok atlanir.
+    * Ayni anahtarli mesajlarin sureleri toplanir, tek satir olur.
+    """
+    plan = AttendancePlan()
+    marker = as_mri(clean_text(mri))
+    pools = event_pools(events)
+    stamp = seen_at or repository.now_iso()
+    skip = {clean_text(item) for item in known_ids}
+    made: dict[str, dict[str, Any]] = {}
+
+    for record in records or ():
+        key = attendance_key(record)
+        mine, how = record.match_for(marker) if marker else (None, "")
+        seconds = mine.seconds if mine is not None else 0
+        note = {
+            "call_id": clean_text(record.call_id),
+            "key": key,
+            "thread_id": clean_text(record.thread_id),
+            "thread_core": thread_core(record.thread_id),
+            "ended_at": iso_text(parse_utc(record.ended_at)) or clean_text(record.ended_at),
+            "event_kind": clean_text(record.kind) or "(yok)",
+            "part_count": len(record.parts),
+            "me_present": how or "",
+            "my_seconds": int(seconds),
+            "ical_uid": clean_text(record.ical_uid),
+        }
+
+        if clean_text(record.kind) == PARTLIST_STARTED:
+            note["decision"] = DECISION_STARTED
+        elif key in skip:
+            note["decision"] = DECISION_HISTORY
+        elif mine is None:
+            note["decision"] = DECISION_NO_ME
+        elif seconds <= 0:
+            note["decision"] = DECISION_NO_DURATION
+        elif key in made:
+            # Cok oturumlu toplanti: sure eklenir, yeni satir acilmaz.
+            row = made[key]
+            row["duration_ms"] += int(seconds) * 1000
+            row["ended_at"] = max(row["ended_at"], note["ended_at"])
+            note["decision"] = f"{DECISION_MERGED}:{key}"
+        else:
+            row = _attendance_row(record, seconds, pools, names, stamp, key)
+            made[key] = row
+            plan.rows.append(row)
+            note["decision"] = DECISION_CREATED
+
+        plan.decisions.append(note)
+
+    plan.rows.sort(key=lambda item: (item["started_at"], item["call_id"]))
+    return plan
+
+
+def _attendance_row(
+    record: MeetingAttendance,
+    seconds: int,
+    pools: Any,
+    names: dict[str, str] | None,
+    stamp: str,
+    call_id: str,
+) -> dict[str, Any]:
+    """Tek katilim satiri (`source='chat'`)."""
+    ended = parse_utc(record.ended_at)
+    started = ended - timedelta(seconds=seconds) if ended is not None else None
+    event = match_attendance(record, pools)
+    participants = [
+        {
+            "id": part.mri,
+            "name": resolve_name(part.mri, "", names),
+            "seconds": int(part.seconds),
+        }
+        for part in record.parts
+    ]
+    return {
+        "call_id": call_id,
+        "started_at": iso_text(started),
+        "ended_at": iso_text(ended),
+        "connected_at": iso_text(started),
+        "duration_ms": int(seconds) * 1000,
+        # Toplantiya katildim: yon kavrami yok, durum "kabul".
+        "direction": "",
+        "state": STATE_ACCEPTED,
+        "kind": KIND_MEETING,
+        "counterpart_id": "",
+        "counterpart_name": "",
+        "forwarded": "",
+        "meeting_subject": clean_text(event.subject) if event is not None else "",
+        "meeting_organizer": clean_text(event.organizer_name) if event is not None else "",
+        "my_response": clean_text(event.my_response) if event is not None else "",
+        "thread_id": clean_text(record.thread_id),
+        "group_thread_id": "",
+        "topic": "",
+        "participants_json": json.dumps(participants, ensure_ascii=False),
+        "attendees_json": json.dumps(
+            list(event.attendees) if event is not None else [], ensure_ascii=False
+        ),
+        "raw_json": json.dumps(
+            {"thread_id": record.thread_id, "parts": len(record.parts)}, ensure_ascii=False
+        ),
+        "source": SOURCE_CHAT,
+        "seen_at": stamp,
+        "matched_event_type": clean_text(event.event_type) if event is not None else "",
+    }
+
+
 def normalize_attendance(
     records: Iterable[MeetingAttendance],
     mri: Any,
@@ -1159,81 +1313,61 @@ def normalize_attendance(
     seen_at: str | None = None,
     known_ids: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
-    """Katilim kayitlari -> veritabani satirlari (`source='chat'`).
-
-    Kullanici katilimci listesinde YOKSA satir uretilmez: o toplantiya
-    katilmamistir. Sure kullanicinin KENDI `duration` degeridir; kayitta
-    yoksa toplantinin en uzun katilimi yedege gecer.
-    """
-    marker = as_mri(clean_text(mri))
-    if not marker:
+    """Katilim kayitlari -> veritabani satirlari (`source='chat'`)."""
+    if not clean_text(mri):
         return []
+    return plan_attendance(records, mri, events, names, seen_at, known_ids).rows
 
+
+def diagnose_attendance(
+    records: Iterable[MeetingAttendance],
+    mri: Any,
+    events: Any = (),
+    names: dict[str, str] | None = None,
+    known_ids: Iterable[str] = (),
+    days: Any = DEFAULT_DAYS,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Teshis: her partlist mesaji ne oldu, neden?
+
+    "Katildigim toplanti listede yok" ve "katilmadigim toplanti listede var"
+    sikayetlerinin ikisi de buradan okunur.
+    """
+    since = since_of(days, now)
+    picked = [
+        record
+        for record in records or ()
+        if (parse_utc(record.ended_at) is None or parse_utc(record.ended_at) >= since)
+    ]
+    plan = plan_attendance(picked, mri, events, names, known_ids=known_ids)
     pools = event_pools(events)
-    stamp = seen_at or repository.now_iso()
-    skip = {clean_text(item) for item in known_ids}
-    rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
 
-    for record in records or ():
-        mine = record.part_for(marker)
-        if mine is None:
+    subjects: dict[str, str] = {}
+    for record in picked:
+        key = attendance_key(record)
+        if key in subjects:
             continue
-        call_id = attendance_call_id(record)
-        if not call_id or call_id in skip or call_id in seen:
-            continue
-        seen.add(call_id)
-
-        ended = parse_utc(record.ended_at)
-        seconds = mine.seconds or record.longest
-        started = ended - timedelta(seconds=seconds) if ended is not None else None
         event = match_attendance(record, pools)
-        participants = [
-            {
-                "id": part.mri,
-                "name": resolve_name(part.mri, "", names),
-                "seconds": int(part.seconds),
-            }
-            for part in record.parts
-        ]
-        rows.append(
-            {
-                "call_id": call_id,
-                "started_at": iso_text(started),
-                "ended_at": iso_text(ended),
-                "connected_at": iso_text(started),
-                "duration_ms": int(seconds) * 1000,
-                # Toplantiya katildim: yon kavrami yok, durum "kabul".
-                "direction": "",
-                "state": STATE_ACCEPTED,
-                "kind": KIND_MEETING,
-                "counterpart_id": "",
-                "counterpart_name": "",
-                "forwarded": "",
-                "meeting_subject": clean_text(event.subject) if event is not None else "",
-                "meeting_organizer": clean_text(event.organizer_name) if event is not None else "",
-                "my_response": clean_text(event.my_response) if event is not None else "",
-                "thread_id": clean_text(record.thread_id),
-                "group_thread_id": "",
-                "topic": "",
-                "participants_json": json.dumps(participants, ensure_ascii=False),
-                "attendees_json": json.dumps(
-                    list(event.attendees) if event is not None else [], ensure_ascii=False
-                ),
-                "raw_json": json.dumps(
-                    {"thread_id": record.thread_id, "parts": len(record.parts)},
-                    ensure_ascii=False,
-                ),
-                "source": SOURCE_CHAT,
-                "seen_at": stamp,
-                "matched_event_type": clean_text(event.event_type) if event is not None else "",
-            }
-        )
-    rows.sort(key=lambda item: (item["started_at"], item["call_id"]))
-    return rows
+        subjects[key] = clean_text(event.subject) if event is not None else ""
+
+    counts: dict[str, int] = {}
+    for note in plan.decisions:
+        note["subject"] = subjects.get(note["key"], "")
+        head = str(note["decision"]).split(":", 1)[0]
+        counts[head] = counts.get(head, 0) + 1
+
+    plan.decisions.sort(key=lambda item: str(item.get("ended_at") or ""), reverse=True)
+    return {
+        "days": _as_days(days),
+        "my_mri_known": bool(clean_text(mri)),
+        "messages": len(plan.decisions),
+        "created": len(plan.rows),
+        "summary": counts,
+        "meetings": plan.decisions,
+    }
 
 
-# --- tarama --------------------------------------------------------------
+# --- tarama ---# --- tarama --------------------------------------------------------------
 
 
 def source_diagnostics(source: Any) -> dict[str, Any]:

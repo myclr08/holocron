@@ -890,6 +890,63 @@ def scan_calls(request: Request) -> dict[str, Any]:
     return result
 
 
+def _calls_payload(
+    context: AppContext,
+    days: int,
+    q: str = "",
+    direction: str = "",
+    state: str = "",
+    kind: str = "",
+    with_stats: bool = True,
+) -> dict[str, Any]:
+    """Ekranin tek yanitta ihtiyaci olan her sey. YALNIZCA SQLite okur.
+
+    Onbellek burada ACILMAZ: pencere degistirmek ya da arama kutusuna yazmak
+    Teams'in IndexedDB'sine dokunmamali (saniyeler suruyor).
+    """
+    conn = context.connection()
+    # Pencere suzgeci SQL'de: butun tabloyu cekip Python'da elemek yerine.
+    since = calls_intake.iso_text(calls_intake.since_of(days))
+    rows = repository.list_calls(conn, since=since)
+    names = calls_intake.names_from_rows(rows)
+    picked = calls_intake.select(
+        rows, days=days, q=q, direction=direction, state=state, kind=kind, names=names
+    )
+    cards = [calls_intake.view(row, names) for row in picked]
+    payload: dict[str, Any] = {
+        "calls": cards,
+        "people": calls_intake.people_totals(picked, names),
+        "count": len(picked),
+        "total": repository.call_count(conn),
+        "days": calls_intake._as_days(days),
+        "windows": list(calls_intake.WINDOW_DAYS),
+        "scanned_at": context.settings.get("calls.scanned_at", "") or "",
+        "supported": calls_supported(),
+        # Rozet buradan hesaplanir; "Eslesmeyenler" ucuna istek atilmaz.
+        "unmatched": sum(
+            1
+            for card in cards
+            if card["kind"] == calls_intake.KIND_GROUP and card["thread_kind"] != "group_chat"
+        ),
+    }
+    if with_stats:
+        payload["stats"] = calls_intake.build_stats(rows, days=days, names=names)
+    return payload
+
+
+@router.get("/calls/view")
+def read_calls_view(
+    request: Request,
+    days: int = calls_intake.DEFAULT_DAYS,
+    q: str = "",
+    direction: str = "",
+    state: str = "",
+    kind: str = "",
+) -> dict[str, Any]:
+    """Liste + kisiler + istatistik tek istekte (ekranin kullandigi uc)."""
+    return _calls_payload(get_context(request), days, q, direction, state, kind)
+
+
 @router.get("/calls")
 def read_calls(
     request: Request,
@@ -900,31 +957,19 @@ def read_calls(
     kind: str = "",
 ) -> dict[str, Any]:
     """Pencere + suzgeclerle arama listesi ve ayni kumeden kisi dokumu."""
-    context = get_context(request)
-    conn = context.connection()
-    rows = repository.list_calls(conn)
-    # Kimlik -> ad sozlugu bir kez kurulur: grup basliklari ve arama da kullanir.
-    names = calls_intake.names_from_rows(rows)
-    picked = calls_intake.select(
-        rows, days=days, q=q, direction=direction, state=state, kind=kind, names=names
+    payload = _calls_payload(
+        get_context(request), days, q, direction, state, kind, with_stats=False
     )
-    return {
-        "calls": [calls_intake.view(row, names) for row in picked],
-        "people": calls_intake.people_totals(picked, names),
-        "count": len(picked),
-        "total": repository.call_count(conn),
-        "days": calls_intake.DEFAULT_DAYS if not days else max(1, min(int(days), 3650)),
-        "windows": list(calls_intake.WINDOW_DAYS),
-        "scanned_at": context.settings.get("calls.scanned_at", "") or "",
-        "supported": calls_supported(),
-    }
+    return payload
 
 
 @router.get("/calls/stats")
 def read_call_stats(request: Request, days: int = calls_intake.DEFAULT_DAYS) -> dict[str, Any]:
     """Istatistik seridi: top 5, uc dilim, aradim/arandim, is gunu ortalamasi."""
     context = get_context(request)
-    return calls_intake.build_stats(repository.list_calls(context.connection()), days=days)
+    since = calls_intake.iso_text(calls_intake.since_of(days))
+    rows = repository.list_calls(context.connection(), since=since)
+    return calls_intake.build_stats(rows, days=days)
 
 
 @router.get("/calls/export.xlsx")
@@ -966,15 +1011,43 @@ def read_unmatched_calls(
     )
 
 
+@router.get("/calls/attendance-diagnose")
+def read_attendance_diagnosis(
+    request: Request, days: int = calls_intake.DEFAULT_DAYS
+) -> dict[str, Any]:
+    """Teshis: toplanti sohbetlerindeki her katilim mesaji ne oldu, neden?
+
+    Onbellegi TAZE okur (saniyeler surer): yalnizca dugmeye basinca cagrilir.
+    """
+    context = get_context(request)
+    config = calls_intake.load_config(context.settings)
+    source = calls_source(context, config)
+    bundle = tuple(source.read())
+    calls, calendar, names, threads, attended = (*bundle, [], [], [], [])[:5]
+    found = calls_intake.source_diagnostics(source)
+    marker = calls_intake.my_mri(
+        setting=context.settings.get("calls.my_mri", "") or "",
+        discovered=found.get("my_mri"),
+    )
+    return calls_intake.diagnose_attendance(
+        attended,
+        marker,
+        calendar,
+        names,
+        known_ids=repository.history_call_ids(context.connection()),
+        days=days,
+    )
+
+
 @router.get("/calls/person/{counterpart_id}")
 def read_call_person(
     request: Request, counterpart_id: str, days: int = calls_intake.DEFAULT_DAYS
 ) -> dict[str, Any]:
     """Kisi cekmecesi: ozet, o kisiyle butun gorusmeler, ortak grup/toplantilar."""
     context = get_context(request)
-    return calls_intake.person_view(
-        repository.list_calls(context.connection()), counterpart_id, days=days
-    )
+    since = calls_intake.iso_text(calls_intake.since_of(days))
+    rows = repository.list_calls(context.connection(), since=since)
+    return calls_intake.person_view(rows, counterpart_id, days=days)
 
 
 # --- yerel alanlar ------------------------------------------------------
