@@ -488,6 +488,9 @@ def test_calls_script_covers_the_strip_the_tabs_and_the_drawer(api_client):
     assert "counterpart_label" in script
     assert "participant_names" in script
     assert "counterpart_name" not in script
+    # Tarama balonu en yeni kaydi ve kilitli dosya uyarisini soyler.
+    for marker in ("latest_call_at", "result.warning", "skipped_kinds", "en yeni:"):
+        assert marker in script, marker
 
 
 def test_calls_styles_are_defined(api_client):

@@ -866,7 +866,13 @@ def calls_source(context: AppContext, config: Any = None) -> Any:
 
 @router.post("/calls/scan")
 def scan_calls(request: Request) -> dict[str, Any]:
-    """Onbellegi tarar. Ozet: scanned / new / updated / meetings_matched / ms."""
+    """Onbellegi tarar.
+
+    Ozet yalnizca sayilari tasimaz: `source` verinin gecici kopyadan mi canli
+    klasorden mi geldigini, `copied` / `skipped` / `skipped_kinds` kopyalamanin
+    ne kadarinin tuttugunu, `warning` en yeni aramalarin eksik olabilecegini,
+    `latest_call_at` ise okunan en yeni aramanin zamanini soyler.
+    """
     context = get_context(request)
     config = calls_intake.load_config(context.settings)
     source = calls_source(context, config)

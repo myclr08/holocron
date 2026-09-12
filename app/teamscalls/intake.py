@@ -37,6 +37,7 @@ from .source import (
     CallSource,
     as_int,
     clean_text,
+    empty_diagnostics,
     iso_text,
     parse_local,
     parse_utc,
@@ -690,10 +691,33 @@ def person_view(
 # --- tarama --------------------------------------------------------------
 
 
+def source_diagnostics(source: Any) -> dict[str, Any]:
+    """Kaynagin teshis bilgisi (kopyalanan/atlanan dosya, kaynak, uyari).
+
+    Sozlesme bunu zorunlu kilmaz: veremeyen kaynak bos degerlerle gecer.
+    """
+    base = empty_diagnostics()
+    reader = getattr(source, "diagnostics", None)
+    info = reader() if callable(reader) else None
+    if isinstance(info, dict):
+        for key in base:
+            if key in info and info[key] is not None:
+                base[key] = info[key]
+    return base
+
+
 def scan(conn: Any, source: CallSource, seen_at: str | None = None) -> dict[str, Any]:
-    """Kaynagi okur, normalize eder, `call_id` ile tekillestirerek yazar."""
+    """Kaynagi okur, normalize eder, `call_id` ile tekillestirerek yazar.
+
+    Ozet yalnizca sayilari degil, verinin NEREDEN geldigini de tasir: en yeni
+    aramalar eksikse kullanicinin bunu balonda gormesi gerekir.
+    """
     calls, calendar, names = source.read()
     rows = normalize(calls, calendar, names, seen_at)
     report = repository.import_calls(conn, rows)
     report["meetings_matched"] = sum(1 for row in rows if row["kind"] == KIND_MEETING)
+    report["latest_call_at"] = max(
+        (row["started_at"] for row in rows if row["started_at"]), default=""
+    )
+    report.update(source_diagnostics(source))
     return report

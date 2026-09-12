@@ -7,8 +7,15 @@ zaten gorunen kayitlar. Hicbir ag cagrisi yoktur, hicbir sey disari gitmez.
 Bilinmesi gerekenler:
 
 * **Kilit.** Teams acikken LevelDB dosyalari kilitli olabilir; klasor once
-  `%TEMP%\\holocron-teams-calls\\` altina kopyalanir, acilamayan dosya
-  atlanir. Kopya okunamazsa canli klasor bir kez daha denenir.
+  `%TEMP%\\holocron-teams-calls\\` altina kopyalanir. Kopyalama once normal
+  okumayi, olmazsa Windows'un paylasimli acma bayraklarini
+  (`FILE_SHARE_READ|WRITE|DELETE`) dener; yine acilamayan dosya atlanir ve
+  ADIYLA sayilir.
+* **Eksik kopya.** En yeni aramalar henuz `.ldb`ye sikistirilmamis yazma
+  gunlugunde (`*.log`) durur. Atlanan dosyalar arasinda `.log`, `MANIFEST`
+  ya da `CURRENT` varsa kopya EKSIK sayilir ve once **canli klasor** okunur
+  (ccl salt okuma yapar). Canli okuma da patlarsa kopyadan okunan sonuc
+  kullanilir ama `warning` ile birlikte doner.
 * **ccl yalnizca burada.** IndexedDB okuyucusu `app/vendor/` icinde tasinir
   ve **cagri aninda** `ensure_path()` ile yola eklenir; modul import'u da
   fonksiyonun icindedir. Linux paketinde hic dokunulmaz.
@@ -20,6 +27,7 @@ Bilinmesi gerekenler:
 from __future__ import annotations
 
 import shutil
+import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,12 +35,15 @@ from typing import Any, Iterable
 
 from .. import vendor
 from .source import (
+    SOURCE_COPY,
+    SOURCE_LIVE,
     CalendarRecord,
     CallRecord,
     CallsError,
     blob_dir_for,
     clean_text,
     default_cache_path,
+    empty_diagnostics,
     temp_root,
 )
 
@@ -180,34 +191,133 @@ def names_from_value(value: Any) -> dict[str, str]:
 
 
 # --- kopyalama -----------------------------------------------------------
+#
+# LevelDB'nin dosya turleri esit degildir: `.ldb` sikistirilmis eski veriyi,
+# `*.log` HENUZ SIKISTIRILMAMIS yeni veriyi tasir. Teams acikken kilitli
+# kalan genellikle tam da o yazma gunlugudur; atlanirsa "son bir hafta yok"
+# sikayeti cikar. Bu yuzden atlanan dosyalar turleriyle sayilir.
+
+# Tek seferde okunan parca (kilitli dosyayi parca parca cekiyoruz).
+COPY_CHUNK = 1024 * 1024
+
+# Atlanmasi kopyayi EKSIK yapan dosya turleri.
+CRITICAL_KINDS: tuple[str, ...] = ("log", "manifest", "current")
+
+
+def file_kind(name: Any) -> str:
+    """Dosya adindan LevelDB dosya turu: log / ldb / manifest / current / lock."""
+    marker = Path(str(name or "")).name.upper()
+    if marker.endswith(".LOG"):
+        return "log"
+    if marker.endswith(".LDB") or marker.endswith(".SST"):
+        return "ldb"
+    if marker.startswith("MANIFEST"):
+        return "manifest"
+    if marker == "CURRENT":
+        return "current"
+    if marker == "LOCK":
+        return "lock"
+    return "other"
+
+
+def is_critical(name: Any) -> bool:
+    """Bu dosya atlanirsa kopya eksik mi sayilir?"""
+    return file_kind(name) in CRITICAL_KINDS
 
 
 @dataclass
 class CopyReport:
-    """Kopyalamanin sonucu: nereye, kac dosya, kac atlama."""
+    """Kopyalamanin sonucu: nereye, kac dosya, neler atlandi."""
 
     target: Path
     copied: int = 0
     skipped: int = 0
+    skipped_names: list[str] = field(default_factory=list)
     reasons: Counter = field(default_factory=Counter)
+
+    def kinds(self) -> dict[str, int]:
+        """Atlanan dosyalarin tur dokumu (`{"log": 1, "lock": 1}`)."""
+        return dict(Counter(file_kind(name) for name in self.skipped_names))
+
+    @property
+    def critical(self) -> list[str]:
+        """Atlanmasi veriyi eksik birakan dosyalar."""
+        return [name for name in self.skipped_names if is_critical(name)]
+
+    @property
+    def is_incomplete(self) -> bool:
+        """Kopya eksik mi? (yazma gunlugu, MANIFEST ya da CURRENT atlandiysa)"""
+        return bool(self.critical)
+
+    def merge(self, other: "CopyReport") -> None:
+        self.copied += other.copied
+        self.skipped += other.skipped
+        self.skipped_names.extend(other.skipped_names)
+        self.reasons.update(other.reasons)
+
+
+def copy_stream(src: Any, dst: Any) -> None:
+    """Normal okuma: dosya paylasimli acilabiliyorsa bu yeter."""
+    with open(src, "rb") as source, open(dst, "wb") as target:
+        shutil.copyfileobj(source, target, COPY_CHUNK)
+
+
+def copy_shared(src: Any, dst: Any) -> None:
+    """Kilitli dosyayi Windows'un paylasimli acma bayraklariyla okur.
+
+    `open()` Windows'ta dosyayi paylasimsiz acar ve Teams'in tuttugu
+    `*.log` / `LOCK` dosyalarinda `PermissionError` alir. `CreateFile`
+    `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE` ile ayni
+    dosyayi okumaya izin verir; cogu kilitli dosya boyle kopyalanabiliyor.
+    """
+    if sys.platform != "win32":
+        raise OSError("paylaşımlı okuma yalnız Windows'ta var")
+    import win32file  # noqa: PLC0415 - yerel ice aktarim: yalnizca Windows
+
+    handle = win32file.CreateFile(
+        str(src),
+        win32file.GENERIC_READ,
+        win32file.FILE_SHARE_READ | win32file.FILE_SHARE_WRITE | win32file.FILE_SHARE_DELETE,
+        None,
+        win32file.OPEN_EXISTING,
+        0,
+        None,
+    )
+    try:
+        with open(dst, "wb") as target:
+            while True:
+                _, chunk = win32file.ReadFile(handle, COPY_CHUNK)
+                if not chunk:
+                    break
+                target.write(chunk)
+    finally:
+        try:
+            handle.Close()
+        except Exception:  # pragma: no cover - tanitici zaten kapanmis olabilir
+            pass
 
 
 def copy_tree(source: Path, target: Path) -> CopyReport:
-    """Klasoru kopyalar; acilamayan (kilitli) dosyayi atlar ve sayar."""
+    """Klasoru kopyalar; acilamayan dosyayi atlar, adiyla ve turuyle sayar."""
     report = CopyReport(target=target)
     if target.exists():
         shutil.rmtree(target, ignore_errors=True)
     target.mkdir(parents=True, exist_ok=True)
 
     def copy_file(src: str, dst: str, *, follow_symlinks: bool = True) -> Any:
+        """Once normal, olmazsa paylasimli okuma; ikisi de olmazsa atla."""
         try:
-            result = shutil.copy2(src, dst, follow_symlinks=follow_symlinks)
-        except OSError as exc:
-            report.skipped += 1
-            report.reasons[type(exc).__name__] += 1
-            return dst
+            copy_stream(src, dst)
+        except OSError:
+            try:
+                copy_shared(src, dst)
+            except Exception as exc:
+                report.skipped += 1
+                report.skipped_names.append(Path(src).name)
+                report.reasons[type(exc).__name__] += 1
+                return dst
         report.copied += 1
-        return result
+        return dst
 
     try:
         shutil.copytree(source, target, copy_function=copy_file, dirs_exist_ok=True)
@@ -217,6 +327,14 @@ def copy_tree(source: Path, target: Path) -> CopyReport:
     except OSError as exc:  # pragma: no cover - kok klasor okunamadi
         report.reasons[type(exc).__name__] += 1
     return report
+
+
+def missing_warning(report: CopyReport) -> str:
+    """Eksik kopyanin kullaniciya gosterilen cumlesi."""
+    return (
+        f"Teams açıkken {len(report.critical)} dosya kopyalanamadı; "
+        "en yeni aramalar eksik olabilir. Teams'i kapatıp tekrar deneyin."
+    )
 
 
 # --- kaynak --------------------------------------------------------------
@@ -237,8 +355,13 @@ class TeamsCacheSource:
         self.cache_path = clean_text(cache_path)
         self.copy_first = copy_first
         self.copy_report: CopyReport | None = None
+        self.report: dict[str, Any] = empty_diagnostics()
 
     # --- sozlesme -----------------------------------------------------
+
+    def diagnostics(self) -> dict[str, Any]:
+        """Son taramanin teshisi: kopyalanan/atlanan dosyalar, kaynak, uyari."""
+        return dict(self.report)
 
     def read(self) -> tuple[list[CallRecord], list[CalendarRecord], dict[str, str]]:
         leveldb = Path(self.cache_path) if self.cache_path else default_cache_path()
@@ -251,44 +374,77 @@ class TeamsCacheSource:
             )
 
         blob = blob_dir_for(leveldb)
-        source = leveldb
-        blob_source = blob if blob.is_dir() else None
+        live_blob = blob if blob.is_dir() else None
+        self.report = empty_diagnostics()
+        self.copy_report = None
 
-        if self.copy_first:
-            root = temp_root()
-            report = copy_tree(leveldb, root / leveldb.name)
-            self.copy_report = report
-            source = report.target
-            if blob_source is not None:
-                blob_copy = copy_tree(blob_source, root / blob.name)
-                report.copied += blob_copy.copied
-                report.skipped += blob_copy.skipped
-                report.reasons.update(blob_copy.reasons)
-                blob_source = blob_copy.target
+        if not self.copy_first:
+            result = self._read_or_fail(leveldb, live_blob)
+            self.report["source"] = SOURCE_LIVE
+            return result
+
+        copy_leveldb, copy_blob, report = self._copy_cache(leveldb, blob)
+        self.copy_report = report
+        self.report["copied"] = report.copied
+        self.report["skipped"] = report.skipped
+        self.report["skipped_kinds"] = report.kinds()
+
+        # Kopya eksikse (yazma gunlugu kilitli kaldiysa) en yeni aramalar
+        # kopyada YOKTUR; once canli klasor denenir. ccl salt okuma yapar,
+        # Teams'in verisine dokunmaz.
+        if report.is_incomplete:
+            try:
+                result = self._read_all(leveldb, live_blob)
+            except Exception:
+                result = None
+            if result is not None:
+                self.report["source"] = SOURCE_LIVE
+                return result
 
         try:
-            return self._read_all(source, blob_source)
-        except CallsError:
-            raise
+            result = self._read_all(copy_leveldb, copy_blob)
         except Exception as exc:
-            # Kopya bozuksa canli klasore bir sans daha: LevelDB kilidi
-            # okumayi her zaman engellemiyor.
-            if source == leveldb:
+            if report.is_incomplete:
+                # Hem canli hem kopya okunamadi: soyleyecek bir sey kalmadi.
                 raise CallsError(
                     "calls_read_failed",
                     f"Teams önbelleği okunamadı ({type(exc).__name__}). "
                     "Teams'i kapatıp yeniden deneyin.",
                 ) from exc
-            try:
-                return self._read_all(leveldb, blob if blob.is_dir() else None)
-            except Exception as second:
-                raise CallsError(
-                    "calls_read_failed",
-                    f"Teams önbelleği okunamadı ({type(second).__name__}). "
-                    "Teams'i kapatıp yeniden deneyin.",
-                ) from second
+            # Kopya tamdi ama bozuk cikti: canli klasore bir sans daha.
+            result = self._read_or_fail(leveldb, live_blob)
+            self.report["source"] = SOURCE_LIVE
+            return result
+
+        self.report["source"] = SOURCE_COPY
+        if report.is_incomplete:
+            self.report["warning"] = missing_warning(report)
+        return result
 
     # --- ic islem -----------------------------------------------------
+
+    def _copy_cache(self, leveldb: Path, blob: Path) -> tuple[Path, Path | None, CopyReport]:
+        """Onbellegi `%TEMP%` altina kopyalar; rapor iki klasoru birlestirir."""
+        root = temp_root()
+        report = copy_tree(leveldb, root / leveldb.name)
+        copy_blob: Path | None = None
+        if blob.is_dir():
+            blob_report = copy_tree(blob, root / blob.name)
+            report.merge(blob_report)
+            copy_blob = blob_report.target
+        return report.target, copy_blob, report
+
+    def _read_or_fail(
+        self, leveldb: Path, blob: Path | None
+    ) -> tuple[list[CallRecord], list[CalendarRecord], dict[str, str]]:
+        try:
+            return self._read_all(leveldb, blob)
+        except Exception as exc:
+            raise CallsError(
+                "calls_read_failed",
+                f"Teams önbelleği okunamadı ({type(exc).__name__}). "
+                "Teams'i kapatıp yeniden deneyin.",
+            ) from exc
 
     def _read_all(
         self, leveldb: Path, blob: Path | None

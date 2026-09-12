@@ -36,6 +36,21 @@ TEAMS_RELATIVE = (
 # Teams acikken LevelDB kilitli olabilir; klasor once buraya kopyalanir.
 COPY_DIR_NAME = "holocron-teams-calls"
 
+# Kayitlarin hangi klasorden okundugu: gecici kopya ya da canli klasor.
+SOURCE_COPY = "copy"
+SOURCE_LIVE = "live"
+
+
+def empty_diagnostics() -> dict[str, Any]:
+    """Tarama teshisi: kac dosya kopyalandi, kac tanesi atlandi, nereden okundu."""
+    return {
+        "copied": 0,
+        "skipped": 0,
+        "skipped_kinds": {},
+        "source": "",
+        "warning": "",
+    }
+
 # `callDirection`
 DIRECTION_IN = "Incoming"
 DIRECTION_OUT = "Outgoing"

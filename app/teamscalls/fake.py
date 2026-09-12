@@ -15,12 +15,14 @@ from typing import Any, Iterable
 from .source import (
     DIRECTION_IN,
     DIRECTION_OUT,
+    SOURCE_COPY,
     STATE_ACCEPTED,
     TYPE_MULTI_PARTY,
     TYPE_TWO_PARTY,
     CalendarRecord,
     CallRecord,
     CallsError,
+    empty_diagnostics,
 )
 
 # Sahte kimlikler: Teams'in MRI bicimini taklit eder ama kimseye ait degildir.
@@ -119,12 +121,19 @@ class FakeCallSource:
         calendar: Iterable[CalendarRecord] = (),
         names: dict[str, str] | None = None,
         error: CallsError | None = None,
+        report: dict[str, Any] | None = None,
     ) -> None:
         self.calls: list[CallRecord] = list(calls)
         self.calendar: list[CalendarRecord] = list(calendar)
         self.names: dict[str, str] = dict(DEFAULT_NAMES if names is None else names)
         self.error = error
         self.reads = 0
+        # Teshis: gercek kaynakta kopyalama sonucunu tasir, burada testlerin
+        # istedigi degerleri (ornegin bir uyari) tasiyabilir.
+        self.report: dict[str, Any] = report or {**empty_diagnostics(), "source": SOURCE_COPY}
+
+    def diagnostics(self) -> dict[str, Any]:
+        return dict(self.report)
 
     def read(self) -> tuple[list[CallRecord], list[CalendarRecord], dict[str, str]]:
         self.reads += 1

@@ -19,6 +19,7 @@ from __future__ import annotations
 import io
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from openpyxl import load_workbook
@@ -358,6 +359,180 @@ def test_the_person_drawer_titles_shared_meetings_the_same_way():
     assert "8:orgid:" not in data["group_calls"][0]["title"]
 
 
+# --- kopyalama: kilitli dosya, eksik kopya, canli yedek -------------------
+#
+# Saha bulgusu: Teams acikken en yeni aramalar kopyaya girmiyordu. Sebep,
+# henuz `.ldb`ye sikistirilmamis yazma gunlugunun (`*.log`) kilitli kalmasi.
+# Bu bolum o kararlari koruyor.
+
+
+@pytest.mark.parametrize(
+    "name,kind",
+    [
+        ("000123.log", "log"),
+        ("000045.ldb", "ldb"),
+        ("000045.sst", "ldb"),
+        ("MANIFEST-000002", "manifest"),
+        ("CURRENT", "current"),
+        ("LOCK", "lock"),
+        ("bir-sey.txt", "other"),
+    ],
+)
+def test_leveldb_files_are_classified(name, kind):
+    assert teams_cache.file_kind(name) == kind
+
+
+@pytest.mark.parametrize("name", ["000123.log", "MANIFEST-000002", "CURRENT"])
+def test_these_files_make_a_copy_incomplete(name):
+    assert teams_cache.is_critical(name) is True
+
+
+@pytest.mark.parametrize("name", ["000045.ldb", "LOCK", "bir-sey.txt"])
+def test_these_files_do_not(name):
+    assert teams_cache.is_critical(name) is False
+
+
+def report_with(*names: str) -> "teams_cache.CopyReport":
+    return teams_cache.CopyReport(
+        target=Path("kopya"), copied=3, skipped=len(names), skipped_names=list(names)
+    )
+
+
+def test_a_skipped_write_log_marks_the_copy_incomplete():
+    assert report_with("000123.log").is_incomplete is True
+    assert report_with("LOCK").is_incomplete is False
+    assert report_with().is_incomplete is False
+
+
+def test_the_skipped_files_are_summarised_by_kind():
+    report = report_with("000123.log", "000124.log", "LOCK")
+    assert report.kinds() == {"log": 2, "lock": 1}
+    assert report.critical == ["000123.log", "000124.log"]
+
+
+def test_a_locked_file_is_skipped_named_and_counted(tmp_path, monkeypatch):
+    source = tmp_path / "leveldb"
+    source.mkdir()
+    (source / "000123.log").write_bytes(b"yeni veri")
+    (source / "000045.ldb").write_bytes(b"eski veri")
+
+    def stubborn(src, dst):
+        if Path(src).name.endswith(".log"):
+            raise PermissionError("kilitli")
+        Path(dst).write_bytes(Path(src).read_bytes())
+
+    def refuse(src, dst):
+        raise PermissionError("paylaşımlı okuma da olmadı")
+
+    monkeypatch.setattr(teams_cache, "copy_stream", stubborn)
+    monkeypatch.setattr(teams_cache, "copy_shared", refuse)
+
+    report = teams_cache.copy_tree(source, tmp_path / "kopya")
+    assert report.copied == 1
+    assert report.skipped == 1
+    assert report.skipped_names == ["000123.log"]
+    assert report.kinds() == {"log": 1}
+    assert report.is_incomplete is True
+
+
+def test_the_shared_read_rescues_a_file_that_normal_open_cannot(tmp_path, monkeypatch):
+    source = tmp_path / "leveldb"
+    source.mkdir()
+    (source / "000123.log").write_bytes(b"yeni veri")
+
+    def locked(src, dst):
+        raise PermissionError("kilitli")
+
+    def shared(src, dst):
+        Path(dst).write_bytes(Path(src).read_bytes())
+
+    monkeypatch.setattr(teams_cache, "copy_stream", locked)
+    monkeypatch.setattr(teams_cache, "copy_shared", shared)
+
+    report = teams_cache.copy_tree(source, tmp_path / "kopya")
+    assert report.copied == 1
+    assert report.skipped == 0
+    assert (tmp_path / "kopya" / "000123.log").read_bytes() == b"yeni veri"
+
+
+def test_the_shared_read_is_windows_only(monkeypatch):
+    monkeypatch.setattr(teams_cache.sys, "platform", "linux")
+    with pytest.raises(OSError):
+        teams_cache.copy_shared("a", "b")
+
+
+def reading_source(tmp_path, monkeypatch, report, failing: set[str] = frozenset()):
+    """Kopyalamayi ve okumayi sahteleyen bir kaynak + okunan yollar listesi."""
+    cache = tmp_path / "leveldb"
+    cache.mkdir()
+    source = teams_cache.TeamsCacheSource(cache_path=str(cache))
+    monkeypatch.setattr(teams_cache, "copy_tree", lambda src, dst: report)
+    seen: list[str] = []
+
+    def fake_read_all(leveldb, blob):
+        name = "live" if Path(leveldb) == cache else "copy"
+        seen.append(name)
+        if name in failing:
+            raise RuntimeError("okunamadı")
+        return ([], [], {})
+
+    monkeypatch.setattr(source, "_read_all", fake_read_all)
+    return source, seen, cache
+
+
+def test_a_complete_copy_is_read_from_the_copy(tmp_path, monkeypatch):
+    report = report_with("LOCK")
+    report.target = tmp_path / "kopya"
+    source, seen, _ = reading_source(tmp_path, monkeypatch, report)
+    source.read()
+    assert seen == ["copy"]
+    assert source.diagnostics()["source"] == "copy"
+    assert source.diagnostics()["warning"] == ""
+    assert source.diagnostics()["skipped_kinds"] == {"lock": 1}
+
+
+def test_an_incomplete_copy_falls_back_to_the_live_folder(tmp_path, monkeypatch):
+    report = report_with("000123.log")
+    report.target = tmp_path / "kopya"
+    source, seen, _ = reading_source(tmp_path, monkeypatch, report)
+    source.read()
+    # Once canli klasor: en yeni aramalar kopyada yok.
+    assert seen == ["live"]
+    assert source.diagnostics()["source"] == "live"
+    assert source.diagnostics()["warning"] == ""
+
+
+def test_when_the_live_read_fails_too_the_copy_is_used_with_a_warning(tmp_path, monkeypatch):
+    report = report_with("000123.log", "MANIFEST-000002")
+    report.target = tmp_path / "kopya"
+    source, seen, _ = reading_source(tmp_path, monkeypatch, report, failing={"live"})
+    source.read()
+    assert seen == ["live", "copy"]
+    info = source.diagnostics()
+    assert info["source"] == "copy"
+    assert "kopyalanamadı" in info["warning"]
+    assert "Teams'i kapatıp" in info["warning"]
+    assert info["skipped_kinds"] == {"log": 1, "manifest": 1}
+
+
+def test_a_broken_complete_copy_still_tries_the_live_folder(tmp_path, monkeypatch):
+    report = report_with()
+    report.target = tmp_path / "kopya"
+    source, seen, _ = reading_source(tmp_path, monkeypatch, report, failing={"copy"})
+    source.read()
+    assert seen == ["copy", "live"]
+    assert source.diagnostics()["source"] == "live"
+
+
+def test_when_nothing_can_be_read_the_user_is_told(tmp_path, monkeypatch):
+    report = report_with("000123.log")
+    report.target = tmp_path / "kopya"
+    source, _, _ = reading_source(tmp_path, monkeypatch, report, failing={"live", "copy"})
+    with pytest.raises(CallsError) as caught:
+        source.read()
+    assert caught.value.code == "calls_read_failed"
+
+
 # --- tekillestirme --------------------------------------------------------
 
 
@@ -681,6 +856,13 @@ def test_the_scan_endpoint_summarises_the_run(api_client, fake_calls):
     assert result["ms"] >= 0
     assert result["scanned_at"]
     assert fake_calls.reads == 1
+    # Verinin nereden geldigi ve en yeni kaydin zamani ozette durur.
+    assert result["source"] == "copy"
+    assert result["warning"] == ""
+    assert result["copied"] == 0
+    assert result["skipped"] == 0
+    assert result["skipped_kinds"] == {}
+    assert result["latest_call_at"].startswith("2026-09-1")
 
     again = api_client.post("/api/calls/scan").json()
     assert (again["new"], again["updated"]) == (0, 4)
@@ -768,6 +950,22 @@ def test_the_endpoints_say_feature_unavailable_without_windows(api_client, conte
     response = api_client.post("/api/calls/scan")
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "feature_unavailable"
+
+
+def test_the_scan_reports_a_locked_cache(api_client, fake_calls):
+    fake_calls.report = {
+        "copied": 41,
+        "skipped": 2,
+        "skipped_kinds": {"log": 1, "lock": 1},
+        "source": "copy",
+        "warning": "Teams açıkken 1 dosya kopyalanamadı; en yeni aramalar eksik "
+        "olabilir. Teams'i kapatıp tekrar deneyin.",
+    }
+    result = seed_api(api_client, fake_calls)
+    assert result["copied"] == 41
+    assert result["skipped"] == 2
+    assert result["skipped_kinds"] == {"log": 1, "lock": 1}
+    assert "kopyalanamadı" in result["warning"]
 
 
 def test_a_source_error_reaches_the_user(api_client, fake_calls):

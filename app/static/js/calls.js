@@ -93,11 +93,28 @@ async function scanCalls() {
   el("calls-hint").textContent = "Teams önbelleği okunuyor...";
   try {
     const result = await api("/api/calls/scan", { method: "POST" });
+    const newest = result.latest_call_at ? shortStamp(result.latest_call_at) : "—";
+    const notes = [];
+    if (result.warning) {
+      // Kilitli kalan yazma gunlugu: en yeni aramalar eksik olabilir.
+      notes.push(h("div", { class: "toast-sub", text: result.warning }));
+    }
+    if (result.skipped) {
+      notes.push(
+        h("div", {
+          class: "toast-sub",
+          text: `Kopyalanan ${result.copied} dosya · atlanan ${result.skipped}` +
+            kindSummary(result.skipped_kinds),
+        })
+      );
+    }
     toast(
       "Aramalar çekildi",
-      `${result.scanned} kayıt okundu · ${result.new} yeni · ${result.updated} güncellendi` +
+      `${result.scanned} kayıt, en yeni: ${newest}` +
+        ` · ${result.new} yeni · ${result.updated} güncellendi` +
         (result.meetings_matched ? ` · ${result.meetings_matched} toplantı eşleşti` : ""),
-      "ok"
+      result.warning ? "error" : "ok",
+      notes
     );
     await loadCalls();
   } catch (err) {
@@ -106,6 +123,12 @@ async function scanCalls() {
     button.disabled = false;
     el("calls-hint").textContent = callsHint();
   }
+}
+
+/** Atlanan dosyalarin tur dokumu: " (log 1, lock 1)". */
+function kindSummary(kinds) {
+  const parts = Object.entries(kinds || {}).map(([name, count]) => `${name} ${count}`);
+  return parts.length ? " (" + parts.join(", ") + ")" : "";
 }
 
 function callsHint() {

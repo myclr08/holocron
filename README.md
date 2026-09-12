@@ -185,6 +185,27 @@ Hata mesajı sebebi söyler: adı çözülemedi (DNS), kapı reddedildi, TCP
 kurulamadı, vekil sunucuya ulaşılamadı, sertifika doğrulanamadı. Daha
 ayrıntısı için **Ayarlar → Ağ → Teşhis**.
 
+### Teams aramalarında son günler gelmiyor
+
+Eski aramalar geliyor ama son birkaç günün kayıtları yoksa sebep neredeyse
+her zaman **kilitli yazma günlüğüdür**: LevelDB yeni kayıtları önce `*.log`
+dosyasına yazar, sıkıştırılmış `.ldb` dosyalarına sonra taşır. Teams açıkken o
+`.log` dosyası kilitlidir; kopyalanamazsa en yeni aramalar da gelmez.
+
+Sırayla:
+
+1. **Teams'te Aramalar → Geçmiş ekranını açın** ve biraz aşağı kaydırın.
+   İstemci kayıtları oraya yazar; hiç açmadıysanız yerel önbellekte de
+   olmayabilirler.
+2. **Teams'i tamamen kapatın** (bildirim alanındaki simgeden Çıkış) ve
+   **Aramaları çek**'e yeniden basın. Balon "Teams açıkken N dosya
+   kopyalanamadı" diyorsa sorun budur.
+3. Balondaki **en yeni** tarihine bakın: beklediğiniz günü gösteriyorsa veri
+   gelmiştir, pencereyi (7/30/90 gün) kontrol edin.
+4. Hâlâ gelmiyorsa `tools/teams_probe/probe.py` sondasını çalıştırın; çıktı
+   hangi veritabanında kaç kayıt olduğunu ve tarih aralığını yazar (kişisel
+   değer içermez, paylaşılabilir).
+
 ### Teşhis
 
 **Bağlantıyı sına** düğmesinin yanındaki **Teşhis**, zinciri parçalara ayırıp
@@ -501,12 +522,16 @@ geçmişinizi yerelde tablo ve istatistik olarak gösterir.
 
 Nasıl çalışır:
 
-- **Çekme.** **Aramaları çek** düğmesi klasörü önce `%TEMP%` altına kopyalar
-  (Teams açıkken dosyalar kilitli olabilir), kopyalanamayan dosyayı atlar,
-  kopya okunamazsa canlı klasörü bir kez daha dener. Özet satırı kaç kayıt
-  okunduğunu, kaçının yeni olduğunu ve kaç toplantının eşleştiğini söyler.
-  Aynı önbelleği ikinci kez taramak kopya oluşturmaz: tekilleştirme
-  `callId` üzerindendir.
+- **Çekme.** **Aramaları çek** düğmesi klasörü önce `%TEMP%` altına kopyalar.
+  Kilitli dosyalarda önce normal okuma, olmazsa Windows'un paylaşımlı açma
+  bayrakları (`FILE_SHARE_READ|WRITE|DELETE`) denenir; yine açılamayan dosya
+  atlanır ve **türüyle** sayılır. Atlananlar arasında yazma günlüğü (`*.log`),
+  `MANIFEST` ya da `CURRENT` varsa kopya **eksik** sayılır ve **canlı klasör**
+  okunur (okuyucu salt okuma yapar, Teams'in verisine dokunmaz); o da
+  başarısız olursa kopyadan okunan sonuç bir uyarıyla birlikte gelir.
+  Özet balonu kaç kayıt okunduğunu, **en yeni aramanın tarihini**, kaçının yeni
+  olduğunu ve kaç toplantının eşleştiğini söyler. Aynı önbelleği ikinci kez
+  taramak kopya oluşturmaz: tekilleştirme `callId` üzerindendir.
 - **Tür.** `TwoParty` **birebir** görüşmedir. `MultiParty` ise takvimde aynı
   saate (± 10 dakika) denk gelen bir kayıt varsa **toplantı** (konusu ve
   organizatörü de oradan gelir), yoksa **grup araması** sayılır. Yineleyen
