@@ -17,7 +17,7 @@ import requests
 from . import db
 from .jira_client import BaseJiraClient, create_client
 from .lifecycle import Heartbeat
-from .mail import default_source
+from .mail import default_sender, default_source
 from .refresh import RefreshManager
 from .secrets import SecretBox
 from .teamscalls import default_source as default_calls_source
@@ -28,6 +28,8 @@ ClientFactory = Callable[[JiraConfig], BaseJiraClient]
 MailFactory = Callable[..., Any]
 # Arama gecmisi kaynagi fabrikasi: uretimde Teams onbellegi, testlerde sahte kaynak.
 CallFactory = Callable[..., Any]
+# Posta gondericisi fabrikasi: uretimde Outlook, testlerde sahte gonderici.
+SenderFactory = Callable[..., Any]
 
 
 @dataclass
@@ -40,6 +42,7 @@ class AppContext:
     refresh: RefreshManager = field(default_factory=RefreshManager)
     mail_factory: MailFactory = field(default=default_source)
     calls_factory: CallFactory = field(default=default_calls_source)
+    sender_factory: SenderFactory = field(default=default_sender)
     # Yazma islemleri bu kilitle sirayla girer (okumalar paralel kalabilir).
     db_lock: threading.RLock = field(default_factory=threading.RLock)
 

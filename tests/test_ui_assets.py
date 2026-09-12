@@ -138,7 +138,15 @@ CSS_VARIABLES = (
     "--font:", "--display:",
 )
 
-SCRIPTS = ("common.js", "app.js", "settings.js", "starfield.js", "calls.js")
+SCRIPTS = (
+    "common.js",
+    "app.js",
+    "settings.js",
+    "starfield.js",
+    "calls.js",
+    "mailsend.js",
+    "mailsend-settings.js",
+)
 
 
 def test_fonts_and_their_licenses_ship_with_the_app():

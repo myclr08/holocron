@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from app import __version__ as app_version
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # Windows'ta OneDrive/Masaustu yollari boyle gorunuyor; ayni tuzak burada.
@@ -88,7 +90,7 @@ def test_app_starts_from_a_foreign_working_directory(tmp_path, monkeypatch):
         log_file = package / "holocron.log"
         assert log_file.exists()
         text = log_file.read_text(encoding="utf-8")
-        assert "Holocron 0.1.0 basliyor" in text
+        assert f"Holocron {app_version} basliyor" in text
         assert f"port {port}" in text
         assert str(package) in text
 
@@ -158,7 +160,7 @@ def test_app_starts_without_stdout_or_stderr(tmp_path):
         # Konsol yokken de tek satir bile kaybolmuyor.
         text = (package / "holocron.log").read_text(encoding="utf-8")
         assert "Konsol durumu: stdout=yok stderr=yok" in text
-        assert "Holocron 0.1.0 basliyor" in text
+        assert f"Holocron {app_version} basliyor" in text
         assert f"port {port}" in text
 
         urllib.request.urlopen(

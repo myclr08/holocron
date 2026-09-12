@@ -228,3 +228,46 @@ def test_pywin32_stays_in_the_windows_zip(fake_wheels, tmp_path):
     )
     with zipfile.ZipFile(output) as archive:
         assert any("pywin32" in name for name in archive.namelist())
+
+
+# --- surum numarasi -----------------------------------------------------
+#
+# Uc yerde ayni deger duruyor: `app/__init__.py` (arayuzdeki "s<surum>" rozeti
+# ve /api/health), `pyproject.toml` (paketleme) ve itilen etiket (`v<surum>`,
+# release is akisi dogruluyor). Ikisi burada kilitlenir, ucuncusu CI'da.
+
+VERSION_PATTERN = r"^\d+\.\d+\.\d+$"
+
+
+def _pyproject_version() -> str:
+    import re
+
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    block = text.split("[project]", 1)[1]
+    return re.search(r'^version = "([^"]+)"', block, re.MULTILINE).group(1)
+
+
+def test_pyproject_and_app_agree_on_the_version():
+    import re
+
+    from app import __version__
+
+    assert _pyproject_version() == __version__
+    assert re.match(VERSION_PATTERN, __version__), __version__
+
+
+def test_the_release_workflow_refuses_a_mismatched_tag():
+    """Etiket ile koddaki surum ayrilirsa publish isi dusmeli."""
+    text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    publish = text.split("  publish:", 1)[1]
+    assert "actions/checkout@v4" in publish
+    assert "__version__" in publish
+    assert "github.ref_name" in publish
+    assert "sys.exit(" in publish
+
+
+def test_the_readme_names_the_current_version():
+    from app import __version__
+
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert f"v{__version__}" in text

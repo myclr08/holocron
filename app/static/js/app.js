@@ -44,6 +44,9 @@ const state = {
   crawlTimer: null,
   view: "groups",
   teams: null,
+  // Grid'deki onay kutusu sutunu; grup degisince sifirlanir.
+  selectedKeys: new Set(),
+  mailSupported: true,
   tasks: {
     columns: [],
     oldDone: 0,
@@ -243,6 +246,7 @@ async function selectGroup(groupId, keepView) {
     state.query = "";
     el("search").value = "";
     state.sort = null;
+    clearSelection();
   }
   el("placeholder").hidden = true;
   if (state.view !== "tasks" && state.view !== "calls") el("group-view").hidden = false;
@@ -260,6 +264,54 @@ function renderGroupHead() {
   const jqlLine = el("group-jql");
   jqlLine.textContent = group.jql ? "JQL: " + group.jql : "";
   jqlLine.hidden = !group.jql;
+}
+
+// --- secim (onay kutusu sutunu) -----------------------------------------
+//
+// Secim grid'in ustunde durur: "E-posta ile gonder" ve Excel penceresindeki
+// "yalniz secili" kutusu bunu okur. Kume grup degisince sifirlanir; suzgec
+// degisince DURUR, kullanici arayip secip aramayi temizleyince secimini
+// kaybetmesin.
+
+function clearSelection() {
+  state.selectedKeys = new Set();
+  renderPickCount();
+}
+
+/** Secili anahtarlar; sira grid'deki sira degil, secim sirasidir. */
+function selectedKeyList() {
+  return Array.from(state.selectedKeys);
+}
+
+function toggleKey(key, on) {
+  if (on) state.selectedKeys.add(key);
+  else state.selectedKeys.delete(key);
+  renderPickCount();
+}
+
+/** Rozet ve "tumunu sec" kutusunun uc durumu (bos / karisik / dolu). */
+function renderPickCount() {
+  const badge = el("pick-count");
+  if (!badge) return;
+  const count = state.selectedKeys.size;
+  badge.textContent = count ? count + " seçili" : "";
+  badge.hidden = count === 0;
+  const all = el("pick-all");
+  if (all) {
+    const shown = state.rows.length;
+    const picked = state.rows.filter((row) => state.selectedKeys.has(row.key)).length;
+    all.checked = shown > 0 && picked === shown;
+    all.indeterminate = picked > 0 && picked < shown;
+  }
+}
+
+/** Basliktaki kutu yalnizca GORUNEN (suzulmus) satirlari kapsar. */
+function toggleAllVisible(on) {
+  state.rows.forEach((row) => {
+    if (on) state.selectedKeys.add(row.key);
+    else state.selectedKeys.delete(row.key);
+  });
+  renderGrid();
 }
 
 // --- grid ---------------------------------------------------------------
@@ -296,6 +348,16 @@ async function loadIssues() {
 function renderGrid() {
   const head = el("grid-head");
   clear(head);
+  const all = h("input", {
+    type: "checkbox",
+    id: "pick-all",
+    title: "Görünen satırların tümünü seç",
+    onclick: (event) => {
+      event.stopPropagation();
+      toggleAllVisible(event.target.checked);
+    },
+  });
+  head.appendChild(h("th", { class: "pick" }, [all]));
   state.columns.forEach((column) => {
     const sorted = state.sort && state.sort.field === column.id;
     const arrow = sorted ? (state.sort.dir === "asc" ? " ↑" : " ↓") : "";
@@ -323,6 +385,8 @@ function renderGrid() {
       : "Bu sektörde kayıt yok.";
   // Bos grupta disa aktaracak bir sey yok.
   el("export-xlsx").disabled = state.total === 0;
+  el("mail-send").disabled = state.total === 0 || state.mailSupported === false;
+  renderPickCount();
   el("catalog-warning").hidden = !state.catalogEmpty;
   el("row-count").textContent =
     state.shown === state.total ? `${state.total} kayıt` : `${state.shown} / ${state.total} kayıt`;
@@ -357,6 +421,19 @@ function renderRow(row) {
     title: row.missing ? "Bu kayıt henüz Jira'dan çekilmedi." : "",
     onclick: () => openDrawer(row.key),
   });
+
+  const pick = h("input", {
+    type: "checkbox",
+    title: "Bu kaydı seç",
+    onclick: (event) => {
+      event.stopPropagation();
+      toggleKey(row.key, event.target.checked);
+    },
+  });
+  pick.checked = state.selectedKeys.has(row.key);
+  tr.appendChild(
+    h("td", { class: "pick", onclick: (event) => event.stopPropagation() }, [pick])
+  );
 
   row.cells.forEach((cell, index) => {
     const column = state.columns[index] || {};
@@ -1692,6 +1769,17 @@ function exportModal() {
   const filterInput = h("input", { type: "checkbox" });
   filterInput.checked = true;
 
+  // Grid'de onay kutusuyla secim varsa varsayilan olarak yalniz onlar gider.
+  const picked = selectedKeyList();
+  const pickedInput = h("input", { type: "checkbox" });
+  pickedInput.checked = picked.length > 0;
+  const pickedBox = picked.length
+    ? h("label", { class: "checkbox" }, [
+        pickedInput,
+        document.createTextNode(`Yalnız seçili ${picked.length} kayıt`),
+      ])
+    : null;
+
   const body = h("div", {}, [
     h("div", { class: "export-head" }, [
       h("span", { class: "hint", text: "Excel'e gidecek sütunlar" }),
@@ -1707,6 +1795,7 @@ function exportModal() {
       filterInput,
       document.createTextNode("Görünen süzgeç ve sıralamayı uygula"),
     ]),
+    pickedBox,
     h("p", {
       class: "hint",
       text: "Dosya ekranda görüneni yazar; uzun metinler kırpılmaz.",
@@ -1729,9 +1818,13 @@ function exportModal() {
         params.set("dir", state.sort.dir);
       }
     }
+    // Secim varsa ayri uc kullanilir: `keys` yalnizca o anahtarlari yazar.
+    const onlyPicked = picked.length > 0 && pickedInput.checked;
+    if (onlyPicked) params.set("keys", picked.join(","));
+    const file = onlyPicked ? "export-selected.xlsx" : "export.xlsx";
     // Indirme normal bir baglanti gibi gider; Content-Disposition adi belirler.
     const link = h("a", {
-      href: `/api/groups/${state.activeId}/export.xlsx?${params.toString()}`,
+      href: `/api/groups/${state.activeId}/${file}?${params.toString()}`,
       download: true,
     });
     document.body.appendChild(link);
@@ -2467,6 +2560,10 @@ function bindEvents() {
   el("empty-add").addEventListener("click", addItemsModal);
   el("choose-columns").addEventListener("click", columnsModal);
   el("export-xlsx").addEventListener("click", exportModal);
+  el("mail-send").addEventListener("click", () => {
+    // Pencere ayri dosyada (mailsend.js); dosya yuklenmediyse sessiz kalinir.
+    if (typeof mailSendModal === "function") mailSendModal();
+  });
   el("local-fields").addEventListener("click", localFieldsModal);
   el("tasks-entry").addEventListener("click", showTasks);
   el("tasks-entry").addEventListener("keydown", (event) => {
@@ -2558,6 +2655,14 @@ document.addEventListener("DOMContentLoaded", () => {
       // Dugme yalnizca ozellik acikken ve Windows'ta gorunur.
       state.tasks.mail = settings["mail.enabled"] === "1" && settings.mail_supported !== false;
       el("tasks-scan").hidden = !state.tasks.mail;
+      // E-posta gonderimi de Outlook COM ister: Windows disinda dugme pasif.
+      state.mailSupported = settings.mail_supported !== false;
+      state.mailMode = settings["mailsend.mode"] === "send" ? "send" : "display";
+      if (!state.mailSupported) {
+        const button = el("mail-send");
+        button.disabled = true;
+        button.title = "Bu özellik yalnız Windows'ta Outlook ile çalışır.";
+      }
       const hint = el("connection-hint");
       if (settings["jira.base_url"] && settings.secret_set) {
         hint.textContent = "Bağlantı hazır: " + settings["jira.base_url"];

@@ -4,23 +4,39 @@ Jira kayıtlarını yerelde takip etmek için küçük bir masaüstü aracı. Su
 yalnızca `127.0.0.1` üzerinde çalışır, arayüz tarayıcıda açılır; veriler
 uygulamanın yanındaki `holocron.db` dosyasında kalır, hiçbir yere gönderilmez.
 
+Amaç tek bir şey: peşinde olduğunuz kayıtları, kendi notlarınızı ve kime ne
+sorduğunuzu **tek masada** toplamak. Jira'nın kendi ekranlarının yerine geçmez;
+sizin takip listenizi tutar, yanına Jira'nın bilmediği bilgileri ekler ve o
+listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
+
 > Bu depo yalnızca aracın kendisini içerir. Kurum bilgisi, iç adres, gerçek
 > proje anahtarı veya kayıt örneği bulunmaz; belgelerdeki tüm örnekler
-> uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`).
+> uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
+> `ornek@example.com`).
 
-## Durum
+Güncel sürüm: **v0.6.0** (bkz. [Sürüm notları](#sürüm-notları)).
 
-Gruplar (manuel ve JQL filtresi), kayıt listesi, sütun seçici, arama, arka
-planda çalışan **Güncelle** işi, kendi tanımladığınız **yerel alanlar** (alan
-başına değişim geçmişiyle), kişisel kanban panosu (**Görevlerim**), **Outlook e-postalarından görev
-üretme** (yalnız Windows), **kayıttan Teams'e mesaj**, **Teams arama geçmişi** (yalnız Windows),
-**Excel'e aktarma** ve tam tema
-kullanılabilir durumda. Taşınabilir Windows/Linux paketleri etiket itildiğinde üretilir.
+## Ne yapar
+
+| Özellik | Kısaca |
+| --- | --- |
+| **Gruplar ve JQL filtreleri** | Kayıtları elle topladığınız *manuel* gruplar ya da üyeliği her Güncelle'de sorgudan gelen *JQL filtresi* grupları. Filtre grubunda iğnelenen kayıt sonuçtan düşse bile listede kalır. |
+| **Güncelle** | Arka planda çalışan tazeleme işi: ilerleme, aşama ve iptal üst çubukta; değişen hücreler beş saniye vurgulanır. |
+| **Sütunlar ve arama** | Sütun seçici, sıralama, bütün seçili sütunlarda süzen arama kutusu (`/`). Türkçe `İ/ı` ayrımı gözetilmez. |
+| **Yerel alanlar** | Jira'ya asla gitmeyen kendi alanlarınız (metin, sayı, tarih, evet/hayır, liste) — istenirse **alan başına değişim geçmişiyle**, iki türetilmiş sütunla (son değişim, kaç kez değişti). |
+| **Görevlerim** | Jira'dan bağımsız kişisel kanban: üç sütun, sürükle-bırak, son tarih rozetleri, Jira kaydına bağlanabilen kartlar. |
+| **Outlook e-postasından görev** (Windows) | Kimden / Kime / CC listelerine uyan postalar **Yapılacak** sütununa düşer; bir konuşmadan tek görev çıkar. |
+| **Teams'e mesaj** | Kayda iliştirilen kişilere tek tıkla mesaj: Graph API ve IT izni yok, `msteams:` derin bağlantısı. Gönder'e siz basarsınız. |
+| **Teams Aramalar** (Windows) | Teams'in yerel önbelleğinden okunan **kendi** arama geçmişiniz: liste, kişi kırılımı, istatistik şeridi, Excel. |
+| **E-posta ile gönder** (Windows) | Grubun kayıtlarını seçili sütunlarla Excel'e çevirip şablonlu bir postaya ekler; Kime/CC şablondan gelir, posta Outlook'ta açılır ya da gönderilir. |
+| **Excel'e aktarma** | Gruplar, görevler ve aramalar için gerçek tarih/sayı hücreli, köprülü `.xlsx` dosyaları. |
+| **Tema** | Koyu Star Wars atmosferi: yıldız alanı, ışın kılıcı renkleri, açılış akışı — hepsi kapatılabilir. Dış kaynak, CDN, izleme yok. |
 
 ## Gereksinimler
 
 - Python 3.11 veya üstü (Windows tam paketi kendi Python'ını getirir, lite paket getirmez)
 - Jira Server / Data Center (kişisel erişim anahtarı destekleyen sürümler) veya Jira Cloud
+- Outlook ve Teams özellikleri yalnız **Windows**'ta çalışır; diğer her şey her yerde çalışır
 
 ## Kurulum
 
@@ -77,35 +93,6 @@ python3 -m venv .venv
 .venv/bin/python -m app --no-browser --port 8765
 ```
 
-Taşınabilir paketi elle üretmek için:
-
-```bash
-# Windows tam paketi (embed dağıtımını önce indirin)
-python tools/build_portable.py --target windows --embed-zip python-embed.zip --wheels wheels
-# Windows lite paketi (python-embed yok, ~7 MB)
-python tools/build_portable.py --target windows --no-embed --wheels wheels
-# Linux paketi (zaten embed'siz)
-python tools/build_portable.py --target linux --wheels wheels
-# Ne yapacağını yazsın, dosyaya dokunmasın
-python tools/build_portable.py --target linux --wheels wheels --dry-run
-```
-
-`--no-embed` ile `--variant lite` aynı şeydir. Her iki varyantta da `tests/`,
-`tools/`, `.github/` ve `__pycache__` pakete girmez.
-
-Tekerlekler şöyle toplanır:
-
-```bash
-pip download --only-binary=:all: --python-version 3.13 \
-  --platform win_amd64 --implementation cp -r requirements.txt -d wheels
-# pywin32'nin isaretcisi (sys_platform == "win32") pip'in CALISTIGI yoruma gore
-# degerlendirilir: Linux'tan indirirken sessizce atlanir, ayrica istenir.
-pip download --only-binary=:all: --python-version 3.13 \
-  --platform win_amd64 --implementation cp --no-deps pywin32 -d wheels
-```
-
-Linux paketinde `pywin32` tekerlekleri `wheels/` klasörüne kopyalanmaz.
-
 ### Çalıştırma seçenekleri
 
 Uygulama boş bir port bulur (tercihen 8765), varsayılan tarayıcıyı açar ve
@@ -118,139 +105,88 @@ kapatır; arayüzdeki **Kapat** düğmesi de aynı işi anında yapar.
 ./holocron.sh --console       # ayrıntılı log, hata ekranda kalır
 ```
 
-## Sorun giderme
+## İlk ayar sırası
 
-### Konsol açılıp hemen kapanıyor, tarayıcı gelmiyor
+Hepsi **Ayarlar** ekranındadır ve sırayla yapılması en kolayıdır. Yalnızca ilk
+adım zorunludur; geri kalanı kullanmadığınız özellikleri kapalı bırakır.
 
-Windows'ta uygulama `pythonw.exe` ile açılır: konsol penceresi yoktur, bu
-yüzden bir hata çıkarsa görünmez. İki aracınız var.
+### 1. Jira bağlantısı
 
-**1. Konsol kipi.** Komut isteminde paketin klasöründe:
+Kimlik bilgileri `settings` tablosunda şifreli durur; şifreleme anahtarı
+yanındaki `holocron.key` dosyasındadır (yalnız sahibine okunur izinle
+oluşturulur). Kaydedilen token bir daha ekranda gösterilmez, yalnızca
+"ayarlı / ayarsız" bilgisi görünür.
 
-```bat
-holocron.bat --console
-```
+**Jira Server / Data Center (varsayılan)**
 
-Uygulama ön planda çalışır, hata mesajı pencerede kalır, kapanırken `pause`
-bekler. Çift tıklamayla da çalışır: `holocron.bat` kısayolu oluşturup hedefin
-sonuna ` --console` ekleyin.
+1. Jira'da profilinizden bir **kişisel erişim anahtarı (PAT)** oluşturun.
+2. Ayarlar ekranında mod olarak *Jira Server / Data Center* seçin.
+3. Adres: `https://jira.example.com`
+4. Kimlik türü *Kişisel erişim anahtarı*, alana anahtarı yapıştırın.
+5. **Bağlantıyı sına** ile ad-soyad ve sunucu başlığını doğrulayın.
 
-**2. Log dosyası.** Her çalıştırma `holocron.log` dosyasına yazar; dosya
-`holocron.db` ile aynı klasördedir (paketi açtığınız yer). İçinde ilk satırda
-sürüm, Python sürümü, işletim sistemi, port ve veri klasörü bulunur;
-yakalanmamış her hata tam yığın izi ile düşer. Dosya 1 MB'ı geçince döner,
-üç yedek tutulur.
+Kullanıcı adı + parola ile Basic kimlik de desteklenir, ancak PAT önerilir.
 
-Normal başlatmada (çift tıklama) betik altı saniye bekleyip `/api/health`
-adresini yoklar. Cevap gelmezse pencere kapanmaz: "Uygulama acilmadi" der ve
-logun son kırk satırını basar.
+**Jira Cloud**
 
-Paketi yazma izni olmayan bir klasöre (`Program Files`, doğrudan zip
-görüntüleyicisinin içi) açtıysanız veri ve log `%LOCALAPPDATA%\Holocron`
-altına düşer. En temizi paketi `Belgeler` gibi yazılabilir bir klasöre taşımak.
+1. Atlassian hesabınızdan bir **API token** oluşturun.
+2. Mod olarak *Jira Cloud*, adres `https://demo.atlassian.net`.
+3. E-posta adresinizi ve token'ı girin.
 
-### "No module named app"
+Bağlantı kurulduktan sonra **Alan kataloğunu çek** deyin: sütun başlıkları ham
+alan kimliği yerine gerçek adlarıyla görünsün.
 
-`python -m app` yalnızca doğru klasörden çalıştırılırsa iş görür ve
-`PYTHONSAFEPATH`/`-P` açıkken hiç çalışmaz. Bunun yerine giriş dosyasını tam
-yoluyla çağırın; nereden çalıştırdığınız önemli olmaz:
+### 2. Ağ (yalnız kurum ağındaysanız)
 
-```bat
-.venv\Scripts\python.exe "C:\yol\holocron\holocron_run.py" --console
-```
+**Ayarlar → Ağ** altında vekil sunucu kipi, muaf adresler, özel CA dosyası,
+SSL doğrulaması ve IPv4 önceliği bulunur.
 
-Başlatıcılar (`holocron.bat`, `holocron.sh`) zaten bunu yapar.
+Vekil sunucu kipi üç seçenektir:
 
-### Port 8765 dolu
+* **Sistem ayarını kullan** (varsayılan): alanlar doluysa onlar, boşsa
+  işletim sisteminin bildirdiği değer. Windows'ta bu, ortam değişkenlerinin
+  yanında kayıt defterindeki `ProxyServer` kaydını da kapsar — `requests` tek
+  başına oraya bakmaz.
+* **Aşağıdaki alanları kullan**: yalnız elle yazdığınız adresler; alanlar
+  boşsa vekil sunucu kullanılmaz.
+* **Doğrudan bağlan**: vekil sunucu hiç kullanılmaz, `https_proxy` gibi ortam
+  değişkenleri yok sayılır (`trust_env` kapatılır). Kurum makinesinde ortam
+  değişkeni kurumsal vekile bakıyor ama Jira iç ağdaysa doğru seçenek budur.
 
-Uygulama kendisi boş bir port seçer ve seçtiğini `holocron.port` dosyasına
-yazar; başlatıcı sağlık yoklamasında o dosyayı okur. Sabit port isterseniz
-`--port` verin. Çalışan adres log dosyasının ilk satırında da yazılıdır.
+**Vekil sunucudan muaf adresler** (`no_proxy`) virgülle ayrılır; `.kurum.local`
+gibi bir son ek yazabilirsiniz. Sistem ve elle kiplerinde geçerlidir.
 
-### Tarayıcı açılmıyor ama uygulama çalışıyor
+**Önce IPv4 dene** varsayılan olarak açıktır. Sunucunun AAAA (IPv6) kaydı olup
+IPv6 yolu kapalıysa Python önce IPv6'yı deneyip zaman aşımına düşer, tarayıcı
+ise IPv4'e inip çalışır — "tarayıcıda açılıyor, uygulamada açılmıyor" şikâyeti
+çoğu zaman budur.
 
-Log dosyasındaki adresi (`http://127.0.0.1:<port>/`) elle açın. Windows'ta
-önce `os.startfile`, olmazsa `webbrowser` denenir; ikisi de olmazsa uygulama
-yine de ayakta kalır, sadece log'a uyarı düşer.
+SSL doğrulamayı kapatmak güvenliği düşürür; mümkünse kurumun kök sertifikasını
+CA dosyası olarak verin. Takılırsanız **Teşhis** düğmesi hangi adımda
+durduğunuzu söyler (bkz. [Teşhis](#teşhis)).
 
-### "Bağlantıyı sına" on saniye sonra hata veriyor
+### 3. E-posta (Outlook'tan görev üretme)
 
-Bağlantı zaman aşımı on saniyedir ve bağlantı kurulamadığında **yeniden
-deneme yapılmaz**: hata hemen döner, sebebini de yazar. (Eskiden üç deneme
-otuzar saniye bekliyordu; kullanıcı doksan saniye sonunda yine aynı cümleyi
-görüyordu.) Okuma zaman aşımı ayrıdır: sunucu bağlandıktan sonra yanıtı otuz
-saniye bekler ve yalnız o durumda yeniden denenir.
+**Ayarlar → E-posta** kartında taramayı açın, **Kimden / Kime / CC**
+listelerinden en az birine adres yazın, klasörleri seçin. Ayrıntı:
+[E-posta (görev üretme)](#e-posta-görev-üretme).
 
-Hata mesajı sebebi söyler: adı çözülemedi (DNS), kapı reddedildi, TCP
-kurulamadı, vekil sunucuya ulaşılamadı, sertifika doğrulanamadı. Daha
-ayrıntısı için **Ayarlar → Ağ → Teşhis**.
+### 4. Teams (kişiler ve mesaj şablonları)
 
-### Teams aramalarında son günler gelmiyor
+**Ayarlar → Teams** altında mesaj şablonlarını yazar, adres defterini
+yönetirsiniz. Windows'ta **Rehberi Outlook'tan yenile** kurum adres listesini
+tek geçişte içeri alır. Ayrıntı: [Teams'e mesaj](#teamse-mesaj-kayıttan-tek-tıkla).
 
-Eski aramalar geliyor ama son birkaç günün kayıtları yoksa sebep neredeyse
-her zaman **kilitli yazma günlüğüdür**: LevelDB yeni kayıtları önce `*.log`
-dosyasına yazar, sıkıştırılmış `.ldb` dosyalarına sonra taşır. Teams açıkken o
-`.log` dosyası kilitlidir; kopyalanamazsa en yeni aramalar da gelmez.
+### 5. Teams Aramalar
 
-Sırayla:
+Aynı kartın altındaki **Arama geçmişi** bölümünde önbellek klasörünü elle
+verebilir, Güncelle sonunda otomatik çekmeyi açabilirsiniz. Ayrıntı:
+[Teams Aramalar](#teams-aramalar-yalnız-windows).
 
-1. **Teams'te Aramalar → Geçmiş ekranını açın** ve biraz aşağı kaydırın.
-   İstemci kayıtları oraya yazar; hiç açmadıysanız yerel önbellekte de
-   olmayabilirler.
-2. **Teams'i tamamen kapatın** (bildirim alanındaki simgeden Çıkış) ve
-   **Aramaları çek**'e yeniden basın. Balon "Teams açıkken N dosya
-   kopyalanamadı" diyorsa sorun budur.
-3. Balondaki **en yeni** tarihine bakın: beklediğiniz günü gösteriyorsa veri
-   gelmiştir, pencereyi (7/30/90 gün) kontrol edin.
-4. Hâlâ gelmiyorsa `tools/teams_probe/probe.py` sondasını çalıştırın; çıktı
-   hangi veritabanında kaç kayıt olduğunu ve tarih aralığını yazar (kişisel
-   değer içermez, paylaşılabilir).
+### 6. E-posta şablonları (gönderim)
 
-### Teşhis
-
-**Bağlantıyı sına** düğmesinin yanındaki **Teşhis**, zinciri parçalara ayırıp
-her halkayı süresiyle gösterir:
-
-| Adım | Ne yapar |
-| --- | --- |
-| Adres ayrıştırma | `https://…` biçimi, sunucu adı, kapı numarası |
-| Vekil sunucu | Hangi kip, hangi vekil sunucu, sistemde PAC var mı |
-| Ad çözümleme | `getaddrinfo`: dönen bütün IPv4 ve IPv6 adresleri |
-| TCP (doğrudan) | Her adrese beş saniye; hangisi açıldı |
-| TCP (vekil sunucu üzerinden) | Vekil sunucuya bağlanır, `CONNECT` tüneli dener |
-| TLS | El sıkışma, sertifikanın sahibi ve vereni |
-| HTTP | Kimliksiz `GET /rest/api/2/serverInfo` (401 de olumlu sayılır) |
-| Kimlik | Token ile `myself` |
-
-Her adım yeşil/kırmızı/atlandı ve milisaniye olarak yazılır; kırmızı adımın
-altında ne yapmanız gerektiği durur. Çıktıda kullanıcı adınız ve token'ınız
-**yer almaz**, yalnız sunucu adı ve IP adresleri görünür.
-
-Sık çıkan üç sonuç:
-
-* **Doğrudan TCP açıldı, vekil sunucu tüneli zaman aşımına uğradı.** Jira iç
-  ağda, kurumsal vekil sunucu onu görmüyor. Ayarlar → Ağ → **Doğrudan bağlan**.
-* **PAC tanımlı, vekil sunucu yok.** Windows'ta `AutoConfigURL` var demektir.
-  Holocron PAC (JavaScript) dosyasını çözmez; Jira için geçerli vekil sunucuyu
-  ağ yöneticinizden öğrenip Ayarlar → Ağ'a yazın, ya da iç ağ ise Doğrudan
-  bağlan seçin.
-* **IPv6 adresi zaman aşımına uğradı, IPv4 açıldı.** "Önce IPv4 dene" zaten
-  varsayılan olarak açıktır; kapatmayın.
-
-### Kurum kök sertifikası
-
-Kurum trafiği kendi kök sertifikasıyla açıyorsa TLS adımı "sertifika
-doğrulanamadı" der. Kurumun kök sertifikasını `.pem` olarak alıp
-**Ayarlar → Ağ → Özel CA dosyası** alanına yolunu yazın. SSL doğrulamayı
-kapatmak son çaredir ve güvenliği düşürür.
-
-### Log dosyası kurum adresini yazmıyor
-
-`holocron.log` paylaşılabilir olsun diye `urllib3` ve `asyncio` günlükçüleri
-WARNING'e sabitlenmiştir; eskiden DEBUG satırları `Starting new HTTPS
-connection (1): jira.kurum.local:443` diye sunucu adını yazıyordu. Kendi
-satırlarımız INFO'da kalır ve hata metinlerinde sunucu adı yerine "Jira
-sunucusu" geçer.
+**Ayarlar → E-posta şablonları** kartında Kime/CC/konu/gövde birlikte saklanır
+ve gönderim kipi seçilir. Ayrıntı: [E-posta ile gönder](#e-posta-ile-gönder-yalnız-windows).
 
 ## Kullanım
 
@@ -281,6 +217,17 @@ değerleri, sütunu seçili olmasa bile aramaya dahildir.
 Satıra tıklamak sağdan detay çekmecesini açar (`Esc` kapatır); anahtar sütunu
 kaydı Jira'da yeni sekmede açar. Yerel alan hücresine tıklamak çekmeceyi açmaz,
 hücreyi düzenlemeye alır.
+
+### Satır seçimi
+
+Grid'in ilk sütunu onay kutusudur; başlıktaki kutu **görünen** (süzülmüş)
+satırların hepsini işaretler. Seçili sayısı araç çubuğunda küçük bir rozet
+olarak durur ("3 seçili"). Seçim **grup değişince** sıfırlanır, süzgeç ya da
+sıralama değişince **durur**: arayıp seçtikten sonra aramayı temizlemek
+seçimi bozmaz.
+
+Seçim iki yerde kullanılır: **Excel'e aktar** penceresindeki "Yalnız seçili N
+kayıt" kutusu ve **E-posta ile gönder** penceresi.
 
 ### Yerel alanlar
 
@@ -325,8 +272,10 @@ bilgi kaybolmasın).
 
 Araç çubuğundaki **Excel'e aktar** ekranda görüneni bir `.xlsx` dosyasına yazar.
 Küçük pencerede hangi sütunların gideceğini seçer, istersen **Geçmiş sayfasını**
-eklersin; **görünen süzgeç ve sıralama** varsayılan olarak uygulanır. Dosya adı
-`<grup-adı>-<YYYY-AA-GG>.xlsx` olur, boş grupta düğme pasiftir.
+eklersin; **görünen süzgeç ve sıralama** varsayılan olarak uygulanır. Grid'de
+seçim varsa **Yalnız seçili N kayıt** kutusu da çıkar ve varsayılan olarak
+işaretlidir. Dosya adı `<grup-adı>-<YYYY-AA-GG>.xlsx` olur, boş grupta düğme
+pasiftir.
 
 - Satırlar grid ile birebir aynıdır; tek fark uzun metinlerin **kırpılmamasıdır**.
 - Tarih ve tarih-saat alanları gerçek tarih hücresi olur (`GG.AA.YYYY`,
@@ -341,6 +290,70 @@ eklersin; **görünen süzgeç ve sıralama** varsayılan olarak uygulanır. Dos
 
 Aynı dosyayı doğrudan da indirebilirsin:
 `GET /api/groups/<id>/export.xlsx?columns=issuekey,summary&history=1&q=&sort=&dir=`
+Yalnız belirli anahtarlar için:
+`GET /api/groups/<id>/export-selected.xlsx?keys=DEMO-1,DEMO-2&columns=issuekey,summary`
+
+### E-posta ile gönder (yalnız Windows)
+
+Araç çubuğundaki **E-posta ile gönder**, grubun kayıtlarını seçili sütunlarla
+Excel'e çevirir, şablonlu bir postanın ekine koyar ve Outlook'ta açar. "Her hafta
+aynı kişilere aynı başlıkla listeyi yolla" işi tek pencereye iner: Kime, CC,
+konu ve gövde şablonda birlikte durur.
+
+> **Varsayılan davranış: posta açılır, gönderilmez.** Gönder'e siz basarsınız.
+> Kipi **Ayarlar → E-posta şablonları → Gönderim kipi** ile *Doğrudan gönder*
+> yapabilirsiniz; o zaman pencerede ikinci bir **Gönder** düğmesi çıkar.
+
+Pencerede ne var:
+
+- **Şablon** açılır listesi. Grubun varsayılanı seçili gelir; **Bu şablonu bu
+  gruba bağla** düğmesi seçimi gruba yazar (bir daha aynı grupta o şablonla
+  açılır).
+- **Kime** ve **CC** çip kutuları. Şablondan dolu gelir, elle eklenip
+  çıkarılabilir; iki harften sonra **adres defterinden** öneri gelir (Teams
+  kişileriyle aynı defter, kurum rehberi de oradadır).
+- **Konu** ve **Gövde**. Metin **ham** tutulur: kutuda `{tablo}` yazar,
+  **Önizleme** sekmesi onu tabloya çevirip HTML'i bir çerçevede gösterir.
+  Gönderilen posta da aynı kaynaktan üretilir.
+- **Sütunlar** listesi (varsayılan grubun sütunları): hem gövdedeki tabloya hem
+  Excel'e bu sütunlar girer.
+- Kutular: **Yalnız seçili N kayıt** (grid'de seçim varsa), **Görünen süzgeç ve
+  sıralamayı uygula**, **Excel ekle**, **Gövdeye tablo ekle**.
+- Altta kayıt sayısı ve üretilecek dosya adı; onun altında **Gönderilenler**
+  listesi (tarih, konu, alıcı sayısı, kayıt adedi, açıldı mı gönderildi mi).
+
+Yer tutucular:
+
+| Yer tutucu | Karşılığı |
+| --- | --- |
+| `{grup}` | Grubun adı |
+| `{tarih}` | Bugün (`GG.AA.YYYY`) |
+| `{adet}` | Gönderilen kayıt sayısı |
+| `{jql}` | Grubun JQL sorgusu (varsa) |
+| `{tablo}` | Seçili sütunlarla kayıt tablosu — **yalnız gövdede** |
+
+Bilinmeyen yer tutucu **boş kalır**. Konuda `{tablo}` yazarsanız sessizce düşer.
+
+Nasıl çalışır:
+
+- **Gövde HTML'i Outlook'a göre üretilir.** `<style>` bloğu ve dış CSS yoktur;
+  her kural etiketin `style` özniteliğindedir. Outlook'un HTML motoru Word'dür,
+  sınıf seçicilerini yok sayar. Tabloda başlık satırı koyu ve zeminli, hücreler
+  ince kenarlıklı, anahtar hücresi Jira kaydına köprülüdür.
+- **Gövdeyi düz metin yazabilirsiniz**: satır sonları `<br>` olur, `&` ve `<`
+  kaçışlanır. İçinde HTML etiketi varsa metne dokunulmaz, yazdığınız gibi gider.
+- **İmzanız korunur.** Outlook imzayı öge *görüntülenirken* ekler; bu yüzden
+  posta önce görünmez pencerede açılır, sonra gövde imzanın **önüne** yazılır.
+- **Ek dosyası silinmez.** Excel `%TEMP%\holocron-mail\<grup>-<tarih>.xlsx`
+  olarak (ASCII güvenli adla) yazılır ve orada kalır: Outlook eklemeyi kendi
+  zamanlamasıyla yapabiliyor, hemen silinen dosya bazen boş ek olarak gidiyordu.
+  Klasörde en fazla **yirmi** dosya tutulur, eskiler yeni gönderimde düşer.
+- **Şablonlar** **Ayarlar → E-posta şablonları** altında yazılır: ad, Kime, CC,
+  konu, gövde, "Excel ekle" ve "Gövdeye tablo ekle" anahtarları, sıra. Uygulama
+  **Haftalık liste** şablonuyla gelir.
+
+Windows dışında düğme pasiftir ve uç `feature_unavailable` döner; şablonlar yine
+yazılabilir ve **önizleme her yerde çalışır**.
 
 ### Görevlerim
 
@@ -407,7 +420,8 @@ Nasıl çalışır:
   yazışta tamamlanır. Arama ad **ve** e-posta üzerinde çalışır, büyük/küçük harf ve
   Türkçe `İ/ı` ayrımı gözetilmez, önce baştan eşleşenler gelir. Defter
   **Ayarlar → Teams** altında listelenir: ad ve adres düzenlenir, silinen kişi
-  bütün kayıtlardan da çıkar.
+  bütün kayıtlardan da çıkar. Aynı defteri **E-posta ile gönder** penceresi de
+  kullanır.
 - **Kurum rehberi (yalnız Windows).** **Ayarlar → Teams → Rehberi Outlook'tan
   yenile**, Outlook'un Genel Adres Listesi'ni (GAL) tek geçişte okuyup adres
   defterine yazar: parola sorulmaz, açık Outlook oturumu kullanılır. Kaç kişi
@@ -415,7 +429,7 @@ Nasıl çalışır:
   satırında yazar; son yenileme zamanı düğmenin yanında durur.
   - **Elle girdiğiniz kişiler korunur:** aynı adres rehberde de geçiyorsa
     yalnızca adı tazelenir, kaynağı "manual" kalır.
-  - **Dağıtım listeleri** (`ekip@...`) ayrı işaretlenir ve hem defterde hem
+  - **Dağıtım listeleri** (`ekip@example.com`) ayrı işaretlenir ve hem defterde hem
     çekmecedeki çipte küçük **liste** rozetiyle görünür — bir listeye yazmak
     bir kişiye yazmakla aynı şey değildir.
   - Adresi çözülemeyen girişler (toplantı odaları, X500'de kalmış eski kayıtlar)
@@ -444,7 +458,7 @@ Kayıtta kişi yoksa düğme mesaj açmaz; çekmeceyi açıp önce kişi eklemen
 Adres defteri de boşsa kutunun altında "Rehber boş — Ayarlar → Teams → Rehberi
 Outlook'tan yenile" ipucu çıkar.
 
-### E-posta (yalnız Windows)
+### E-posta (görev üretme)
 
 **Ayarlar → E-posta**, Outlook'taki postalarınızdan görev üretir. Sizin
 tanımladığınız adres listelerinden birine uyan her e-posta **Görevlerim →
@@ -615,59 +629,7 @@ yalnız o grup hata listesine düşer, iş sürer.
 Kayıtlar `*navigable` (Jira Cloud'da `*all`) ile çekilir: sonradan hangi sütunu
 seçerseniz seçin yeniden çekmeye gerek kalmaz.
 
-## Jira bağlantısı
-
-**Ayarlar** ekranından tanımlanır. Kimlik bilgileri `settings` tablosunda
-şifreli durur; şifreleme anahtarı yanındaki `holocron.key` dosyasındadır
-(yalnız sahibine okunur izinle oluşturulur). Kaydedilen token bir daha ekranda
-gösterilmez, yalnızca "ayarlı / ayarsız" bilgisi görünür.
-
-### Jira Server / Data Center (varsayılan)
-
-1. Jira'da profilinizden bir **kişisel erişim anahtarı (PAT)** oluşturun.
-2. Ayarlar ekranında mod olarak *Jira Server / Data Center* seçin.
-3. Adres: `https://jira.example.com`
-4. Kimlik türü *Kişisel erişim anahtarı*, alana anahtarı yapıştırın.
-5. **Bağlantıyı sına** ile ad-soyad ve sunucu başlığını doğrulayın.
-
-Kullanıcı adı + parola ile Basic kimlik de desteklenir, ancak PAT önerilir.
-
-### Jira Cloud
-
-1. Atlassian hesabınızdan bir **API token** oluşturun.
-2. Mod olarak *Jira Cloud*, adres `https://demo.atlassian.net`.
-3. E-posta adresinizi ve token'ı girin.
-
-### Kurum ağı
-
-**Ayarlar → Ağ** altında vekil sunucu kipi, muaf adresler, özel CA dosyası,
-SSL doğrulaması ve IPv4 önceliği bulunur.
-
-Vekil sunucu kipi üç seçenektir:
-
-* **Sistem ayarını kullan** (varsayılan): alanlar doluysa onlar, boşsa
-  işletim sisteminin bildirdiği değer. Windows'ta bu, ortam değişkenlerinin
-  yanında kayıt defterindeki `ProxyServer` kaydını da kapsar — `requests` tek
-  başına oraya bakmaz.
-* **Aşağıdaki alanları kullan**: yalnız elle yazdığınız adresler; alanlar
-  boşsa vekil sunucu kullanılmaz.
-* **Doğrudan bağlan**: vekil sunucu hiç kullanılmaz, `https_proxy` gibi ortam
-  değişkenleri yok sayılır (`trust_env` kapatılır). Kurum makinesinde ortam
-  değişkeni kurumsal vekile bakıyor ama Jira iç ağdaysa doğru seçenek budur.
-
-**Vekil sunucudan muaf adresler** (`no_proxy`) virgülle ayrılır; `.kurum.local`
-gibi bir son ek yazabilirsiniz. Sistem ve elle kiplerinde geçerlidir.
-
-**Önce IPv4 dene** varsayılan olarak açıktır. Sunucunun AAAA (IPv6) kaydı olup
-IPv6 yolu kapalıysa Python önce IPv6'yı deneyip zaman aşımına düşer, tarayıcı
-ise IPv4'e inip çalışır — "tarayıcıda açılıyor, uygulamada açılmıyor" şikâyeti
-çoğu zaman budur. Kutu açıkken IPv4 adresleri her zaman önce denenir.
-
-SSL doğrulamayı kapatmak güvenliği düşürür; mümkünse kurumun kök sertifikasını
-CA dosyası olarak verin. Takılırsanız **Teşhis** düğmesi hangi adımda
-durduğunuzu söyler (bkz. [Sorun giderme](#teşhis)).
-
-## Görünüm
+### Görünüm
 
 Arayüz koyu temalıdır ve açık tema seçeneği yoktur. Arka plandaki yıldız alanı
 tek bir canvas'tır; **Ayarlar → Görünüm** altından kapatılabilir. "Hareketler"
@@ -683,6 +645,175 @@ Yazı tipleri (Inter ve Pathway Gothic One) uygulamanın içinde gelir, SIL Open
 Font License ile dağıtılır ve lisans metinleri `app/static/fonts/` altındadır.
 Arayüz hiçbir CDN'e, hiçbir dış adrese istek atmaz.
 
+## Veri ve gizlilik
+
+Holocron bir istemcidir; kendi sunucusu, hesabı, bulutu yoktur.
+
+- **Her şey yerelde.** Sunucu yalnız `127.0.0.1` dinler. Dışarıya çıkan tek
+  trafik sizin tanımladığınız **Jira** adresidir. Teams ve Outlook özellikleri
+  ağa hiç çıkmaz: biri işletim sistemine bir adres verir, diğerleri makinenizdeki
+  COM oturumunu ve yerel önbelleği okur.
+- **`holocron.db`** bütün verinizi taşır: gruplar, kayıtların ham JSON'u, yerel
+  alanlar ve geçmişleri, görevler, kişiler, şablonlar, arama geçmişi. Yedeği
+  dosyayı kopyalamaktır.
+- **`holocron.key`** Jira token'ınızı şifreleyen anahtardır, yalnız sahibine
+  okunur izinle oluşturulur. **Kaybederseniz kayıtlı token çözülemez**; Ayarlar
+  ekranından yeniden girmeniz gerekir. `holocron.db` ile birlikte yedekleyin.
+- **`holocron.log` paylaşılabilir.** `urllib3` ve `asyncio` günlükçüleri
+  WARNING'e sabitlenmiştir; eskiden DEBUG satırları `Starting new HTTPS
+  connection (1): jira.kurum.local:443` diye **sunucu adını** yazıyordu. Kendi
+  satırlarımız INFO'da kalır ve hata metinlerinde sunucu adı yerine "Jira
+  sunucusu" geçer. Teşhis çıktısı da kullanıcı adı ve token taşımaz.
+- **Parola saklanmaz.** Outlook ve Teams için açık oturumunuz kullanılır; hiçbir
+  kimlik bilgisi sorulmaz.
+- **Yerel alanlar Jira'ya gitmez.** Yazma yönü tek yönlüdür: Holocron Jira'dan
+  okur, Jira'ya yazmaz.
+- Paketi yazma izni olmayan bir klasöre açtıysanız veri ve log
+  `%LOCALAPPDATA%\Holocron` altına düşer.
+
+## Sorun giderme
+
+### Konsol açılıp hemen kapanıyor, tarayıcı gelmiyor
+
+Windows'ta uygulama `pythonw.exe` ile açılır: konsol penceresi yoktur, bu
+yüzden bir hata çıkarsa görünmez. İki aracınız var.
+
+**1. Konsol kipi.** Komut isteminde paketin klasöründe:
+
+```bat
+holocron.bat --console
+```
+
+Uygulama ön planda çalışır, hata mesajı pencerede kalır, kapanırken `pause`
+bekler. Çift tıklamayla da çalışır: `holocron.bat` kısayolu oluşturup hedefin
+sonuna ` --console` ekleyin.
+
+**2. Log dosyası.** Her çalıştırma `holocron.log` dosyasına yazar; dosya
+`holocron.db` ile aynı klasördedir (paketi açtığınız yer). İçinde ilk satırda
+sürüm, Python sürümü, işletim sistemi, port ve veri klasörü bulunur;
+yakalanmamış her hata tam yığın izi ile düşer. Dosya 1 MB'ı geçince döner,
+üç yedek tutulur.
+
+Normal başlatmada (çift tıklama) betik altı saniye bekleyip `/api/health`
+adresini yoklar. Cevap gelmezse pencere kapanmaz: "Uygulama acilmadi" der ve
+logun son kırk satırını basar.
+
+Paketi yazma izni olmayan bir klasöre (`Program Files`, doğrudan zip
+görüntüleyicisinin içi) açtıysanız veri ve log `%LOCALAPPDATA%\Holocron`
+altına düşer. En temizi paketi `Belgeler` gibi yazılabilir bir klasöre taşımak.
+
+### "No module named app"
+
+`python -m app` yalnızca doğru klasörden çalıştırılırsa iş görür ve
+`PYTHONSAFEPATH`/`-P` açıkken hiç çalışmaz. Bunun yerine giriş dosyasını tam
+yoluyla çağırın; nereden çalıştırdığınız önemli olmaz:
+
+```bat
+.venv\Scripts\python.exe "C:\yol\holocron\holocron_run.py" --console
+```
+
+Başlatıcılar (`holocron.bat`, `holocron.sh`) zaten bunu yapar.
+
+### Port 8765 dolu
+
+Uygulama kendisi boş bir port seçer ve seçtiğini `holocron.port` dosyasına
+yazar; başlatıcı sağlık yoklamasında o dosyayı okur. Sabit port isterseniz
+`--port` verin. Çalışan adres log dosyasının ilk satırında da yazılıdır.
+
+### Tarayıcı açılmıyor ama uygulama çalışıyor
+
+Log dosyasındaki adresi (`http://127.0.0.1:<port>/`) elle açın. Windows'ta
+önce `os.startfile`, olmazsa `webbrowser` denenir; ikisi de olmazsa uygulama
+yine de ayakta kalır, sadece log'a uyarı düşer.
+
+### "Bağlantıyı sına" on saniye sonra hata veriyor
+
+Bağlantı zaman aşımı on saniyedir ve bağlantı kurulamadığında **yeniden
+deneme yapılmaz**: hata hemen döner, sebebini de yazar. (Eskiden üç deneme
+otuzar saniye bekliyordu; kullanıcı doksan saniye sonunda yine aynı cümleyi
+görüyordu.) Okuma zaman aşımı ayrıdır: sunucu bağlandıktan sonra yanıtı otuz
+saniye bekler ve yalnız o durumda yeniden denenir.
+
+Hata mesajı sebebi söyler: adı çözülemedi (DNS), kapı reddedildi, TCP
+kurulamadı, vekil sunucuya ulaşılamadı, sertifika doğrulanamadı. Daha
+ayrıntısı için **Ayarlar → Ağ → Teşhis**.
+
+### Teams aramalarında son günler gelmiyor
+
+Eski aramalar geliyor ama son birkaç günün kayıtları yoksa sebep neredeyse
+her zaman **kilitli yazma günlüğüdür**: LevelDB yeni kayıtları önce `*.log`
+dosyasına yazar, sıkıştırılmış `.ldb` dosyalarına sonra taşır. Teams açıkken o
+`.log` dosyası kilitlidir; kopyalanamazsa en yeni aramalar da gelmez.
+
+Sırayla:
+
+1. **Teams'te Aramalar → Geçmiş ekranını açın** ve biraz aşağı kaydırın.
+   İstemci kayıtları oraya yazar; hiç açmadıysanız yerel önbellekte de
+   olmayabilirler.
+2. **Teams'i tamamen kapatın** (bildirim alanındaki simgeden Çıkış) ve
+   **Aramaları çek**'e yeniden basın. Balon "Teams açıkken N dosya
+   kopyalanamadı" diyorsa sorun budur.
+3. Balondaki **en yeni** tarihine bakın: beklediğiniz günü gösteriyorsa veri
+   gelmiştir, pencereyi (7/30/90 gün) kontrol edin.
+4. Hâlâ gelmiyorsa `tools/teams_probe/probe.py` sondasını çalıştırın; çıktı
+   hangi veritabanında kaç kayıt olduğunu ve tarih aralığını yazar (kişisel
+   değer içermez, paylaşılabilir).
+
+### Gönderilen postada imza kayboldu ya da tablo bozuk görünüyor
+
+Holocron postayı önce görünmez bir pencerede açar (imzayı Outlook orada
+ekler), sonra gövdeyi imzanın önüne yazar. İmza hiç çıkmıyorsa Outlook'ta
+**yeni ileti** için bir imza tanımlı olmayabilir.
+
+Tablo bozuksa sebep neredeyse her zaman gövdeye elle yapıştırılan HTML'dir:
+Outlook Word ile çizer, `<style>` bloklarını ve sınıf seçicilerini yok sayar.
+Holocron'un ürettiği tablo satır içi stil kullanır; kendi HTML'inizi yazarken
+aynısını yapın.
+
+### Ek gitmedi ya da boş gitti
+
+Excel `%TEMP%\holocron-mail` altında kalır ve **silinmez**: Outlook eklemeyi
+kendi zamanlamasıyla yapabiliyor. O klasörde dosyayı göremiyorsanız
+"Excel ekle" kutusu kapalı demektir. Klasörde en fazla yirmi dosya tutulur.
+
+### Teşhis
+
+**Bağlantıyı sına** düğmesinin yanındaki **Teşhis**, zinciri parçalara ayırıp
+her halkayı süresiyle gösterir:
+
+| Adım | Ne yapar |
+| --- | --- |
+| Adres ayrıştırma | `https://…` biçimi, sunucu adı, kapı numarası |
+| Vekil sunucu | Hangi kip, hangi vekil sunucu, sistemde PAC var mı |
+| Ad çözümleme | `getaddrinfo`: dönen bütün IPv4 ve IPv6 adresleri |
+| TCP (doğrudan) | Her adrese beş saniye; hangisi açıldı |
+| TCP (vekil sunucu üzerinden) | Vekil sunucuya bağlanır, `CONNECT` tüneli dener |
+| TLS | El sıkışma, sertifikanın sahibi ve vereni |
+| HTTP | Kimliksiz `GET /rest/api/2/serverInfo` (401 de olumlu sayılır) |
+| Kimlik | Token ile `myself` |
+
+Her adım yeşil/kırmızı/atlandı ve milisaniye olarak yazılır; kırmızı adımın
+altında ne yapmanız gerektiği durur. Çıktıda kullanıcı adınız ve token'ınız
+**yer almaz**, yalnız sunucu adı ve IP adresleri görünür.
+
+Sık çıkan üç sonuç:
+
+* **Doğrudan TCP açıldı, vekil sunucu tüneli zaman aşımına uğradı.** Jira iç
+  ağda, kurumsal vekil sunucu onu görmüyor. Ayarlar → Ağ → **Doğrudan bağlan**.
+* **PAC tanımlı, vekil sunucu yok.** Windows'ta `AutoConfigURL` var demektir.
+  Holocron PAC (JavaScript) dosyasını çözmez; Jira için geçerli vekil sunucuyu
+  ağ yöneticinizden öğrenip Ayarlar → Ağ'a yazın, ya da iç ağ ise Doğrudan
+  bağlan seçin.
+* **IPv6 adresi zaman aşımına uğradı, IPv4 açıldı.** "Önce IPv4 dene" zaten
+  varsayılan olarak açıktır; kapatmayın.
+
+### Kurum kök sertifikası
+
+Kurum trafiği kendi kök sertifikasıyla açıyorsa TLS adımı "sertifika
+doğrulanamadı" der. Kurumun kök sertifikasını `.pem` olarak alıp
+**Ayarlar → Ağ → Özel CA dosyası** alanına yolunu yazın. SSL doğrulamayı
+kapatmak son çaredir ve güvenliği düşürür.
+
 ## Geliştirme
 
 ```bash
@@ -691,8 +822,60 @@ python3 -m venv .venv
 .venv/bin/pytest -q
 ```
 
-Testler gerçek Jira'ya çıkmaz; `requests` oturumu sahte bir sunucuyla
-değiştirilir (`tests/fake_jira.py`).
+Testler gerçek Jira'ya, gerçek Outlook'a ya da gerçek Teams önbelleğine
+**çıkmaz**: `requests` oturumu sahte bir sunucuyla değiştirilir
+(`tests/fake_jira.py`), posta kaynağı/göndericisi ve arama kaynağı bellek içi
+sahtelerle (`app/mail/fake.py`, `app/teamscalls/fake.py`) takılır. Her test
+kendi geçici veri klasöründe çalışır.
+
+### Paketleme
+
+```bash
+# Windows tam paketi (embed dağıtımını önce indirin)
+python tools/build_portable.py --target windows --embed-zip python-embed.zip --wheels wheels
+# Windows lite paketi (python-embed yok, ~7 MB)
+python tools/build_portable.py --target windows --no-embed --wheels wheels
+# Linux paketi (zaten embed'siz)
+python tools/build_portable.py --target linux --wheels wheels
+# Ne yapacağını yazsın, dosyaya dokunmasın
+python tools/build_portable.py --target linux --wheels wheels --dry-run
+```
+
+`--no-embed` ile `--variant lite` aynı şeydir. Her iki varyantta da `tests/`,
+`tools/`, `.github/` ve `__pycache__` pakete girmez.
+
+Tekerlekler şöyle toplanır:
+
+```bash
+pip download --only-binary=:all: --python-version 3.13 \
+  --platform win_amd64 --implementation cp -r requirements.txt -d wheels
+# pywin32'nin isaretcisi (sys_platform == "win32") pip'in CALISTIGI yoruma gore
+# degerlendirilir: Linux'tan indirirken sessizce atlanir, ayrica istenir.
+pip download --only-binary=:all: --python-version 3.13 \
+  --platform win_amd64 --implementation cp --no-deps pywin32 -d wheels
+```
+
+Linux paketinde `pywin32` tekerlekleri `wheels/` klasörüne kopyalanmaz.
+
+### Sürüm çıkarma
+
+Sürüm numarası iki dosyada durur ve **aynı olmak zorundadır**:
+`app/__init__.py` içindeki `__version__` (arayüzdeki `s<sürüm>` rozeti ve
+`/api/health`) ve `pyproject.toml` içindeki `version`. Bir test bu ikisini
+kilitler. Üçüncüsü etikettir: `v<sürüm>` biçiminde itilir ve release iş akışı
+`publish` adımında etiketi koddaki sürümle karşılaştırır — tutmuyorsa iş düşer,
+yanlış numaralı bir release çıkmaz.
+
+```bash
+git tag v0.6.0 && git push origin v0.6.0
+```
+
+### Teams sondası
+
+`tools/teams_probe/probe.py` saf Python'dur, tekerlek istemez ve uygulama
+paketlerine girmez; kendi zip'iyle release'e eklenir. Çıktısı hangi
+veritabanında kaç kayıt olduğunu ve tarih aralığını söyler, kişisel değer
+taşımaz.
 
 ## Dosya düzeni
 
@@ -709,11 +892,15 @@ değiştirilir (`tests/fake_jira.py`).
 | `app/tasks.py` | Görev panosunun kurulması (sütunlar, son tarih durumu) |
 | `app/teams.py` | Teams derin bağlantısı ve şablon çözümü (saf mantık) |
 | `app/desktop.py` | Adresi işletim sistemine açtırır (`msteams:` protokolü dahil) |
-| `app/export.py` | Grup → Excel (.xlsx) dosyası |
+| `app/export.py` | Grup / görev / arama → Excel (.xlsx) dosyası |
 | `app/refresh.py` | Arka planda çalışan Güncelle işi |
 | `app/mail/` | Outlook'tan görev üretme (kaynak sözleşmesi, COM sarmalayıcı, iş mantığı) |
 | `app/mail/intake.py` | Eşleştirme, tekilleştirme, görev üretimi (COM'dan bağımsız) |
-| `app/mail/outlook.py` | Outlook COM sarmalayıcısı (yalnız Windows) |
+| `app/mail/outlook.py` | Outlook COM sarmalayıcısı, postaları **okur** (yalnız Windows) |
+| `app/mail/send.py` | Outlook COM sarmalayıcısı, posta **gönderir** (yalnız Windows) |
+| `app/mailsend.py` | E-posta şablonu çözümü ve Outlook uyumlu HTML tablo (saf mantık) |
+| `app/mailsend_repo.py` | E-posta şablonları, grup bağı, gönderim kayıtları (SQL) |
+| `app/api_mailsend.py` | "E-posta ile gönder" uçları (ayrı router) |
 | `app/teamscalls/` | Teams arama geçmişi (kaynak sözleşmesi, önbellek okuyucu, iş mantığı) |
 | `app/teamscalls/intake.py` | Normalize, tür kararı, istatistik (IndexedDB'den bağımsız) |
 | `app/teamscalls/teams_cache.py` | Teams'in yerel IndexedDB önbelleği (yalnız Windows) |
@@ -722,15 +909,26 @@ değiştirilir (`tests/fake_jira.py`).
 | `app/static/fonts/` | Gömülü OFL yazı tipleri ve lisans metinleri |
 | `app/static/js/starfield.js` | Arka plandaki yıldız alanı (canvas) |
 | `app/static/js/calls.js` | Teams Aramalar ekranı (istatistik şeridi, sekmeler, çekmece) |
-| `tests/` | pytest testleri ve sahte Jira sunucusu |
+| `app/static/js/mailsend.js` | "E-posta ile gönder" penceresi |
+| `app/static/js/mailsend-settings.js` | Ayarlar → E-posta şablonları kartı |
+| `tests/` | pytest testleri, sahte Jira sunucusu |
 | `tools/build_portable.py` | Taşınabilir Windows/Linux paketlerini üretir |
+| `tools/teams_probe/` | Teams önbellek sondası (paketlere girmez) |
 | `holocron.db` | Yerel veritabanı (depoya girmez) |
 | `holocron.key` | Şifreleme anahtarı (depoya girmez, yedekleyin) |
 | `holocron.log` | Çalışma günlüğü (1 MB × 3, depoya girmez) |
 | `holocron.port` | Çalışırken seçilen port; kapanışta silinir |
 
-`holocron.key` dosyasını kaybederseniz kayıtlı token çözülemez; Ayarlar
-ekranından yeniden girmeniz gerekir.
+## Sürüm notları
+
+| Sürüm | Tarih | Ne geldi |
+| --- | --- | --- |
+| **v0.6.0** | 12 Eylül 2026 | **E-posta ile gönder**: grid'de onay kutusu sütunu, Kime/CC taşıyan e-posta şablonları, Outlook uyumlu HTML tablo, Excel eki, "Outlook'ta aç" / "Doğrudan gönder" kipleri, gönderim geçmişi |
+| **v0.5.0** | 12 Eylül 2026 | Teams'e mesaj (derin bağlantı, `msteams:` protokolü, kurum rehberi içe aktarma) ve **Teams Aramalar**: yerel önbellekten arama geçmişi, kişi kırılımı, istatistik şeridi, üç sayfalık Excel |
+| **v0.4.0** | 11 Eylül 2026 | Outlook e-postalarından görev üretme (COM, üç ayrı adres listesi, klasör ağacı, arama klasörleri, konuşma başına tek görev) |
+| **v0.3.0** | 11 Eylül 2026 | Görevlerim kanban panosu; ağ katmanı (vekil sunucu kipleri, IPv4 önceliği, adım adım teşhis); Star Wars görsel katmanı, taşınabilir paketler ve lite Windows zip'i |
+| **v0.2.0** | 11 Eylül 2026 | Yerel alanlar, alan başına değişim geçmişi, türetilmiş sütunlar, satır içi düzenleme; Excel'e aktarma ve grid'in tek kaynağa taşınması |
+| **v0.1.0** | 11 Eylül 2026 | İskelet: SQLite şeması, Jira istemcisi (Server/DC + Cloud), ayarlar ekranı, gruplar, arka planda Güncelle, grid, sütun seçici, arama, detay çekmecesi |
 
 ## Lisans
 

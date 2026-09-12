@@ -101,6 +101,24 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
+      # Etiket ile koddaki surum ayrilirsa release yanlis numarayla cikar ve
+      # arayuzdeki "s<surum>" rozeti indirilen zip ile tutmaz: is burada duser.
+      - name: Etiket ile sürüm eşleşmeli
+        run: |
+          python - <<'EOF'
+          import os, re, sys, pathlib
+          tag = os.environ["TAG"]
+          text = pathlib.Path("app/__init__.py").read_text(encoding="utf-8")
+          found = re.search(r'__version__ = "([^"]+)"', text).group(1)
+          if tag != f"v{found}":
+              sys.exit(f"Etiket {tag} ile app/__init__.py surumu {found} uyusmuyor.")
+          print(f"Surum dogrulandi: {tag}")
+          EOF
+        env:
+          TAG: ${{ github.ref_name }}
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts

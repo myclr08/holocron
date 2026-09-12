@@ -289,6 +289,74 @@
         <div class="status" id="teams-status" hidden></div>
       </div>
 
+      <div class="card" id="mailsend-card">
+        <h2>E-posta şablonları</h2>
+        <p class="hint">
+          Ana ekrandaki <strong>E-posta ile gönder</strong> penceresi bu şablonları kullanır:
+          Kime, CC, konu ve gövde birlikte saklanır, böylece "her hafta aynı kişilere aynı
+          başlıkla" işi tek seçimle biter. Grubun kayıtları seçili sütunlarla Excel'e çevrilip
+          postaya eklenir; Outlook'un açık oturumu kullanılır, parola sorulmaz.
+        </p>
+        <p class="warn-note" id="mailsend-unsupported" hidden>
+          Bu özellik yalnız Windows'ta Outlook ile çalışır.
+        </p>
+
+        <div class="field">
+          <span class="label-text">Şablonlar</span>
+          <div class="teams-list" id="mailsend-templates"></div>
+          <p class="hint" id="mailsend-placeholders"></p>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="mailsend-name">Yeni şablon adı</label>
+            <input type="text" id="mailsend-name" placeholder="Haftalık liste" />
+          </div>
+          <div class="field">
+            <label for="mailsend-new-subject">Konu</label>
+            <input type="text" id="mailsend-new-subject"
+              placeholder="{grup} — {tarih} ({adet} kayıt)" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="mailsend-new-to">Kime</label>
+            <input type="text" id="mailsend-new-to" placeholder="ornek@example.com" />
+          </div>
+          <div class="field">
+            <label for="mailsend-new-cc">CC</label>
+            <input type="text" id="mailsend-new-cc" placeholder="ekip@example.com" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="mailsend-new-body">Gövde</label>
+          <textarea id="mailsend-new-body" rows="4"
+            placeholder="Merhaba,&#10;&#10;{grup} listesinin {tarih} tarihli hâli ektedir.&#10;&#10;{tablo}"></textarea>
+        </div>
+        <div class="actions">
+          <button id="mailsend-add">Şablon ekle</button>
+        </div>
+
+        <div class="field">
+          <span class="label-text">Gönderim kipi</span>
+          <div class="choice-group" id="mailsend-mode">
+            <label class="checkbox">
+              <input type="radio" name="mailsend-mode" value="display" checked />
+              Outlook'ta aç (Gönder'e siz basarsınız)
+            </label>
+            <label class="checkbox">
+              <input type="radio" name="mailsend-mode" value="send" />
+              Doğrudan gönder
+            </label>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="mailsend-save">Kaydet</button>
+        </div>
+        <div class="status" id="mailsend-status" hidden></div>
+      </div>
+
       <div class="card" id="appearance">
         <h2>Görünüm</h2>
         <p class="hint">
@@ -313,5 +381,6 @@
   <script src="/static/js/starfield.js"></script>
   <script src="/static/js/common.js"></script>
   <script src="/static/js/settings.js"></script>
+  <script src="/static/js/mailsend-settings.js"></script>
 </body>
 </html>

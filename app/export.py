@@ -12,7 +12,7 @@ import io
 import re
 from datetime import date, datetime, tzinfo
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Sequence
 from urllib.parse import quote
 
 from openpyxl import Workbook
@@ -75,8 +75,13 @@ def build_workbook(
     direction: str = "",
     tz: tzinfo | None = None,
     now: datetime | None = None,
+    keys: Sequence[str] | None = None,
 ) -> bytes:
-    """Grubu .xlsx olarak uretir ve bellekteki baytlari dondurur."""
+    """Grubu .xlsx olarak uretir ve bellekteki baytlari dondurur.
+
+    `keys` verilirse yalnizca o anahtarlar yazilir: grid'de onay kutusuyla
+    secilen satirlar. Suzgec/siralama once uygulanir, secim onun uzerine biner.
+    """
     data = grid.build_grid(
         context,
         group_id,
@@ -85,6 +90,8 @@ def build_workbook(
         sort=sort or "",
         direction=direction,
     )
+    if keys is not None:
+        data.rows = pick_rows(data.rows, keys)
 
     book = Workbook()
     sheet = book.active
@@ -675,6 +682,16 @@ def content_disposition(name: str, when: date | None = None) -> str:
         f'attachment; filename="{ascii_stem(stem)}.xlsx"; '
         f"filename*=UTF-8''{quote(stem + '.xlsx')}"
     )
+
+
+def pick_rows(
+    rows: list[dict[str, Any]], keys: Sequence[str] | None
+) -> list[dict[str, Any]]:
+    """Secilen anahtarlarla suzer; sira grid'den gelen siradir."""
+    if keys is None:
+        return rows
+    wanted = {str(key).strip().upper() for key in keys if str(key).strip()}
+    return [row for row in rows if str(row["key"]).upper() in wanted]
 
 
 def parse_columns(text: str | None) -> list[str] | None:

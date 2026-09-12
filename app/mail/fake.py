@@ -148,3 +148,42 @@ def _aware(moment: datetime | None) -> datetime:
     if moment is None:
         return datetime.min.replace(tzinfo=timezone.utc)
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+class FakeSender:
+    """`MailSender` sozlesmesinin bellek ici karsiligi.
+
+    Gercek Outlook yerine cagriyi kaydeder: testler dosyanin uretildigini,
+    alicilari ve kipi buradan dogrular. `error` verilirse cagri patlar; boylece
+    "Outlook acilamadi" yolu da sinanabilir.
+    """
+
+    def __init__(self, error: MailError | None = None) -> None:
+        self.sent: list[dict[str, Any]] = []
+        self.error = error
+
+    def send(
+        self,
+        to: Iterable[str],
+        cc: Iterable[str],
+        subject: str,
+        html: str,
+        attachments: Iterable[Any] = (),
+        mode: str = "display",
+    ) -> dict[str, Any]:
+        if self.error is not None:
+            raise self.error
+        record = {
+            "to": [str(item) for item in to or []],
+            "cc": [str(item) for item in cc or []],
+            "subject": str(subject or ""),
+            "html": str(html or ""),
+            "attachments": [str(item) for item in attachments or []],
+            "mode": str(mode or "display"),
+        }
+        self.sent.append(record)
+        return {"ok": True, "mode": record["mode"], "displayed": record["mode"] != "send"}
+
+    @property
+    def last(self) -> dict[str, Any]:
+        return self.sent[-1] if self.sent else {}

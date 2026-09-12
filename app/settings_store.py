@@ -62,6 +62,8 @@ DEFAULTS: dict[str, str] = {
     "mail.days": "30",
     "mail.body_limit": "4000",
     "mail.scan_on_refresh": "1",
+    # Grup kayitlarini e-postalama: Outlook penceresini ac ya da dogrudan gonder.
+    "mailsend.mode": "display",
     # Teams: grup sohbetinin konu adi bicimi (sablon yer tutuculari gecerli).
     "teams.topic_format": "{key}",
     # Teams aramalari: onbellek yolu (bos = varsayilan), Guncelle ile tarama.

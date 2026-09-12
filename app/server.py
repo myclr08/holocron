@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__, paths
 from .api import router
+from .api_mailsend import router as mailsend_router
 from .context import AppContext
 from .jira_client import JiraError
 from .mail import MailError
@@ -63,6 +64,8 @@ def create_app(context: AppContext) -> FastAPI:
         )
 
     app.include_router(router)
+    # Asama 10 ayri modulde durur: e-posta sablonlari, onizleme, gonderim.
+    app.include_router(mailsend_router)
 
     static_dir = paths.static_dir()
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")

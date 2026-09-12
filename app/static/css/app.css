@@ -1797,3 +1797,91 @@ html.no-motion *::after {
     scroll-behavior: auto !important;
   }
 }
+
+/* --- Asama 10: secim sutunu ve "E-posta ile gonder" --------------------- */
+
+.grid th.pick,
+.grid td.pick {
+  width: 34px;
+  padding-right: 0;
+  text-align: center;
+  cursor: default;
+}
+
+.grid th.pick:hover { color: inherit; }
+.grid td.pick input,
+.grid th.pick input { width: auto; margin: 0; cursor: pointer; }
+
+.pick-count {
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.mailsend .field { margin-bottom: 10px; }
+.mailsend textarea { width: 100%; font-family: var(--mono); font-size: 12px; }
+.mailsend .tabs { margin-bottom: 8px; }
+.mailsend .export-columns { max-height: 180px; }
+
+.mail-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+
+.mail-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  padding: 2px 4px 2px 10px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.mail-chip button {
+  border: none;
+  background: none;
+  color: var(--muted);
+  padding: 0 4px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mail-chip button:hover { color: var(--saber-red); }
+
+.mail-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+
+#mailsend-preview {
+  width: 100%;
+  min-height: 240px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.mail-sent-head {
+  font-family: var(--display);
+  font-size: 15px;
+  letter-spacing: .08em;
+  color: var(--muted);
+  margin: 14px 0 6px;
+}
+
+.mail-sent { display: flex; flex-direction: column; gap: 4px; }
+
+.mail-sent-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 4px;
+}
+
+.mail-sent-line .when { font-family: var(--mono); white-space: nowrap; }
+.mail-sent-line .subject { flex: 1; color: var(--text); }

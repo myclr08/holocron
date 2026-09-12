@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable, Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import paths
@@ -390,6 +391,88 @@ def _migration_0009_call_threads(conn: sqlite3.Connection) -> None:
     )
 
 
+# E-posta sablonu tohumunun bir kez atildigini soyleyen ic isaret.
+MAILSEND_SEED_KEY = "mailsend.templates_seeded"
+
+
+def _migration_0010_mail_send(conn: sqlite3.Connection) -> None:
+    """Asama 10: grup kayitlarini Excel ekiyle e-postayla gonderme (Outlook).
+
+    `mail_templates` Kime/CC/Konu/Govde'yi birlikte tasir: "her hafta ayni
+    kisilere ayni baslikla" isi tek secimle bitsin diye. `groups.mail_template_id`
+    grubun varsayilanidir (NULL = listenin ilki). `mail_sends` GERCEK gonderim
+    kaydidir; `mode` sutunu pencerenin mi acildigini yoksa `Send()` mi
+    cagrildigini soyler.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS mail_templates (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT NOT NULL,
+            to_addresses TEXT,
+            cc_addresses TEXT,
+            subject      TEXT,
+            body         TEXT,
+            attach_excel INTEGER NOT NULL DEFAULT 1,
+            inline_table INTEGER NOT NULL DEFAULT 1,
+            position     INTEGER NOT NULL DEFAULT 0,
+            created_at   TEXT,
+            updated_at   TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS mail_sends (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id    INTEGER,
+            template_id INTEGER,
+            to_text     TEXT,
+            cc_text     TEXT,
+            subject     TEXT,
+            issue_count INTEGER NOT NULL DEFAULT 0,
+            file_name   TEXT,
+            mode        TEXT NOT NULL DEFAULT 'display'
+                        CHECK (mode IN ('display', 'send')),
+            sent_at     TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mail_sends_group ON mail_sends(group_id, id);
+        """
+    )
+    _add_column(conn, "groups", "mail_template_id", "INTEGER")
+
+    # Tohum bir kez atilir: kullanici sablonu sildiyse yarim kalmis bir
+    # yukseltme onu geri getirmemeli.
+    from .mailsend import SEED_TEMPLATES
+
+    seeded = conn.execute(
+        "SELECT value FROM settings WHERE key = ?", (MAILSEND_SEED_KEY,)
+    ).fetchone()
+    if seeded is None:
+        stamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        conn.executemany(
+            "INSERT INTO mail_templates "
+            "(name, to_addresses, cc_addresses, subject, body, attach_excel, inline_table, "
+            " position, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?, ?)",
+            [
+                (
+                    seed["name"],
+                    seed.get("to_addresses", ""),
+                    seed.get("cc_addresses", ""),
+                    seed["subject"],
+                    seed["body"],
+                    index,
+                    stamp,
+                    stamp,
+                )
+                for index, seed in enumerate(SEED_TEMPLATES)
+            ],
+        )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, '1') ON CONFLICT(key) DO NOTHING",
+            (MAILSEND_SEED_KEY,),
+        )
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
@@ -401,6 +484,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (7, "address book source", _migration_0007_address_book),
     (8, "teams calls", _migration_0008_teams_calls),
     (9, "teams call threads", _migration_0009_call_threads),
+    (10, "mail send templates", _migration_0010_mail_send),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]
