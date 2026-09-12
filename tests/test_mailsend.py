@@ -529,10 +529,21 @@ def test_the_mode_is_cleaned(monkeypatch):
     assert mail_send.clean_mode("saçma") == "display"
 
 
-def test_the_outlook_sender_refuses_to_start_off_windows():
+def test_the_outlook_sender_refuses_to_start_off_windows(monkeypatch):
+    """Platform sahte: test hem Linux'ta hem Windows'ta ayni sonucu verir.
+
+    Gercek Windows'ta gonderici haklı olarak kuruluyordu ve test "DID NOT RAISE"
+    diyordu; kurulum sarti `sys.platform` oldugu icin platform monkeypatch ile
+    iki yone de cevriliyor.
+    """
+    monkeypatch.setattr(mail_send.sys, "platform", "linux")
     with pytest.raises(Exception) as caught:
         mail_send.OutlookSender()
     assert getattr(caught.value, "code", "") == "feature_unavailable"
+
+    # win32 gorunumunde kurulum gecer: COM'a ancak `send()` cagrisinda gidilir.
+    monkeypatch.setattr(mail_send.sys, "platform", "win32")
+    assert isinstance(mail_send.OutlookSender(), mail_send.OutlookSender)
 
 
 # --- secili kayitlarla Excel --------------------------------------------
