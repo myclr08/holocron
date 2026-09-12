@@ -1979,7 +1979,7 @@ html.no-motion *::after {
 /* Kahraman seridi: rutbe | sefer bilgisi | seri alevi. */
 .hero-strip {
   display: grid;
-  grid-template-columns: 128px 1fr 150px;
+  grid-template-columns: 150px 1fr 150px;
   gap: 18px;
   align-items: center;
   border: 1px solid var(--line);
@@ -1991,18 +1991,39 @@ html.no-motion *::after {
 
 .hero-rank { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 
+/* Rutbe gorseli KARE bir PNG (512px); daire kirpmasi kabin isi.
+   `overflow: hidden` gorseli halkanin icine hapseder, halka ve parlama
+   gorselin USTUNDE degil CEVRESINDE durur: kendi kutu golgesi (disa dogru,
+   overflow kirpmaz) ve kenardaki 2px'lik ince sari cember. */
 .rank-art {
-  width: 96px;
-  height: 96px;
+  position: relative;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  overflow: hidden;
   display: grid;
   place-items: center;
-  border-radius: 50%;
   background: radial-gradient(circle at 50% 45%, rgba(46, 155, 255, .18), transparent 70%);
   box-shadow: var(--saber-blue-glow);
 }
 
-.rank-art img { width: 92px; height: 92px; object-fit: contain; }
-.rank-art .holo { width: 82px; height: 82px; }
+.rank-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rank-art .holo { width: 86%; height: 86%; }
+
+.rank-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+}
 
 .holo .holo-frame { fill: none; stroke: var(--saber-blue); stroke-width: 2; opacity: .85; }
 .holo .holo-frame-in { fill: none; stroke: var(--saber-blue); stroke-width: 1; opacity: .45; }
@@ -2084,27 +2105,6 @@ html.no-motion *::after {
 .quest-foot { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
 .quest-points { font-family: var(--mono); color: var(--accent); }
 
-/* Guc dengesi. */
-.force-row { display: grid; grid-template-columns: 1fr 320px; gap: 14px; align-items: start; }
-
-.force-gauge {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-  padding: 12px;
-}
-
-.force-line { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-.force-percent { font-family: var(--mono); }
-.force-bar { height: 8px; border-radius: 5px; background: rgba(255, 255, 255, .06); margin: 8px 0 6px; overflow: hidden; }
-.force-fill { height: 100%; transition: width var(--speed) var(--ease); }
-.force-fill.force-green { background: var(--saber-green); }
-.force-fill.force-yellow { background: var(--saber-yellow); }
-.force-fill.force-red { background: var(--saber-red); }
-.force-percent.force-green { color: var(--saber-green); }
-.force-percent.force-yellow { color: var(--saber-yellow); }
-.force-percent.force-red { color: var(--saber-red); }
-
 .week-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 
 .week-count {
@@ -2119,6 +2119,22 @@ html.no-motion *::after {
 }
 
 .week-count strong { font-family: var(--display); font-size: 24px; }
+
+/* Satir sonundaki kucuk silme dugmesi (defter satiri, gecmis sefer karti). */
+.line-drop {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  flex: none;
+}
+
+.line-drop:hover { color: var(--saber-red); }
+
+.history-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .week-count span { font-size: 11px; color: var(--muted); }
 
 /* Rozet duvari. */
@@ -2136,15 +2152,40 @@ html.no-motion *::after {
   cursor: help;
 }
 
-.badge-art { width: 58px; height: 58px; display: grid; place-items: center; }
-.badge-art img { width: 56px; height: 56px; object-fit: contain; }
-.badge-art .holo { width: 54px; height: 54px; }
+/* Rozet gorselleri de kare PNG; ayni daire kirpmasi. */
+.badge-art {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
+.badge-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.badge-art .holo { width: 86%; height: 86%; }
 .badge-name { font-size: 12px; text-align: center; }
 
 .badge-tile.locked { opacity: .45; }
 .badge-tile.locked .badge-art { filter: grayscale(1); }
 .badge-tile.earned { border-color: var(--line-strong); }
-.badge-tile.earned .badge-art { box-shadow: var(--saber-yellow-glow); border-radius: 50%; }
+.badge-tile.earned .badge-art { box-shadow: var(--saber-yellow-glow); }
+
+.badge-tile.earned .badge-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+}
 
 /* XP defteri. */
 .ledger-bar { margin-bottom: 8px; }
@@ -2219,8 +2260,8 @@ html.no-motion *::after {
 .no-motion #campaign-view.rank-up .hero-strip { animation: none; }
 
 @media (max-width: 1100px) {
-  .force-row { grid-template-columns: 1fr; }
   .quest-row { grid-template-columns: 1fr; }
+  .week-counts { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 860px) {

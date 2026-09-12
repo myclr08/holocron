@@ -26,7 +26,6 @@ from typing import Any, Sequence
 
 from . import fields as field_utils, repository, tasks as task_utils
 from . import gamify_repo as store
-from .teamscalls import intake as calls_intake
 
 # --- kaynaklar ve turler ------------------------------------------------
 
@@ -133,7 +132,6 @@ BADGE_STREAK_60 = "streak_60"
 BADGE_CARTOGRAPHER = "cartographer"
 BADGE_ARCHIVIST = "archivist"
 BADGE_ENVOY = "envoy"
-BADGE_BALANCE = "balance"
 BADGE_COMPLETE = "campaign_complete"
 
 BADGES: tuple[dict[str, Any], ...] = (
@@ -147,7 +145,6 @@ BADGES: tuple[dict[str, Any], ...] = (
     {"code": BADGE_CARTOGRAPHER, "label": "Haritacı", "hint": "Bütün filolarda sütun düzeni tanımlı"},
     {"code": BADGE_ARCHIVIST, "label": "Arşivci", "hint": "30 günden eski 20 tamamlanmış görev katlandı"},
     {"code": BADGE_ENVOY, "label": "Elçi", "hint": "20 kez son durum soruldu"},
-    {"code": BADGE_BALANCE, "label": "Denge", "hint": "Bir hafta toplantı oranı %40'ın altında"},
     {"code": BADGE_COMPLETE, "label": "Sefer Tamam", "hint": "Sefer hedefine ulaşıldı"},
 )
 
@@ -174,15 +171,9 @@ DROP_CAP = 20
 
 # --- ayar anahtarlari ---------------------------------------------------
 
-SETTING_FOCUS_HOURS = "gamify.focus_hours"
 SETTING_GRACE_MONTH = "gamify.streak_grace_used_month"
 SETTING_CLEAN_SINCE = "gamify.clean_since"
 SETTING_DIGEST_WEEK = "gamify.digest_seen_week"
-
-DEFAULT_FOCUS_HOURS = 8.0
-# Guc dengesi gostergesi: yesil / sari / kirmizi esikleri.
-BALANCE_GREEN = 0.25
-BALANCE_YELLOW = 0.40
 
 CLEAN_DESK_DAYS = 7
 
@@ -946,8 +937,6 @@ def _badge_met(code: str, facts: dict[str, Any]) -> bool:
         return facts["old_done"] >= 20
     if code == BADGE_ENVOY:
         return facts["asked"] >= 20
-    if code == BADGE_BALANCE:
-        return facts["balanced_week"]
     if code == BADGE_COMPLETE:
         return facts["target_reached"]
     return False
@@ -970,7 +959,6 @@ def badge_facts(
         )
     asked = _asked_count(context, campaign)
     total = store.total_xp(conn, campaign["id"])
-    balance = force_balance(context, now)
     return {
         "clean_days": _clean_days(context, board["overdue"], now),
         "mail_fast": store.count_events(conn, campaign["id"], (KIND_MAIL_FAST,)),
@@ -982,7 +970,6 @@ def badge_facts(
         "all_columns": bool(groups) and all(group["columns"] for group in groups),
         "old_done": board["old_done"],
         "asked": asked,
-        "balanced_week": bool(balance["has_data"] and balance["ratio"] < BALANCE_YELLOW),
         "target_reached": campaign["target_xp"] > 0 and total >= campaign["target_xp"],
     }
 
@@ -1021,65 +1008,73 @@ def _clean_days(context: Any, overdue: int, now: datetime | None) -> int:
     return max(1, days_between(since, day) + 1)
 
 
-# --- guc dengesi --------------------------------------------------------
+# --- silme ve yeniden degerlendirme --------------------------------------
 
 
-def focus_hours(context: Any) -> float:
-    try:
-        value = float(str(context.settings.get(SETTING_FOCUS_HOURS, "") or DEFAULT_FOCUS_HOURS))
-    except (TypeError, ValueError):
-        return DEFAULT_FOCUS_HOURS
-    return value if 1.0 <= value <= 24.0 else DEFAULT_FOCUS_HOURS
+def delete_history(context: Any, campaign_id: Any) -> dict[str, Any]:
+    """Biten bir seferi defteri ve rozetleriyle birlikte siler."""
+    return store.delete_campaign(context.connection(), campaign_id)
 
 
-def meeting_ms(context: Any, first_day: str, last_day: str = "") -> int:
-    """Verilen gun araligindaki toplanti + grup aramasi suresi (ms).
+def delete_event(context: Any, event_id: Any, now: datetime | None = None) -> dict[str, Any]:
+    """Defterden bir satir siler ve seferi bastan degerlendirir.
 
-    Aralik `first_day` dahil, `last_day` HARIC; bos birakilirsa ucu aciktir.
-    Kayitlar UTC damgali oldugu icin gun karsilastirmasi yerel gune cevrilerek
-    yapilir (SQL yalnizca kaba on eleme yapar).
+    Silmek satiri goturur, dogrudan bagli kayitlari temizler (o gunun seri
+    isareti, rozet) ve ardindan kosulu artik saglanmayan rozetleri puanlariyla
+    birlikte geri alir; toplam dustugu icin rutbe de geriye gidebilir.
+
+    Iz birakilmaz: ayni olay ileride yeniden gerceklesirse (kayit tekrar
+    filodan duser, gorev yeniden kapanir, gun yeniden etkin olur) puan normal
+    sekilde yeniden yazilir. Silmek "bu olay hic olmadi" demektir, "bir daha
+    sayma" demek degil.
     """
-    # SQL on elemesi UTC damgasina bakar, aralik ise YEREL gun: saat farki
-    # yuzunden sinirdaki kayitlar elenmesin diye bir gun genis alinir, kesin
-    # eleme asagida yerel gune gore yapilir.
-    floor = parse_day(first_day)
-    edge = (floor - timedelta(days=1)).isoformat() if floor else first_day
-    rows = context.connection().execute(
-        "SELECT duration_ms, started_at FROM teams_calls "
-        "WHERE kind IN (?, ?) AND started_at >= ?",
-        (calls_intake.KIND_MEETING, calls_intake.KIND_GROUP, edge),
-    ).fetchall()
-    total = 0
-    for row in rows:
-        day = local_day(row["started_at"])
-        if day < first_day or (last_day and day >= last_day):
-            continue
-        total += int(row["duration_ms"] or 0)
-    return total
-
-
-def force_balance(context: Any, now: datetime | None = None) -> dict[str, Any]:
-    """Bu haftaki toplanti yuku / odak butcesi. Puan yok, yalniz gosterge."""
     conn = context.connection()
-    day = parse_day(today_of(now)) or date.today()
-    week = week_start_of(day)
-    hours = focus_hours(context)
-    budget = 5 * hours * 3600 * 1000
-    total = meeting_ms(context, week)
-    ratio = (total / budget) if budget else 0.0
-    level = "green" if ratio < BALANCE_GREEN else ("yellow" if ratio < BALANCE_YELLOW else "red")
-    has_data = repository.call_count(conn) > 0
-    return {
-        "has_data": has_data,
-        "ms": total,
-        "ratio": round(ratio, 3),
-        "percent": round(ratio * 100),
-        "level": level,
-        "focus_hours": hours,
-        "duration_text": calls_intake.duration_text(total),
-        "text": f"bu hafta {calls_intake.duration_text(total)} toplantı",
-        "week_start": week,
-    }
+    campaign = ensure_campaign(context, now)
+    if campaign is None:
+        raise repository.RepositoryError(
+            "campaign_missing", "Süren bir sefer yok.", status=404
+        )
+    event = store.get_event(conn, event_id)
+    if event is None or event["campaign_id"] != campaign["id"]:
+        raise repository.RepositoryError(
+            "event_not_found", "Defter satırı bulunamadı.", status=404
+        )
+
+    store.delete_event(conn, event["id"])
+
+    # Olayin dogrudan izleri: seri gunu ve rozet satiri.
+    if event["kind"] == KIND_STREAK_DAY and event["ref"].startswith("day:"):
+        store.clear_day(conn, campaign["id"], event["ref"][4:])
+    if event["kind"] == KIND_BADGE_EARNED and event["ref"].startswith("badge:"):
+        store.revoke_badge(conn, campaign["id"], event["ref"][6:])
+
+    revoked = reevaluate(context, campaign, now)
+    return {"event": event, "revoked": revoked}
+
+
+def reevaluate(
+    context: Any, campaign: dict[str, Any], now: datetime | None = None
+) -> list[str]:
+    """Kosulu artik saglanmayan rozetleri (ve puanlarini) geri alir.
+
+    Bir rozetin dusmesi toplami dusurur, o da baska bir rozeti dusurebilir
+    ("Sefer Tamam" hedefe bagli); bu yuzden durulana kadar donulur.
+    """
+    conn = context.connection()
+    revoked: list[str] = []
+    for _ in range(len(BADGES) + 1):
+        facts = badge_facts(context, campaign, now)
+        earned = store.earned_badges(conn, campaign["id"])
+        gone = [code for code in earned if not _badge_met(code, facts)]
+        if not gone:
+            break
+        for code in gone:
+            store.revoke_badge(conn, campaign["id"], code)
+            store.delete_events_by_ref(
+                conn, campaign["id"], KIND_BADGE_EARNED, f"badge:{code}"
+            )
+            revoked.append(code)
+    return revoked
 
 
 # --- panel --------------------------------------------------------------
@@ -1209,8 +1204,6 @@ def digest(context: Any, campaign: dict[str, Any], now: datetime | None) -> dict
         "seen_key": week,
         "xp": points,
         "tasks_done": closed,
-        "meeting_ms": meeting_ms(context, last_week, week),
-        "meeting_text": calls_intake.duration_text(meeting_ms(context, last_week, week)),
         "rank": rank_view(total, target),
         "rank_before": {"code": was["code"], "label": was["label"]},
         "rank_changed": was["code"] != now_rank["code"],
@@ -1262,7 +1255,6 @@ def panel(context: Any, now: datetime | None = None) -> dict[str, Any]:
         "next_rank": next_rank_of(total, target),
         "streak": streak_state(context, campaign, now),
         "quests": store.list_quests(conn, campaign["id"], week),
-        "force": force_balance(context, now),
         "week": week_stats(context, campaign, now),
         "badges": badge_wall(context, campaign, now),
         "ledger": ledger(context, limit=store.LEDGER_LIMIT, now=now),

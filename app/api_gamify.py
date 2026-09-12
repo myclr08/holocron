@@ -93,7 +93,6 @@ def read_rules(request: Request) -> dict[str, Any]:
     context = get_context(request)
     return {
         "rules": gamify.rules_view(context),
-        "focus_hours": gamify.focus_hours(context),
         "grace_used": (context.settings.get(gamify.SETTING_GRACE_MONTH, "") or "") != "",
         "grace_month": context.settings.get(gamify.SETTING_GRACE_MONTH, "") or "",
     }
@@ -109,20 +108,42 @@ def write_rules(request: Request, payload: dict[str, Any] = Body(default_factory
     with context.db_lock:
         if rules:
             store.update_rules(context.connection(), rules)
-        if payload.get("focus_hours") is not None:
-            context.settings.set(
-                gamify.SETTING_FOCUS_HOURS, str(payload.get("focus_hours"))
-            )
-    return {
-        "rules": gamify.rules_view(context),
-        "focus_hours": gamify.focus_hours(context),
-    }
+    return {"rules": gamify.rules_view(context)}
+
+
+@router.delete("/campaign/ledger/{event_id}")
+def drop_ledger_event(request: Request, event_id: int) -> dict[str, Any]:
+    """Defterden bir satir siler; sefer bastan degerlendirilir.
+
+    Kosulu kalmayan rozetler puanlariyla birlikte geri alinir. Ayni olay
+    ileride yeniden gerceklesirse yeniden puan yazilir.
+    """
+    context = get_context(request)
+    with context.db_lock:
+        result = gamify.delete_event(context, event_id)
+        return {
+            "deleted": result["event"],
+            "revoked": result["revoked"],
+            "panel": gamify.panel(context),
+        }
 
 
 @router.get("/campaign/history")
 def read_history(request: Request) -> dict[str, Any]:
     context = get_context(request)
     return {"campaigns": gamify.history(context)}
+
+
+@router.delete("/campaign/history/{campaign_id}")
+def drop_history(request: Request, campaign_id: int) -> dict[str, Any]:
+    """Biten bir seferi defteri, rozetleri ve emirleriyle siler.
+
+    Suren sefer buradan silinmez; onun yolu `POST /api/campaign/end`.
+    """
+    context = get_context(request)
+    with context.db_lock:
+        deleted = gamify.delete_history(context, campaign_id)
+        return {"deleted": deleted, "campaigns": gamify.history(context)}
 
 
 @router.post("/campaign/digest-seen")

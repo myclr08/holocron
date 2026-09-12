@@ -184,6 +184,24 @@ def end_campaign(
     return require_campaign(conn, campaign["id"])
 
 
+def delete_campaign(conn: sqlite3.Connection, campaign_id: Any) -> dict[str, Any]:
+    """Biten bir seferi defteri, rozetleri, emirleri ve serisiyle siler.
+
+    Aktif sefer silinmez: onun yolu "bitir" (`end_campaign`). Bagli satirlar
+    semadaki ON DELETE CASCADE ile gider, burada tek satir silinir.
+    """
+    campaign = require_campaign(conn, campaign_id)
+    if campaign["status"] != STATUS_ENDED:
+        raise RepositoryError(
+            "campaign_active",
+            "Süren sefer silinemez; önce bitirin.",
+            status=409,
+        )
+    with conn:
+        conn.execute("DELETE FROM campaigns WHERE id = ?", (campaign["id"],))
+    return campaign
+
+
 # --- XP defteri ---------------------------------------------------------
 
 
@@ -228,6 +246,28 @@ def add_event(
         return None
     row = conn.execute("SELECT * FROM xp_events WHERE id = ?", (int(cursor.lastrowid),)).fetchone()
     return _event_dict(row) if row else None
+
+
+def get_event(conn: sqlite3.Connection, event_id: Any) -> dict[str, Any] | None:
+    try:
+        wanted = int(event_id)
+    except (TypeError, ValueError):
+        return None
+    row = conn.execute("SELECT * FROM xp_events WHERE id = ?", (wanted,)).fetchone()
+    return _event_dict(row) if row else None
+
+
+def delete_event(conn: sqlite3.Connection, event_id: int) -> bool:
+    """Defter satirini siler.
+
+    Iz birakmaz: tekillik `xp_events` uzerinde durdugu icin satir gidince
+    anahtar serbest kalir; ayni olay ileride yeniden gerceklesirse (kayit
+    tekrar filodan duser, gorev yeniden kapanir) normal sekilde yeniden puan
+    yazilir.
+    """
+    with conn:
+        cursor = conn.execute("DELETE FROM xp_events WHERE id = ?", (int(event_id),))
+    return bool(cursor.rowcount)
 
 
 def list_events(
@@ -431,6 +471,36 @@ def earn_badge(
             (code, at or now_iso(), int(campaign_id)),
         )
     return bool(cursor.rowcount)
+
+
+def revoke_badge(conn: sqlite3.Connection, campaign_id: int, code: str) -> bool:
+    """Kosulu artik saglanmayan rozeti geri alir."""
+    with conn:
+        cursor = conn.execute(
+            "DELETE FROM badges WHERE campaign_id = ? AND code = ?", (int(campaign_id), code)
+        )
+    return bool(cursor.rowcount)
+
+
+def clear_day(conn: sqlite3.Connection, campaign_id: int, day: str) -> bool:
+    """Gun isaretini kaldirir (o gunun seri puani silindiginde)."""
+    with conn:
+        cursor = conn.execute(
+            "DELETE FROM streaks WHERE campaign_id = ? AND day = ?", (int(campaign_id), day)
+        )
+    return bool(cursor.rowcount)
+
+
+def delete_events_by_ref(
+    conn: sqlite3.Connection, campaign_id: int, kind: str, ref: str
+) -> int:
+    """Belirli bir olayi referansiyla siler (rozet geri alinirken puani da gider)."""
+    with conn:
+        cursor = conn.execute(
+            "DELETE FROM xp_events WHERE campaign_id = ? AND kind = ? AND ref = ?",
+            (int(campaign_id), kind, ref),
+        )
+    return cursor.rowcount or 0
 
 
 # --- haftalik emirler ---------------------------------------------------

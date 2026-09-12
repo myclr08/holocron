@@ -29,7 +29,7 @@ Güncel sürüm: **v0.7.3** (bkz. [Sürüm notları](#sürüm-notları)).
 | **Teams'e mesaj** | Kayda iliştirilen kişilere tek tıkla mesaj: Graph API ve IT izni yok, `msteams:` derin bağlantısı. Gönder'e siz basarsınız. |
 | **Teams Aramalar** (Windows) | Teams'in yerel önbelleğinden okunan **kendi** arama geçmişiniz: liste, kişi kırılımı, istatistik şeridi, Excel. |
 | **E-posta ile gönder** (Windows) | Grubun kayıtlarını seçili sütunlarla Excel'e çevirip şablonlu bir postaya ekler; Kime/CC şablondan gelir, posta Outlook'ta açılır ya da gönderilir. |
-| **Sefer** | Bitiş tarihi olan XP hedefi: görev kapatmak, kaydın filodan düşmesi ve durum geçişleri puan verir; rütbe, rozetler, haftalık emirler, güç dengesi ve "ne için puan aldım" defteri. |
+| **Sefer** | Bitiş tarihi olan XP hedefi: görev kapatmak, kaydın filodan düşmesi ve durum geçişleri puan verir; rütbe, rozetler, haftalık emirler ve "ne için puan aldım" defteri (yanlış satır silinebilir). |
 | **Excel'e aktarma** | Gruplar, görevler, aramalar ve XP defteri için gerçek tarih/sayı hücreli, köprülü `.xlsx` dosyaları. |
 | **Tema** | Koyu Star Wars atmosferi: yıldız alanı, ışın kılıcı renkleri, açılış akışı — hepsi kapatılabilir. Dış kaynak, CDN, izleme yok. |
 
@@ -749,14 +749,12 @@ veriden üretilir: gecikmiş görevleri kapatmak, Yapılıyor'u beşin altına i
 görevlerini ele almak. İlerleme ayrı bir sayaçtan değil, panonun anlık
 durumundan ölçülür; biten emir 25 XP verir.
 
-**Güç dengesi** puan vermez, yalnız söyler: bu haftaki toplantı + grup araması
-süresi, `5 iş günü × günlük odak bütçesi` (varsayılan 8 saat) içinde ne kadar yer
-kaplıyor. %25 altı yeşil, %40 altı sarı, üstü kırmızı. Teams Aramalar verisi
-yoksa gösterge onu söyler.
+**Bu hafta** şeridi puan vermez, yalnız sayar: bu hafta kapanan görev, düşen
+kayıt ve toplanan XP.
 
 **Rozetler** kazanıldığında renklenir, kazanılmayan gri hologram olarak durur ve
 üzerine gelince koşulu yazar: Temiz Masa, Hızlı Yanıt, Kapatıcı, Bitirici, Beş /
-Yirmi / Altmış Gün, Haritacı, Arşivci, Elçi, Denge, Sefer Tamam.
+Yirmi / Altmış Gün, Haritacı, Arşivci, Elçi, Sefer Tamam.
 
 **XP defteri** son 50 olayı tarih, kaynak, açıklama ve puanla listeler; kaynak
 süzgeci vardır ve **Tümünü Excel'e** defterin tamamını `.xlsx` yazar
@@ -764,11 +762,22 @@ süzgeci vardır ve **Tümünü Excel'e** defterin tamamını `.xlsx` yazar
 Pazartesi ilk açılışta on saniye duran bir **Holocron kaydı** kartı geçen haftayı
 özetler.
 
+**Yanlış puanı silmek.** Defterdeki her satırın sonunda küçük bir `×` vardır:
+satır silinir, toplam XP düşer, rütbe geriye gidebilir ve koşulu artık
+sağlanmayan rozetler puanlarıyla birlikte geri alınır. Seri günü silinirse o gün
+seriden de düşer. Silmek "bu olay hiç olmadı" demektir: aynı olay ileride
+yeniden gerçekleşirse (kayıt tekrar filodan düşer, görev yeniden kapanır) puan
+normal şekilde yeniden yazılır. (`DELETE /api/campaign/ledger/{id}`)
+
+**Geçmiş seferi silmek.** Geçmiş sefer kartındaki `×` seferi defteri, rozetleri,
+emirleri ve serisiyle birlikte siler; geri alınamaz. Süren sefer buradan
+silinmez, onun yolu **Seferi bitir**. (`DELETE /api/campaign/history/{id}`)
+
 Rütbe ve rozet görselleri `app/static/img/gamify/` altında beklenir; dosya adları
 sabittir. Rütbeler: `rank-padawan.png`, `rank-knight.png`, `rank-master.png`,
 `rank-council.png`, `rank-legend.png`. Rozetler `badge-<kod>.png`, kodlar:
 `clean_desk`, `fast_reply`, `closer`, `finisher`, `streak_5`, `streak_20`,
-`streak_60`, `cartographer`, `archivist`, `envoy`, `balance`, `campaign_complete`.
+`streak_60`, `cartographer`, `archivist`, `envoy`, `campaign_complete`.
 Dosya yoksa arayüz kendi çizdiği SVG hologramı gösterir; ekran hiçbir zaman boş
 kalmaz, eksik görsel sonradan eklenebilir.
 
@@ -1071,7 +1080,7 @@ taşımaz.
 | `app/static/js/mailsend.js` | "E-posta ile gönder" penceresi |
 | `app/static/js/mailsend-settings.js` | Ayarlar → E-posta şablonları kartı |
 | `app/static/js/campaign.js` | Sefer paneli (kahraman şeridi, emirler, rozetler, defter) |
-| `app/static/js/campaign-settings.js` | Ayarlar → Sefer kartı (XP kuralları, odak bütçesi) |
+| `app/static/js/campaign-settings.js` | Ayarlar → Sefer kartı (XP kuralları, koruma durumu) |
 | `app/static/img/gamify/` | Rütbe ve rozet görselleri (yoksa SVG hologram yedeği) |
 | `tests/` | pytest testleri, sahte Jira sunucusu |
 | `tools/build_portable.py` | Taşınabilir Windows/Linux paketlerini üretir |
@@ -1085,7 +1094,8 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
-| **v0.8.0** | 12 Eylül 2026 | **Sefer**: bitiş tarihli XP kampanyası, ayarlanabilir kural motoru, hedefe oranlı rütbeler, 12 rozet, haftalık görev emirleri, iş günü serisi ve aylık Güç koruması, güç dengesi göstergesi, XP defteri (+ Excel), geçmiş seferler, pazartesi "Holocron kaydı" |
+| **v0.8.1** | 12 Eylül 2026 | Sefer: geçmiş sefer silme, XP satırı silme (yeniden değerlendirme, iptal işareti yok), güç dengesi ve Denge rozeti kaldırıldı, rütbe ve rozet görselleri dairesel çerçevede |
+| **v0.8.0** | 12 Eylül 2026 | **Sefer**: bitiş tarihli XP kampanyası, ayarlanabilir kural motoru, hedefe oranlı rütbeler, 11 rozet, haftalık görev emirleri, iş günü serisi ve aylık Güç koruması, XP defteri (+ Excel, satır silme ve yeniden değerlendirme), geçmiş seferler (silinebilir), pazartesi "Holocron kaydı" |
 | **v0.7.3** | 12 Eylül 2026 | Toplantı katılımı: birleştirme anahtarı toplantı kimliği + gün (farklı gün/thread asla birleşmez), ad alanlı XML etiketleri, yeniden taramada eski sohbet kayıtlarının temizlenmesi |
 | **v0.7.2** | 12 Eylül 2026 | Teams Aramalar: tek `view` isteği, SQL pencere ve indeks (1.000 kayıtta < 30 ms), önbellek yalnız çekim ve teşhiste; katılım kuralı sertleşti (kendi süre yoksa kayıt yok, GUID eşleşme, oturum toplama); "Katılım teşhisi" çekmecesi |
 | **v0.7.1** | 12 Eylül 2026 | Toplantı katılımı: yeni partlist biçimi (calleventtype, ended, meetingdetails), iCalUid ile takvim eşleşmesi, kendi kimlik veritabanı adından; sonda iskelet çıktısı |

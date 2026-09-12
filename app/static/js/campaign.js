@@ -103,7 +103,7 @@ function renderCampaign() {
 
   renderHero(data);
   renderQuests(data.quests || []);
-  renderForce(data);
+  renderWeek(data);
   renderBadgeWall(data.badges || []);
   renderLedgerFilter(data.sources || []);
   renderLedger(data.ledger || []);
@@ -231,41 +231,11 @@ function renderQuests(quests) {
   });
 }
 
-/** Güç dengesi göstergesi ve bu haftanın iki sayacı. */
-function renderForce(data) {
-  const box = el("campaign-force");
+/** Bu haftanın sayaçları. */
+function renderWeek(data) {
+  const box = el("campaign-week");
   clear(box);
-  const force = data.force || {};
   const week = data.week || {};
-
-  if (!force.has_data) {
-    box.appendChild(
-      h("div", {
-        class: "hint",
-        text: "Güç dengesi Teams Aramalar verisi ister: soldaki Teams Aramalar ekranından çekin.",
-      })
-    );
-  } else {
-    const fill = h("div", { class: "force-fill force-" + force.level });
-    fill.style.width = Math.min(100, force.percent) + "%";
-    box.appendChild(
-      h("div", { class: "force-gauge" }, [
-        h("div", { class: "force-line" }, [
-          h("span", { class: "force-text", text: force.text }),
-          h("span", {
-            class: "force-percent force-" + force.level,
-            text: "%" + force.percent,
-          }),
-        ]),
-        h("div", { class: "force-bar" }, [fill]),
-        h("div", {
-          class: "hint",
-          text: `Ölçü: toplantı + grup araması süresi / (5 iş günü × ${force.focus_hours} saat odak). Puan yok.`,
-        }),
-      ])
-    );
-  }
-
   box.appendChild(
     h("div", { class: "week-counts" }, [
       weekCount(String(week.tasks_done || 0), "bu hafta kapanan görev"),
@@ -374,9 +344,33 @@ function renderLedger(events) {
         icon(SOURCE_ICONS[event.source] || "task"),
         h("span", { class: "what", text: event.title || event.kind }),
         h("span", { class: "points", text: "+" + event.points }),
+        h("button", {
+          class: "line-drop",
+          text: "×",
+          title: "Bu XP'yi sil",
+          onclick: () => dropLedgerEvent(event),
+        }),
       ])
     );
   });
+}
+
+/** Defter satırını siler; sefer baştan değerlendirilir. */
+async function dropLedgerEvent(event) {
+  if (!confirm("Bu XP silinecek.")) return;
+  try {
+    const data = await api(`/api/campaign/ledger/${event.id}`, { method: "DELETE" });
+    campaignState.data = data.panel;
+    renderCampaign();
+    const lost = (data.revoked || []).length;
+    toast(
+      "XP silindi",
+      lost ? `${event.points} XP düştü · ${lost} rozet geri alındı` : `${event.points} XP düştü`,
+      "ok"
+    );
+  } catch (err) {
+    fail(err);
+  }
 }
 
 function exportLedger() {
@@ -397,7 +391,15 @@ function renderHistory(history) {
   history.forEach((item) => {
     box.appendChild(
       h("div", { class: "history-card" }, [
-        h("div", { class: "history-name", text: item.name }),
+        h("div", { class: "history-top" }, [
+          h("div", { class: "history-name", text: item.name }),
+          h("button", {
+            class: "line-drop",
+            text: "×",
+            title: "Bu seferi sil",
+            onclick: () => dropHistory(item),
+          }),
+        ]),
         h("div", { class: "history-when", text: `${dateText(item.starts_at)} → ${dateText(item.ends_at)}` }),
         h("div", { class: "history-xp", text: `${item.total_xp} / ${item.target_xp} XP` }),
         h("div", { class: "history-rank", text: (item.rank || {}).label || "" }),
@@ -408,6 +410,19 @@ function renderHistory(history) {
       ])
     );
   });
+}
+
+/** Biten bir seferi defteri ve rozetleriyle siler. */
+async function dropHistory(item) {
+  if (!confirm(`"${item.name}" seferi, defteri ve rozetleriyle silinecek. Silinsin mi?`)) return;
+  try {
+    const data = await api(`/api/campaign/history/${item.id}`, { method: "DELETE" });
+    if (campaignState.data) campaignState.data.history = data.campaigns || [];
+    renderHistory(data.campaigns || []);
+    toast("Sefer silindi", item.name, "ok");
+  } catch (err) {
+    fail(err);
+  }
 }
 
 // --- pazartesi özeti ve rütbe kutlaması ----------------------------------
@@ -430,7 +445,6 @@ function renderDigest(digest) {
     h("div", { class: "record-body" }, [
       h("span", { text: `Geçen hafta ${digest.xp} XP` }),
       h("span", { text: `${digest.tasks_done} görev kapandı` }),
-      h("span", { text: `toplantı: ${digest.meeting_text}` }),
       h("span", {
         text: digest.rank_changed
           ? `rütbe: ${(digest.rank_before || {}).label || ""} → ${(digest.rank || {}).label || ""}`

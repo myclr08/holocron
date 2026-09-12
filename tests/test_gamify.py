@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import sqlite3
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -59,9 +60,9 @@ def ledger_kinds(context):
 
 
 def test_migration_creates_the_campaign_tables(conn):
-    assert {"campaigns", "xp_events", "xp_rules", "badges", "quests", "streaks"} <= db.table_names(
-        conn
-    )
+    assert {
+        "campaigns", "xp_events", "xp_rules", "badges", "quests", "streaks"
+    } <= db.table_names(conn)
     assert db.SCHEMA_VERSION == 12
 
 
@@ -463,73 +464,14 @@ def test_stale_records_become_an_order(context, conn):
     assert quest["title"] == "2 kaydın son durumunu sor"
 
 
-# --- guc dengesi --------------------------------------------------------
-
-
-def call_row(call_id, kind, minutes, started):
-    return {
-        "call_id": call_id,
-        "started_at": started,
-        "ended_at": started,
-        "duration_ms": minutes * 60 * 1000,
-        "kind": kind,
-        "state": "accepted",
-        "direction": "incoming",
-    }
-
-
-def test_the_record_reports_the_rank_change_and_last_weeks_meetings(context, conn):
-    made = campaign(context, target=100, now=datetime(2026, 9, 7, 10, 0))
-    close_task(context, "Bir", now=datetime(2026, 9, 9, 10, 0))  # 13 XP -> Sovalye
-    repo.import_calls(
-        conn,
-        [
-            call_row("a", "meeting", 90, datetime(2026, 9, 9, 9, 0).astimezone(timezone.utc).isoformat()),
-            call_row("b", "meeting", 30, MONDAY.astimezone(timezone.utc).isoformat()),  # bu hafta
-        ],
-    )
+def test_the_record_reports_the_rank_change(context, conn):
+    campaign(context, target=100, now=datetime(2026, 9, 7, 10, 0))
+    close_task(context, "Bir", now=datetime(2026, 9, 9, 10, 0))
+    close_task(context, "İki", now=datetime(2026, 9, 10, 10, 0))
 
     record = gamify.panel(context, MONDAY)["digest"]
     assert record["rank_before"]["code"] == "padawan"
     assert record["rank"]["code"] == "knight" and record["rank_changed"] is True
-    # Kart GECEN haftayi anlatir: bu haftanin toplantisi sayilmaz.
-    assert record["meeting_text"] == "1 sa 30 dk"
-
-
-def test_the_force_balance_measures_the_meeting_load(context, conn):
-    campaign(context)
-    start = MONDAY.astimezone(timezone.utc).isoformat()
-    repo.import_calls(
-        conn,
-        [
-            call_row("a", "meeting", 600, start),  # 10 saat
-            call_row("b", "group_call", 120, start),  # 2 saat
-            call_row("c", "one_to_one", 600, start),  # sayilmaz
-        ],
-    )
-
-    balance = gamify.force_balance(context, MONDAY)
-    # 12 saat / (5 gun x 8 saat) = %30 -> sari.
-    assert balance["percent"] == 30
-    assert balance["level"] == "yellow"
-    assert balance["text"] == "bu hafta 12 sa 0 dk toplantı"
-    assert balance["has_data"] is True
-
-
-def test_the_focus_budget_can_be_changed(context, conn):
-    campaign(context)
-    context.settings.set(gamify.SETTING_FOCUS_HOURS, "4")
-    repo.import_calls(
-        conn, [call_row("a", "meeting", 600, MONDAY.astimezone(timezone.utc).isoformat())]
-    )
-    balance = gamify.force_balance(context, MONDAY)
-    assert balance["focus_hours"] == 4.0 and balance["percent"] == 50
-    assert balance["level"] == "red"
-
-
-def test_without_call_data_the_gauge_says_so(context):
-    campaign(context)
-    assert gamify.force_balance(context, MONDAY)["has_data"] is False
 
 
 # --- rozetler -----------------------------------------------------------
@@ -633,24 +575,6 @@ def test_the_envoy_badge_counts_asked_records(context, conn):
     assert gamify.BADGE_ENVOY in earned(context)
 
 
-def test_the_balance_badge_wants_a_light_meeting_week(context, conn):
-    campaign(context)
-    repo.import_calls(
-        conn, [call_row("a", "meeting", 60, MONDAY.astimezone(timezone.utc).isoformat())]
-    )
-    gamify.evaluate(context, MONDAY)
-    assert gamify.BADGE_BALANCE in earned(context)
-
-
-def test_a_heavy_meeting_week_earns_no_balance_badge(context, conn):
-    campaign(context)
-    repo.import_calls(
-        conn, [call_row("a", "meeting", 20 * 60, MONDAY.astimezone(timezone.utc).isoformat())]
-    )
-    gamify.evaluate(context, MONDAY)
-    assert gamify.BADGE_BALANCE not in earned(context)
-
-
 def test_the_clean_desk_badge_needs_a_week_without_overdue(context, conn):
     campaign(context)
     gamify.evaluate(context, MONDAY)
@@ -709,7 +633,6 @@ def test_the_panel_carries_everything_the_screen_draws(context):
     assert data["week"]["tasks_done"] == 1
     assert len(data["badges"]) == len(gamify.BADGES)
     assert data["ledger"][0]["source_label"]
-    assert data["force"]["level"] == "green"
     assert data["campaign"]["days_left"] == (
         (datetime(2026, 12, 31) - datetime(2026, 9, 14)).days
     )
@@ -731,7 +654,6 @@ def test_the_monday_record_shows_last_week_once(context):
     assert record["week_start"] == "2026-09-07" and record["seen_key"] == "2026-09-14"
     # Rutbe degisimi de kartta: 0 XP'den 13 XP'ye, hedef 1000 -> ikisi de Padawan.
     assert record["rank_before"]["code"] == "padawan" and record["rank_changed"] is False
-    assert record["meeting_text"] == "—"
 
     context.settings.set(gamify.SETTING_DIGEST_WEEK, "2026-09-14")
     assert gamify.panel(context, MONDAY)["digest"] is None
@@ -832,14 +754,12 @@ def test_the_ledger_can_be_exported(api_client):
 
 def test_the_rules_can_be_read_and_written(api_client):
     data = api_client.get("/api/campaign/rules").json()
-    assert data["focus_hours"] == 8.0
     assert any(rule["label"] == "Görev kapatıldı" for rule in data["rules"])
+    assert "focus_hours" not in data
 
     written = api_client.put(
-        "/api/campaign/rules",
-        json={"rules": [{"kind": "done", "points": 25}], "focus_hours": 6},
+        "/api/campaign/rules", json={"rules": [{"kind": "done", "points": 25}]}
     ).json()
-    assert written["focus_hours"] == 6.0
     assert next(rule for rule in written["rules"] if rule["kind"] == "done")["points"] == 25
 
 
@@ -919,8 +839,8 @@ def test_campaign_view_hooks_are_on_the_page(api_client):
         'id="campaign-hero"',
         'id="campaign-quests"',
         "Haftalık görev emirleri",
-        'id="campaign-force"',
-        "Güç dengesi",
+        'id="campaign-week"',
+        ">Bu hafta<",
         'id="campaign-badges"',
         "Rozet duvarı",
         'id="campaign-ledger"',
@@ -952,7 +872,7 @@ def test_campaign_script_covers_the_panel(api_client):
         "/api/campaign/digest-seen",
         "function renderHero",
         "function renderQuests",
-        "function renderForce",
+        "function renderWeek",
         "function renderBadgeWall",
         "function renderLedger",
         "function renderHistory",
@@ -1002,10 +922,8 @@ def test_campaign_styles_are_defined(api_client):
         ".hero-streak",
         ".quest-card",
         ".quest-fill",
-        ".force-gauge",
-        ".force-fill.force-green",
-        ".force-fill.force-yellow",
-        ".force-fill.force-red",
+        ".week-counts",
+        ".line-drop",
         ".badge-wall",
         ".badge-tile.locked",
         ".ledger-line",
@@ -1024,8 +942,6 @@ def test_the_campaign_card_is_on_the_settings_page(api_client):
         'id="campaign-card"',
         ">Sefer<",
         'id="campaign-rules"',
-        'id="campaign-focus"',
-        "Günlük odak bütçesi",
         'id="campaign-grace"',
         'id="campaign-rules-save"',
         "/static/js/campaign-settings.js",
@@ -1044,7 +960,7 @@ def test_campaign_texts_are_proper_turkish(api_client):
     for word in ("Gorev", "Rutbe", "gunluk", "Gecmis", "Guc", "basla", "Sefer basla"):
         assert word not in section, word
         assert word not in script, word
-    for marker in ("Rozet duvarı", "Güç dengesi", "Geçmiş seferler", "Haftalık görev emirleri"):
+    for marker in ("Rozet duvarı", "Bu hafta", "Geçmiş seferler", "Haftalık görev emirleri"):
         assert marker in section, marker
 
 
@@ -1094,17 +1010,6 @@ def test_the_ledger_is_written_before_the_job_reports_done(context, conn, fake_j
 
 
 # --- gozden gecirme sonrasi sertlestirmeler ------------------------------
-
-
-def test_an_early_morning_meeting_still_counts(context, conn):
-    """UTC damgasi / yerel gun: pazartesi 01:00'deki toplanti pazara kaymamali."""
-    campaign(context)
-    local_start = MONDAY.replace(hour=1, minute=0)
-    repo.import_calls(
-        conn, [call_row("a", "meeting", 60, local_start.astimezone(timezone.utc).isoformat())]
-    )
-    assert gamify.meeting_ms(context, "2026-09-14") == 60 * 60 * 1000
-    assert gamify.force_balance(context, MONDAY)["duration_text"] == "1 sa 0 dk"
 
 
 def test_messages_sent_before_the_campaign_do_not_count(context, conn):
@@ -1291,3 +1196,294 @@ def test_the_record_does_not_credit_this_week_to_last_weeks_rank(context, conn):
     assert record["rank_before"]["code"] == "padawan"
     assert record["rank"]["code"] == "knight"
     assert record["rank_changed"] is True
+
+
+# --- silme: defter satiri ------------------------------------------------
+
+
+def ledger_of(context, source=""):
+    made = store.active_campaign(context.connection())
+    return store.list_events(context.connection(), made["id"], source)
+
+
+def test_deleting_a_ledger_line_lowers_the_total(context):
+    made = campaign(context)
+    close_task(context)
+    event = [e for e in ledger_of(context) if e["kind"] == gamify.KIND_DONE][0]
+
+    result = gamify.delete_event(context, event["id"], now=MONDAY)
+
+    assert result["event"]["points"] == 10
+    assert store.total_xp(context.connection(), made["id"]) == 3
+    assert gamify.KIND_DONE not in ledger_kinds(context)
+
+
+def test_a_deleted_event_scores_again_when_it_happens_again(context, conn):
+    """Silmek "bu olay hiç olmadı" demektir; olay tekrarlanirsa puan yeniden yazilir."""
+    made = campaign(context)
+    close_task(context)
+    event = [e for e in ledger_of(context) if e["kind"] == gamify.KIND_DONE][0]
+    gamify.delete_event(context, event["id"], now=MONDAY)
+    assert store.total_xp(conn, made["id"]) == 3
+
+    task = repo.list_tasks(conn)[0]
+    back = repo.move_task(conn, task["id"], status=repo.TASK_TODO)
+    again = repo.move_task(conn, task["id"], status=repo.TASK_DONE)
+    assert kinds(gamify.on_task_done(context, back, again, now=MONDAY)) == [gamify.KIND_DONE]
+    assert store.total_xp(conn, made["id"]) == 13
+
+
+def test_a_deleted_filter_drop_scores_again_on_the_next_drop(context, conn):
+    made = campaign(context)
+    group = repo.create_group(conn, "Açık işler", repo.KIND_FILTER, jql="project = DEMO")
+    gamify.on_refresh(context, refresh_result(group["id"]), now=MONDAY)
+    event = ledger_of(context, gamify.SOURCE_JIRA)[0]
+
+    gamify.delete_event(context, event["id"], now=MONDAY)
+    assert store.total_xp(conn, made["id"]) == 3
+
+    # Kayit yeniden filodan duserse puan yeniden yazilir.
+    assert gamify.on_refresh(context, refresh_result(group["id"]), now=MONDAY)["points"] == 15
+    assert store.total_xp(conn, made["id"]) == 18
+
+
+def test_deleting_a_streak_day_shortens_the_streak(context, conn):
+    made = campaign(context, now=datetime(2026, 9, 11, 10, 0))
+    close_task(context, "Cuma", now=datetime(2026, 9, 11, 10, 0))
+    close_task(context, "Pazartesi", now=MONDAY)
+    assert gamify.streak_state(context, store.active_campaign(conn), MONDAY)["days"] == 2
+
+    day_event = [e for e in ledger_of(context) if e["ref"] == "day:2026-09-14"][0]
+    gamify.delete_event(context, day_event["id"], now=MONDAY)
+
+    assert "2026-09-14" not in store.marked_days(conn, made["id"])
+    assert gamify.streak_state(context, store.active_campaign(conn), MONDAY)["days"] == 1
+    # Gun yeniden etkin olursa isaret ve puan geri gelir (iz birakilmaz).
+    gamify.evaluate(context, MONDAY, touched=True)
+    assert store.marked_days(conn, made["id"]).get("2026-09-14") == store.STREAK_ACTIVE
+    assert gamify.streak_state(context, store.active_campaign(conn), MONDAY)["days"] == 2
+
+
+def test_deleting_a_line_takes_the_badge_and_its_points_with_it(context, conn):
+    """Kosul artik saglanmiyorsa rozet de, rozetin puani da duser."""
+    campaign(context)
+    fill_events(context, gamify.KIND_DONE, 25)
+    gamify.evaluate(context, MONDAY)
+    assert gamify.BADGE_CLOSER in earned(context)
+    made = store.active_campaign(conn)
+    before = store.total_xp(conn, made["id"])
+
+    victim = [e for e in ledger_of(context) if e["ref"] == "x0"][0]
+    result = gamify.delete_event(context, victim["id"], now=MONDAY)
+
+    assert result["revoked"] == [gamify.BADGE_CLOSER]
+    assert gamify.BADGE_CLOSER not in earned(context)
+    # Bir dolgu puani (1) + rozet puani (10) dustu.
+    assert store.total_xp(conn, made["id"]) == before - 11
+    assert gamify.KIND_BADGE_EARNED not in ledger_kinds(context)
+
+
+def test_deleting_a_line_can_drop_the_rank(context, conn):
+    campaign(context, target=100)
+    fill_events(context, gamify.KIND_DONE, 1, prefix="big")
+    made = store.active_campaign(conn)
+    conn.execute("UPDATE xp_events SET points = 40 WHERE ref = 'big0'")
+    conn.commit()
+    assert gamify.panel(context, MONDAY)["rank"]["code"] == "knight"
+
+    event = [e for e in ledger_of(context) if e["ref"] == "big0"][0]
+    gamify.delete_event(context, event["id"], now=MONDAY)
+
+    assert gamify.panel(context, MONDAY)["rank"]["code"] == "padawan"
+
+
+def test_deleting_the_badge_line_revokes_the_badge(context, conn):
+    campaign(context)
+    fill_events(context, gamify.KIND_MAIL_FAST, 10, source=gamify.SOURCE_MAIL)
+    gamify.evaluate(context, MONDAY)
+    assert gamify.BADGE_FAST_REPLY in earned(context)
+
+    badge_event = [e for e in ledger_of(context) if e["ref"] == "badge:fast_reply"][0]
+    gamify.delete_event(context, badge_event["id"], now=MONDAY)
+    assert gamify.BADGE_FAST_REPLY not in earned(context)
+    assert gamify.KIND_BADGE_EARNED not in ledger_kinds(context)
+
+    # Kosul hala saglandigi icin rozet bir sonraki degerlendirmede geri gelir.
+    gamify.evaluate(context, MONDAY)
+    assert gamify.BADGE_FAST_REPLY in earned(context)
+
+
+def test_a_line_from_another_campaign_cannot_be_deleted(context, conn):
+    campaign(context, "Birinci", "2026-09-16", 500, now=MONDAY)
+    close_task(context, now=MONDAY)
+    old_event = ledger_of(context)[0]["id"]
+    gamify.ensure_campaign(context, datetime(2026, 9, 17, 9, 0))
+    campaign(context, "İkinci", "2026-12-31", 500, now=datetime(2026, 9, 17, 9, 0))
+
+    with pytest.raises(repo.RepositoryError) as err:
+        gamify.delete_event(context, old_event, now=datetime(2026, 9, 17, 9, 0))
+    assert err.value.code == "event_not_found"
+
+
+def test_the_api_deletes_a_ledger_line(api_client):
+    start_via_api(api_client)
+    task = api_client.post("/api/tasks", json={"title": "Rapor"}).json()["task"]
+    api_client.post(f"/api/tasks/{task['id']}/move", json={"status": "done"})
+    event = api_client.get("/api/campaign/ledger?source=task").json()["events"][0]
+
+    response = api_client.delete(f"/api/campaign/ledger/{event['id']}")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["deleted"]["id"] == event["id"]
+    assert data["panel"]["xp"] < 15
+    assert event["id"] not in [item["id"] for item in data["panel"]["ledger"]]
+
+
+def test_the_api_reports_a_missing_ledger_line(api_client):
+    start_via_api(api_client)
+    response = api_client.delete("/api/campaign/ledger/9999")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "event_not_found"
+
+
+# --- silme: gecmis sefer -------------------------------------------------
+
+
+def test_deleting_a_past_campaign_takes_its_ledger_with_it(context, conn):
+    campaign(context, "Birinci", "2026-09-16", 500, now=MONDAY)
+    close_task(context, now=MONDAY)
+    made = store.active_campaign(conn)
+    store.earn_badge(conn, made["id"], gamify.BADGE_CLOSER, MONDAY.isoformat())
+    store.add_quest(conn, made["id"], "2026-09-14", "overdue", "Kapat", 1, 25)
+    gamify.ensure_campaign(context, datetime(2026, 9, 17, 9, 0))
+
+    gamify.delete_history(context, made["id"])
+
+    assert gamify.history(context) == []
+    assert store.get_campaign(conn, made["id"]) is None
+    for table in ("xp_events", "badges", "quests", "streaks"):
+        rows = conn.execute(
+            f"SELECT COUNT(*) AS c FROM {table} WHERE campaign_id = ?", (made["id"],)
+        ).fetchone()["c"]
+        assert rows == 0, table
+
+
+def test_a_running_campaign_cannot_be_deleted_from_the_history(context):
+    made = campaign(context)
+    with pytest.raises(repo.RepositoryError) as err:
+        gamify.delete_history(context, made["id"])
+    assert err.value.code == "campaign_active"
+    assert store.active_campaign(context.connection()) is not None
+
+
+def test_the_api_deletes_a_past_campaign(api_client):
+    start_via_api(api_client, name="Birinci")
+    api_client.post("/api/campaign/end")
+    history = api_client.get("/api/campaign/history").json()["campaigns"]
+    assert len(history) == 1
+
+    response = api_client.delete(f"/api/campaign/history/{history[0]['id']}")
+    assert response.status_code == 200, response.text
+    assert response.json()["campaigns"] == []
+    assert api_client.get("/api/campaign/history").json()["campaigns"] == []
+
+
+def test_the_api_refuses_to_delete_a_running_campaign(api_client):
+    data = start_via_api(api_client)
+    response = api_client.delete(f"/api/campaign/history/{data['campaign']['id']}")
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "campaign_active"
+
+
+def test_the_delete_controls_are_on_the_page(api_client):
+    script = api_client.get("/static/js/campaign.js").text
+    for marker in (
+        "function dropLedgerEvent",
+        "function dropHistory",
+        "/api/campaign/ledger/",
+        "/api/campaign/history/",
+        "Bu XP silinecek.",
+        "defteri ve rozetleriyle silinecek",
+        '"Bu XP\'yi sil"',
+        '"Bu seferi sil"',
+    ):
+        assert marker in script, marker
+    css = api_client.get("/static/css/app.css").text
+    assert ".line-drop" in css
+
+
+# --- arama suresine bagli her sey kalkti ---------------------------------
+
+
+def test_nothing_reads_the_call_durations_any_more(api_client):
+    """Güç dengesi, odak bütçesi ve Denge rozeti Sefer'den tamamen çıktı."""
+    start_via_api(api_client)
+    panel = api_client.get("/api/campaign").json()
+    assert "force" not in panel
+    assert [badge["code"] for badge in panel["badges"]].count("balance") == 0
+
+    rules = api_client.get("/api/campaign/rules").json()
+    assert "focus_hours" not in rules
+
+    for name in ("gamify.py", "gamify_repo.py", "api_gamify.py"):
+        source = (
+            Path(__file__).resolve().parent.parent / "app" / name
+        ).read_text(encoding="utf-8")
+        for word in ("force_balance", "focus_hours", "teams_calls", "duration_ms", "balance"):
+            assert word not in source, f"{name}: {word}"
+
+    page = api_client.get("/").text
+    section = page.split('id="campaign-view"')[1].split("</section>")[0]
+    for word in ("Güç dengesi", "force", "toplantı"):
+        assert word not in section, word
+    script = api_client.get("/static/js/campaign.js").text
+    for word in ("force", "meeting", "toplantı"):
+        assert word not in script, word
+    settings_page = api_client.get("/settings").text
+    assert "odak bütçesi" not in settings_page
+    assert "campaign-focus" not in settings_page
+
+
+def test_asking_for_status_still_scores(api_client, context):
+    """Arama SURESI kalkti ama "son durum sordum" eylemi puan vermeye devam eder."""
+    campaign(context)
+    assert gamify.on_status_asked(context, "DEMO-1", now=MONDAY) is not None
+    assert gamify.KIND_STATUS_ASKED in ledger_kinds(context)
+
+
+def test_the_balance_badge_image_is_not_expected_any_more():
+    readme = (Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
+    assert "badge-balance" not in readme
+    assert "`balance`" not in readme
+    assert len(gamify.BADGES) == 11
+
+
+def test_the_rank_image_is_cropped_into_its_ring(api_client):
+    """Kare PNG halkanın dışına taşmasın: kap daire, görsel kırpılmış.
+
+    Halka ve parlama görselin ÜSTÜNDE değil çevresinde durur; kutu gölgesi
+    `overflow: hidden` ile kırpılmaz, kenar çemberi `::after` ile çizilir.
+    """
+    css = api_client.get("/static/css/app.css").text
+    rank = css.split(".rank-art {")[1].split("}")[0]
+    assert "overflow: hidden" in rank
+    assert "border-radius: 50%" in rank
+    assert "position: relative" in rank
+
+    art = css.split(".rank-art img {")[1].split("}")[0]
+    assert "object-fit: cover" in art
+    assert "width: 100%" in art and "height: 100%" in art
+    assert "display: block" in art
+
+    # Halka görselin üstüne binmez: ayrı bir katman olarak kenarda durur.
+    assert ".rank-art::after" in css
+    ring = css.split(".rank-art::after {")[1].split("}")[0]
+    assert "border: 2px solid var(--accent)" in ring
+    assert "border-radius: 50%" in ring
+
+    # Rozet duvarı da aynı kuralı izler.
+    badge = css.split(".badge-art {")[1].split("}")[0]
+    assert "overflow: hidden" in badge and "border-radius: 50%" in badge
+    badge_img = css.split(".badge-art img {")[1].split("}")[0]
+    assert "object-fit: cover" in badge_img
+    assert ".badge-tile.earned .badge-art::after" in css
