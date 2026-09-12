@@ -138,7 +138,7 @@ CSS_VARIABLES = (
     "--font:", "--display:",
 )
 
-SCRIPTS = ("common.js", "app.js", "settings.js", "starfield.js")
+SCRIPTS = ("common.js", "app.js", "settings.js", "starfield.js", "calls.js")
 
 
 def test_fonts_and_their_licenses_ship_with_the_app():
@@ -419,6 +419,166 @@ def test_task_board_styles_are_defined(api_client):
     assert "@media (max-width: 900px)" in css
     stacked = css.split("@media (max-width: 900px)", 1)[1].split("}", 2)[0]
     assert "grid-template-columns: 1fr" in stacked
+
+
+# --- Asama 9: Teams Aramalar --------------------------------------------
+
+
+def test_calls_entry_sits_under_the_task_board(api_client):
+    page = api_client.get("/").text
+    entry = page.split('id="group-list"')[0]
+    assert 'id="calls-entry"' in entry, "Teams Aramalar satırı grup listesinin üstünde olmalı"
+    assert "Teams Aramalar" in entry
+    assert 'id="calls-badge"' in entry
+    # Gorevlerim sari, Aramalar beyaz serit tasir.
+    tasks_at = entry.index('id="tasks-entry"')
+    calls_at = entry.index('id="calls-entry"')
+    assert tasks_at < calls_at, "Aramalar satırı Görevlerim'in altında durmalı"
+    assert "color-white" in entry[calls_at:]
+
+
+def test_calls_view_hooks_are_on_the_page(api_client):
+    page = api_client.get("/").text
+    for marker in (
+        'id="calls-view"',
+        "TEAMS ARAMALAR",
+        'id="calls-window"',
+        'id="calls-search"',
+        'id="calls-scan"',
+        "Aramaları çek",
+        'id="calls-export"',
+        'id="calls-stats"',
+        'id="calls-tab-list"',
+        'id="calls-tab-people"',
+        ">Liste<",
+        ">Kişiler<",
+        'id="calls-table"',
+        'id="calls-drawer"',
+        '/static/js/calls.js',
+    ):
+        assert marker in page, marker
+
+
+def test_calls_script_covers_the_strip_the_tabs_and_the_drawer(api_client):
+    script = api_client.get("/static/js/calls.js").text
+    for marker in (
+        "/api/calls",
+        "/api/calls/stats",
+        "/api/calls/scan",
+        "/api/calls/person/",
+        "calls/export.xlsx",
+        "function renderCallStats",
+        "function renderCallList",
+        "function renderCallPeople",
+        "function openCallPerson",
+        "function openCallDetail",
+        '"En çok görüşülen"',
+        '"Dağılım"',
+        '"Aradım / Arandım"',
+        '"Toplam temas"',
+        '"İş günü başına"',
+        "Kaçırılan",
+        "CALL_WINDOWS = [7, 30, 90]",
+    ):
+        assert marker in script, marker
+    # Yon ikonlari ve kisi baglantisi.
+    for marker in ('"↗"', '"↙"', "call-person"):
+        assert marker in script, marker
+    # Ham kimlik hicbir yerde cizilmez: sunucunun verdigi etiketler kullanilir.
+    assert "counterpart_label" in script
+    assert "participant_names" in script
+    assert "counterpart_name" not in script
+
+
+def test_calls_styles_are_defined(api_client):
+    css = api_client.get("/static/css/app.css").text
+    for name in (
+        "#calls-view",
+        ".window-picker",
+        ".stats-strip",
+        ".stat-card",
+        ".stat-figure",
+        ".split-bar",
+        ".split-meeting",
+        ".split-group_call",
+        ".split-one_to_one",
+        ".tab.on",
+        ".call-dir.out",
+        ".call-dir.in",
+        ".call-kind.kind-meeting",
+        ".call-state.state-Missed",
+        ".call-line",
+    ):
+        assert name in css, name
+    # Kart basliklari Pathway Gothic One, sayilar mono.
+    head = css.split(".stat-card h3 {", 1)[1].split("}", 1)[0]
+    assert "font-family: var(--display);" in head
+    figure = css.split(".stat-figure {", 1)[1].split("}", 1)[0]
+    assert "font-family: var(--mono);" in figure
+    # 1024'te bes kart iki satira iner.
+    narrow = css.split("@media (max-width: 1024px) {", 1)[1]
+    assert ".stats-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }" in narrow
+
+
+def test_the_drawer_can_be_widened_and_remembers_it(api_client):
+    script = api_client.get("/static/js/common.js").text
+    for marker in (
+        'DRAWER_WIDTH_KEY = "holocron.drawer.width"',
+        "DRAWER_DEFAULT_WIDTH = 440",
+        "DRAWER_MIN_WIDTH = 360",
+        "DRAWER_STEP = 20",
+        "pointerdown",
+        "pointermove",
+        "pointerup",
+        "setPointerCapture",
+        "dblclick",
+        "ArrowLeft",
+        "ArrowRight",
+        "localStorage.getItem",
+        "localStorage.setItem",
+        "function bindDrawerResize",
+    ):
+        assert marker in script, marker
+    # Depolama kapaliysa sessizce gecilir.
+    assert script.count("try {") >= 4
+    # En fazla 90vw / 1400px.
+    assert "Math.min(window.innerWidth * 0.9, 1400)" in script
+    # Tutamak her cekmeceye takilir ve acilista uygulanir.
+    assert "document.querySelectorAll(\".drawer\").forEach(addDrawerHandle)" in script
+    assert "bindDrawerResize();" in script
+
+    css = api_client.get("/static/css/app.css").text
+    assert ".drawer-handle" in css
+    assert "cursor: col-resize" in css
+    assert "width: 6px" in css
+    assert "var(--drawer-width" in css
+    # Surüklerken gecis kapali.
+    resizing = css.split("html.drawer-resizing .drawer {", 1)[1].split("}", 1)[0]
+    assert "transition: none" in resizing
+    assert "animation: none" in resizing
+
+
+def test_the_calls_cache_path_can_be_set_on_the_settings_page(api_client):
+    page = api_client.get("/settings").text
+    for marker in (
+        'id="calls-cache-path"',
+        'id="calls-scan-on-refresh"',
+        'id="calls-unsupported"',
+        "Arama geçmişi",
+    ):
+        assert marker in page, marker
+    script = api_client.get("/static/js/settings.js").text
+    assert '"calls.cache_path"' in script
+    assert '"calls.scan_on_refresh"' in script
+    assert "calls_supported" in script
+
+
+def test_calls_texts_are_proper_turkish(api_client):
+    page = api_client.get("/").text
+    for marker in ("Teams Aramalar", "Aramaları çek", "Kişiler"):
+        assert marker in page, marker
+    for word in ("Aramalari", "Kisiler", "Toplanti", "Sure"):
+        assert word not in page, word
 
 
 # --- Ag teshisi: kurum agi denetimleri ----------------------------------

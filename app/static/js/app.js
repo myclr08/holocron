@@ -171,7 +171,7 @@ function renderGroups() {
       {
         class:
           "group-item" +
-          (state.view !== "tasks" && group.id === state.activeId ? " active" : ""),
+          (state.view === "groups" && group.id === state.activeId ? " active" : ""),
         title: group.kind === "filter" ? group.jql : "Manuel grup",
         onclick: () => selectGroup(group.id),
       },
@@ -224,7 +224,7 @@ async function move(index, delta) {
 }
 
 function showPlaceholder() {
-  if (state.view === "tasks") return;
+  if (state.view === "tasks" || state.view === "calls") return;
   state.activeId = null;
   state.group = null;
   el("placeholder").hidden = false;
@@ -234,7 +234,10 @@ function showPlaceholder() {
 async function selectGroup(groupId, keepView) {
   const changing = state.activeId !== groupId;
   // Arka planda tazeleme (keepView) gorev panosunu kapatmaz; grubu tiklamak kapatir.
-  if (!keepView) leaveTasks();
+  if (!keepView) {
+    leaveTasks();
+    if (typeof leaveCalls === "function") leaveCalls();
+  }
   state.activeId = groupId;
   if (changing || !keepView) {
     state.query = "";
@@ -242,7 +245,7 @@ async function selectGroup(groupId, keepView) {
     state.sort = null;
   }
   el("placeholder").hidden = true;
-  if (state.view !== "tasks") el("group-view").hidden = false;
+  if (state.view !== "tasks" && state.view !== "calls") el("group-view").hidden = false;
   renderGroups();
   await loadIssues();
 }
@@ -1765,6 +1768,8 @@ function dateText(iso) {
 }
 
 function showTasks() {
+  // Teams Aramalar ekrani aciksa once o kapanir: iki gorunum ayni alanda.
+  if (typeof leaveCalls === "function") leaveCalls();
   state.view = "tasks";
   el("placeholder").hidden = true;
   el("group-view").hidden = true;

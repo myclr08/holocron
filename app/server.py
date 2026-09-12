@@ -14,6 +14,7 @@ from .context import AppContext
 from .jira_client import JiraError
 from .mail import MailError
 from .repository import RepositoryError
+from .teamscalls import CallsError
 
 
 def create_app(context: AppContext) -> FastAPI:
@@ -33,6 +34,13 @@ def create_app(context: AppContext) -> FastAPI:
 
     @app.exception_handler(MailError)
     async def _mail_error(_: Request, exc: MailError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status,
+            content={"error": {"code": exc.code, "message": exc.message}},
+        )
+
+    @app.exception_handler(CallsError)
+    async def _calls_error(_: Request, exc: CallsError) -> JSONResponse:
         return JSONResponse(
             status_code=exc.status,
             content={"error": {"code": exc.code, "message": exc.message}},

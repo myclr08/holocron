@@ -13,7 +13,8 @@ uygulamanın yanındaki `holocron.db` dosyasında kalır, hiçbir yere gönderil
 Gruplar (manuel ve JQL filtresi), kayıt listesi, sütun seçici, arama, arka
 planda çalışan **Güncelle** işi, kendi tanımladığınız **yerel alanlar** (alan
 başına değişim geçmişiyle), kişisel kanban panosu (**Görevlerim**), **Outlook e-postalarından görev
-üretme** (yalnız Windows), **kayıttan Teams'e mesaj**, **Excel'e aktarma** ve tam tema
+üretme** (yalnız Windows), **kayıttan Teams'e mesaj**, **Teams arama geçmişi** (yalnız Windows),
+**Excel'e aktarma** ve tam tema
 kullanılabilir durumda. Taşınabilir Windows/Linux paketleri etiket itildiğinde üretilir.
 
 ## Gereksinimler
@@ -483,6 +484,82 @@ paketine girer (`requirements.txt` içinde `sys_platform == "win32"` işaretçis
 vardır), Linux zip'ine alınmaz. Ayrı bir `pywin32_postinstall` adımı
 **gerekmez**: `win32com` site-packages'tan olduğu gibi çalışır.
 
+### Teams Aramalar (yalnız Windows)
+
+Sol kenarda, **Görevlerim**'in altında duran **Teams Aramalar**, Teams
+istemcisinin *Aramalar → Geçmiş* ekranında zaten gördüğünüz **kendi** arama
+geçmişinizi yerelde tablo ve istatistik olarak gösterir.
+
+> **Nereden okur.** Yeni Teams, sohbet/arama/takvim verisini kendi makinenizde
+> bir Chromium **IndexedDB** klasöründe tutar:
+> `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView\WV2Profile_tfw\IndexedDB\https_teams.microsoft.com_0.indexeddb.leveldb`
+> (yanındaki `.blob` klasörüyle birlikte). Holocron o klasörü
+> **okur** — ağa çıkmaz, Graph API kullanmaz, izin istemez, hiçbir şey
+> göndermez. Bu düzenin nasıl göründüğü (hangi veritabanı, hangi store, hangi
+> alan adları) açık kaynak adli analiz araçlarının belgelediği yapıdır;
+> Holocron o yapıyı okur, tahmin etmez.
+
+Nasıl çalışır:
+
+- **Çekme.** **Aramaları çek** düğmesi klasörü önce `%TEMP%` altına kopyalar
+  (Teams açıkken dosyalar kilitli olabilir), kopyalanamayan dosyayı atlar,
+  kopya okunamazsa canlı klasörü bir kez daha dener. Özet satırı kaç kayıt
+  okunduğunu, kaçının yeni olduğunu ve kaç toplantının eşleştiğini söyler.
+  Aynı önbelleği ikinci kez taramak kopya oluşturmaz: tekilleştirme
+  `callId` üzerindendir.
+- **Tür.** `TwoParty` **birebir** görüşmedir. `MultiParty` ise takvimde aynı
+  saate (± 10 dakika) denk gelen bir kayıt varsa **toplantı** (konusu ve
+  organizatörü de oradan gelir), yoksa **grup araması** sayılır. Yineleyen
+  serinin şablonu ve "ofiste değilim" kayıtları eşleşmeye girmez.
+- **Süre.** Kayıtta `durationInMs` varsa o, yoksa *bitiş − bağlanma*, o da
+  yoksa *bitiş − başlangıç*. Kaçırılan ve reddedilen aramanın süresi yoktur;
+  bunlar **temas süresine girmez**, ayrı sayılır.
+- **Karşı taraf.** Gelen aramada arayan, giden aramada aranan. Ad, Teams'in
+  profil/kişi store'larından çözülür; çözülemezse kaydın kendi adı kullanılır.
+  Bir kişiyle bir kez birebir görüştüyseniz adı, sonraki grup aramalarının
+  başlığında da çıkar (ad sözlüğü kayıtlı satırlardan yeniden kurulur).
+- **İstatistik şeridi.** En çok görüşülen beş kişi (yalnız birebir), üç dilim
+  (toplantı / grup / birebir — yüzde ve saat), aradım/arandım (bağlanan sayı
+  ve süre, kaçırılan ve reddedilen ayrı), toplam temas süresi ve **iş günü
+  başına ortalama** + en yoğun gün. İş günü Pazartesi-Cuma sayılır, resmî
+  tatiller düşülmez.
+- **Kim görünür.** Birebir görüşmede karşı tarafın adı yazar. Çok kişili
+  aramada "karşı taraf" diye bir şey yoktur: toplantıda **konu**, grup
+  aramasında **katılımcı adları** (en fazla üç ad, kalanı `+N`), katılımcı
+  kaydedilmemişse "Grup araması" görünür. Adı çözülemeyen bir kimlik hiçbir
+  yerde ham gösterilmez; "Bilinmeyen kişi (son altı hane)" yazar. Arama
+  kutusu katılımcı adlarında da arar.
+- **Sekmeler.** **Liste** her aramayı tarih, yön (↗ / ↙), karşı taraf ya da
+  toplantı/katılımcı adı, tür, durum ve süreyle gösterir. **Kişiler** aynı pencereyi
+  kişi başına toplar (sayı, süre, giden/gelen, kaçırılan) ve başlığa tıklayarak
+  sıralanır.
+- **Çekmece.** Kişi satırına ya da listede bir ada tıklamak sağdan kişi
+  çekmecesini açar: özet (toplam süre, sayı, giden/gelen, kaçırılan, en uzun,
+  son görüşme), o kişiyle bütün görüşmeler ve katıldığı grup/toplantılar.
+  Toplantı satırı organizatör, yanıt ve (kayıtta varsa) katılımcıları gösterir.
+- **Pencere.** 7 / 30 / 90 gün. Arama kutusu (`/` kısayolu) kişi adı, toplantı
+  konusu ve organizatör üzerinde süzer.
+- **Excel.** **Excel'e aktar** üç sayfalık bir dosya verir: **Aramalar**,
+  **Kişiler**, **İstatistik**. Doğrudan da indirilebilir:
+  `GET /api/calls/export.xlsx?days=30`
+- **Ayarlar.** **Ayarlar → Teams → Arama geçmişi** altında önbellek klasörünü
+  elle verebilir (boş bırakırsanız varsayılan yol kullanılır) ve
+  **Güncelle** işinin sonunda otomatik çekmeyi açabilirsiniz (varsayılan
+  kapalı: kopyalama birkaç saniye sürüyor).
+
+Windows dışında ekran açılır ama **Aramaları çek** pasiftir ve uçlar
+`feature_unavailable` döner. IndexedDB okuyucusu (`ccl_chromium_reader`)
+`app/vendor/` altında taşınır, `pip` gerektirmez ve yalnızca çağrı anında
+yüklenir.
+
+### Sağ çekmeceleri genişletme
+
+Bütün sağ çekmecelerin (kayıt detayı, Teams aramaları) sol kenarında ince bir
+tutamaç vardır: sürükleyerek genişliği değiştirirsiniz. En az 360 piksel, en
+çok ekranın %90'ı (ya da 1400 piksel). Ölçü tarayıcıda saklanır ve bir sonraki
+açılışta uygulanır; **çift tıklamak** varsayılan 440 piksele döner. Tutamaç
+klavyeyle de odaklanır: ok tuşları 20'şer piksel kaydırır.
+
 ### Güncelle
 
 **Güncelle** bütün grupları, **Güncelle (bu grup)** yalnız açık olanı tazeler.
@@ -594,9 +671,14 @@ değiştirilir (`tests/fake_jira.py`).
 | `app/mail/` | Outlook'tan görev üretme (kaynak sözleşmesi, COM sarmalayıcı, iş mantığı) |
 | `app/mail/intake.py` | Eşleştirme, tekilleştirme, görev üretimi (COM'dan bağımsız) |
 | `app/mail/outlook.py` | Outlook COM sarmalayıcısı (yalnız Windows) |
+| `app/teamscalls/` | Teams arama geçmişi (kaynak sözleşmesi, önbellek okuyucu, iş mantığı) |
+| `app/teamscalls/intake.py` | Normalize, tür kararı, istatistik (IndexedDB'den bağımsız) |
+| `app/teamscalls/teams_cache.py` | Teams'in yerel IndexedDB önbelleği (yalnız Windows) |
+| `app/vendor/` | Kurulum gerektirmeyen IndexedDB okuyucusu (MIT, `app/vendor/README.md`) |
 | `app/static/` | Vanilla HTML/CSS/JS arayüz, dış bağımlılık yok |
 | `app/static/fonts/` | Gömülü OFL yazı tipleri ve lisans metinleri |
 | `app/static/js/starfield.js` | Arka plandaki yıldız alanı (canvas) |
+| `app/static/js/calls.js` | Teams Aramalar ekranı (istatistik şeridi, sekmeler, çekmece) |
 | `tests/` | pytest testleri ve sahte Jira sunucusu |
 | `tools/build_portable.py` | Taşınabilir Windows/Linux paketlerini üretir |
 | `holocron.db` | Yerel veritabanı (depoya girmez) |

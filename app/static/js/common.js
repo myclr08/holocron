@@ -135,10 +135,136 @@ function saveSetting(key, value) {
   return api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
 }
 
+// --- cekmece genisligi --------------------------------------------------
+//
+// Butun sag cekmeceler (kayit detayi, Teams aramalari) ayni genisligi
+// paylasir: sol kenardaki tutamac surüklenir, olculen deger tarayicida
+// saklanir. Depolama kapaliysa (gizli pencere, silinmis site verisi)
+// okuma/yazma sessizce basarisiz olur ve varsayilan genislik kalir.
+
+const DRAWER_WIDTH_KEY = "holocron.drawer.width";
+const DRAWER_DEFAULT_WIDTH = 440;
+const DRAWER_MIN_WIDTH = 360;
+// Tutamac odakliyken ok tuslari bu kadar kaydirir.
+const DRAWER_STEP = 20;
+
+function drawerMaxWidth() {
+  return Math.min(window.innerWidth * 0.9, 1400);
+}
+
+function clampDrawerWidth(px) {
+  const max = Math.max(DRAWER_MIN_WIDTH, drawerMaxWidth());
+  return Math.round(Math.min(Math.max(Number(px) || 0, DRAWER_MIN_WIDTH), max));
+}
+
+function readDrawerWidth() {
+  try {
+    const stored = Number(localStorage.getItem(DRAWER_WIDTH_KEY));
+    if (stored > 0) return clampDrawerWidth(stored);
+  } catch (err) {
+    // Depolama kapali: varsayilan genislik kullanilir.
+  }
+  return 0;
+}
+
+function storeDrawerWidth(px) {
+  try {
+    localStorage.setItem(DRAWER_WIDTH_KEY, String(px));
+  } catch (err) {
+    // Yazilamadi; genislik yalnizca bu oturumda gecerli olur.
+  }
+}
+
+function applyDrawerWidth(px) {
+  document.documentElement.style.setProperty("--drawer-width", px + "px");
+}
+
+function setDrawerWidth(px, save) {
+  const width = clampDrawerWidth(px);
+  applyDrawerWidth(width);
+  if (save) storeDrawerWidth(width);
+  return width;
+}
+
+function currentDrawerWidth() {
+  const drawer = document.querySelector(".drawer:not([hidden])");
+  if (drawer) {
+    const box = drawer.getBoundingClientRect();
+    if (box.width) return box.width;
+  }
+  return readDrawerWidth() || DRAWER_DEFAULT_WIDTH;
+}
+
+/** Tek bir cekmeceye tutamak ekler (iki kez eklenmez). */
+function addDrawerHandle(drawer) {
+  if (!drawer || drawer.querySelector(".drawer-handle")) return;
+  const handle = document.createElement("div");
+  handle.className = "drawer-handle";
+  handle.tabIndex = 0;
+  handle.setAttribute("role", "separator");
+  handle.setAttribute("aria-orientation", "vertical");
+  handle.title = "Sürükleyerek genişlet · çift tık varsayılan · ok tuşları 20px";
+
+  let startX = 0;
+  let startWidth = 0;
+  let dragging = false;
+
+  handle.addEventListener("pointerdown", (event) => {
+    dragging = true;
+    startX = event.clientX;
+    startWidth = currentDrawerWidth();
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch (err) {
+      // Yakalama desteklenmiyorsa fare yine de izlenir.
+    }
+    // Surüklerken gecis animasyonu kapali: cekmece elin arkasindan gelmesin.
+    document.documentElement.classList.add("drawer-resizing");
+    event.preventDefault();
+  });
+
+  handle.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    setDrawerWidth(startWidth + (startX - event.clientX), false);
+  });
+
+  const stop = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    try {
+      handle.releasePointerCapture(event.pointerId);
+    } catch (err) {
+      // Yakalama zaten birakilmis olabilir.
+    }
+    document.documentElement.classList.remove("drawer-resizing");
+    storeDrawerWidth(clampDrawerWidth(currentDrawerWidth()));
+  };
+
+  handle.addEventListener("pointerup", stop);
+  handle.addEventListener("pointercancel", stop);
+  handle.addEventListener("dblclick", () => setDrawerWidth(DRAWER_DEFAULT_WIDTH, true));
+  handle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const delta = event.key === "ArrowLeft" ? DRAWER_STEP : -DRAWER_STEP;
+    setDrawerWidth(currentDrawerWidth() + delta, true);
+  });
+
+  drawer.insertBefore(handle, drawer.firstChild);
+}
+
+/** Saklanan genisligi uygular ve her cekmeceye tutamak takar. */
+function bindDrawerResize() {
+  const stored = readDrawerWidth();
+  if (stored) applyDrawerWidth(stored);
+  document.querySelectorAll(".drawer").forEach(addDrawerHandle);
+}
+
 function bindShell() {
   const closeButton = document.querySelector("[data-action='shutdown']");
   if (closeButton) closeButton.addEventListener("click", shutdown);
   if (typeof Starfield !== "undefined") Starfield.mount(document.getElementById("starfield"));
+  bindDrawerResize();
   startHeartbeat();
 }
 

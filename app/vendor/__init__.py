@@ -2,7 +2,7 @@
 
 `pip` kurum vekil sunucusunda takilabildigi ve tasinabilir paket cevrimdisi
 acildigi icin IndexedDB okuyucusu burada tasiniyor. Yol `sys.path`e yalnizca
-gerektiginde eklenir: `app/teamscalls/reader.py` icindeki `ensure_path()`.
+gerektiginde eklenir: `app/teamscalls/teams_cache.py` icindeki `ensure_path()`.
 
 Kaynak, surum ve lisanslar icin `README.md`.
 """

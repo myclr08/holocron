@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .mail.source import is_supported as mail_supported
+from .teamscalls.source import is_supported as calls_supported
 from .secrets import SecretBox, SecretError
 
 MODE_CLOUD = "cloud"
@@ -63,13 +64,24 @@ DEFAULTS: dict[str, str] = {
     "mail.scan_on_refresh": "1",
     # Teams: grup sohbetinin konu adi bicimi (sablon yer tutuculari gecerli).
     "teams.topic_format": "{key}",
+    # Teams aramalari: onbellek yolu (bos = varsayilan), Guncelle ile tarama.
+    "calls.cache_path": "",
+    "calls.scan_on_refresh": "0",
+    # Arama gecmisi en son ne zaman cekildi (bos = hic).
+    "calls.scanned_at": "",
     # Kurum rehberi en son ne zaman cekildi (bos = hic).
     "teams.gal_synced_at": "",
 }
 
 # "1"/"0" olarak saklanan anahtarlar: arayuz bazen gercek boolean gonderir.
 BOOLEAN_KEYS: frozenset[str] = frozenset(
-    {"net.verify_ssl", "net.ipv4_first", "mail.enabled", "mail.scan_on_refresh"}
+    {
+        "net.verify_ssl",
+        "net.ipv4_first",
+        "mail.enabled",
+        "mail.scan_on_refresh",
+        "calls.scan_on_refresh",
+    }
 )
 
 # Arayuzun gonderebilecegi duz ayarlar; buradaki liste beyaz listedir.
@@ -167,6 +179,8 @@ class SettingsStore:
         data["secret_set"] = self.has_secret("jira.secret")
         # Arayuz karti buna bakar: Windows disinda dugmeler pasif kalir.
         data["mail_supported"] = mail_supported()
+        # Teams arama gecmisi de yerel onbellek okur: ayni sart.
+        data["calls_supported"] = calls_supported()
         return data
 
     def apply(self, payload: dict[str, Any]) -> None:

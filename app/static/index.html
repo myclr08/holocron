@@ -57,6 +57,13 @@
         <span class="name">Görevlerim</span>
         <span class="count" id="tasks-badge">0</span>
       </div>
+      <!-- Teams Aramalar da sabit satir: Gorevlerim'in hemen altinda. -->
+      <div class="tasks-entry" id="calls-entry" role="button" tabindex="0"
+           title="Teams arama geçmişiniz">
+        <span class="color-strip color-white"></span>
+        <span class="name">Teams Aramalar</span>
+        <span class="count" id="calls-badge">0</span>
+      </div>
       <div id="group-list"></div>
     </aside>
 
@@ -150,6 +157,41 @@
 
         <div class="kanban" id="kanban"></div>
       </section>
+
+      <section id="calls-view" hidden>
+        <div class="group-head">
+          <div class="group-title">
+            <span class="color-strip color-white"></span>
+            <h2>TEAMS ARAMALAR</h2>
+            <span class="badge" id="calls-count"></span>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <div class="window-picker" id="calls-window" role="group" aria-label="Zaman penceresi"></div>
+          <input type="search" id="calls-search" placeholder="Ara ( / )" autocomplete="off" />
+          <button class="primary" id="calls-scan" title="Teams'in yerel önbelleğinden arama geçmişini çeker">Aramaları çek</button>
+          <button id="calls-export" title="Aramaları Excel dosyası olarak indir">Excel'e aktar</button>
+          <span class="hint" id="calls-hint"></span>
+        </div>
+
+        <div class="stats-strip" id="calls-stats"></div>
+
+        <div class="tabs" id="calls-tabs" role="tablist">
+          <button class="tab on" id="calls-tab-list" role="tab" aria-selected="true">Liste</button>
+          <button class="tab" id="calls-tab-people" role="tab" aria-selected="false">Kişiler</button>
+        </div>
+
+        <div class="grid-wrap">
+          <table class="grid calls-grid" id="calls-table">
+            <thead><tr id="calls-head"></tr></thead>
+            <tbody id="calls-body"></tbody>
+          </table>
+          <div class="empty" id="calls-empty" hidden>
+            <p id="calls-empty-text">Bu pencerede arama yok.</p>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -166,6 +208,17 @@
       Boş alanları da göster
     </label>
     <div class="drawer-body" id="drawer-body"></div>
+  </aside>
+
+  <aside class="drawer" id="calls-drawer" hidden>
+    <header class="drawer-head">
+      <div class="drawer-title">
+        <strong id="calls-drawer-title"></strong>
+        <span class="badge" id="calls-drawer-kind"></span>
+      </div>
+      <button id="calls-drawer-close" title="Kapat (Esc)">✕</button>
+    </header>
+    <div class="drawer-body" id="calls-drawer-body"></div>
   </aside>
 
   <div class="modal-backdrop" id="modal" hidden>
@@ -222,5 +275,6 @@
   <script src="/static/js/starfield.js"></script>
   <script src="/static/js/common.js"></script>
   <script src="/static/js/app.js"></script>
+  <script src="/static/js/calls.js"></script>
 </body>
 </html>

@@ -2076,6 +2076,125 @@ def list_sent_messages(
     ]
 
 
+# --- Teams arama gecmisi ------------------------------------------------
+#
+# Tekillestirmenin otoritesi `call_id`: ayni onbellek iki kez taranirsa satir
+# yeniden yazilir, kopya birikmez. Satirlar yalnizca yerel onbellekten gelir;
+# hicbiri disariya gonderilmez.
+
+CALL_COLUMNS: tuple[str, ...] = (
+    "call_id",
+    "started_at",
+    "ended_at",
+    "connected_at",
+    "duration_ms",
+    "direction",
+    "state",
+    "kind",
+    "counterpart_id",
+    "counterpart_name",
+    "forwarded",
+    "meeting_subject",
+    "meeting_organizer",
+    "my_response",
+    "participants_json",
+    "raw_json",
+    "seen_at",
+)
+
+
+def _call_dict(row: sqlite3.Row) -> dict[str, Any]:
+    data = {name: row[name] for name in CALL_COLUMNS}
+    data["duration_ms"] = int(data["duration_ms"] or 0)
+    for name in CALL_COLUMNS:
+        if name != "duration_ms" and data[name] is None:
+            data[name] = ""
+    return data
+
+
+def import_calls(conn: sqlite3.Connection, rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """Normalize edilmis satirlari yazar; `call_id` ile tekillestirir."""
+    prepared = [row for row in rows if str(row.get("call_id") or "").strip()]
+    if not prepared:
+        return {"scanned": 0, "new": 0, "updated": 0}
+
+    # Hangisi yeni, hangisi guncelleme: once bilinenler okunur. Sorgu
+    # parcalara bolunur; sqlite'in degisken sayisi siniri eski surumlerde 999.
+    ids = [str(row["call_id"]) for row in prepared]
+    known: set[str] = set()
+    for start in range(0, len(ids), 400):
+        chunk = ids[start : start + 400]
+        known.update(
+            str(item["call_id"])
+            for item in conn.execute(
+                "SELECT call_id FROM teams_calls WHERE call_id IN ({})".format(
+                    ",".join("?" for _ in chunk)
+                ),
+                chunk,
+            ).fetchall()
+        )
+
+    statement = (
+        "INSERT INTO teams_calls ({names}) VALUES ({marks}) "
+        "ON CONFLICT(call_id) DO UPDATE SET {updates}"
+    ).format(
+        names=", ".join(CALL_COLUMNS),
+        marks=", ".join("?" for _ in CALL_COLUMNS),
+        updates=", ".join(
+            f"{name} = excluded.{name}" for name in CALL_COLUMNS if name != "call_id"
+        ),
+    )
+    with conn:
+        conn.executemany(
+            statement,
+            [
+                tuple(
+                    int(row.get(name) or 0)
+                    if name == "duration_ms"
+                    else str(row.get(name) or "")
+                    for name in CALL_COLUMNS
+                )
+                for row in prepared
+            ],
+        )
+
+    new = sum(1 for row in prepared if str(row["call_id"]) not in known)
+    return {"scanned": len(prepared), "new": new, "updated": len(prepared) - new}
+
+
+def list_calls(conn: sqlite3.Connection, since: str = "") -> list[dict[str, Any]]:
+    """Kayitli aramalar (yeniden eskiye). `since` ISO metnidir, bos = hepsi."""
+    marker = str(since or "").strip()
+    if marker:
+        rows = conn.execute(
+            "SELECT * FROM teams_calls WHERE started_at >= ? ORDER BY started_at DESC, call_id",
+            (marker,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM teams_calls ORDER BY started_at DESC, call_id"
+        ).fetchall()
+    return [_call_dict(row) for row in rows]
+
+
+def get_call(conn: sqlite3.Connection, call_id: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM teams_calls WHERE call_id = ?", (str(call_id or ""),)
+    ).fetchone()
+    return _call_dict(row) if row is not None else None
+
+
+def call_count(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT COUNT(*) AS n FROM teams_calls").fetchone()
+    return int(row["n"]) if row else 0
+
+
+def last_call_seen(conn: sqlite3.Connection) -> str:
+    """En son taramanin damgasi; arayuz "en son ne zaman cekildi" der."""
+    row = conn.execute("SELECT MAX(seen_at) AS stamp FROM teams_calls").fetchone()
+    return str(row["stamp"] or "") if row else ""
+
+
 # --- ic yardimcilar -----------------------------------------------------
 
 

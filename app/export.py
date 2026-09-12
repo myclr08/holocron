@@ -21,6 +21,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from . import __version__, fields as field_utils, grid, repository, tasks as task_utils
+from .teamscalls import intake as calls_intake
 
 MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -423,7 +424,17 @@ def _ordered_tasks(board: Any) -> list[dict[str, Any]]:
 
 def _write_task_cell(target: Any, value: Any, kind: str, tz: tzinfo | None) -> int:
     text = "" if value is None else str(value)
-    if kind == KIND_DATE:
+    if kind == KIND_NUMBER:
+        number = _as_int_or_float(value)
+        if number is not None:
+            target.value = number
+            return len(str(number))
+    elif kind == KIND_DECIMAL:
+        number = _as_decimal(value)
+        if number is not None:
+            target.value = number
+            return len(str(number))
+    elif kind == KIND_DATE:
         moment = field_utils.parse_moment(text)
         if moment is not None:
             target.value = moment.date()
@@ -440,6 +451,189 @@ def _write_task_cell(target: Any, value: Any, kind: str, tz: tzinfo | None) -> i
         return 0
     target.value = text
     return _display_width(text)
+
+
+# --- Teams aramalari: uc sayfa (Aramalar, Kisiler, Istatistik) -----------
+
+CALLS_SHEET = "Aramalar"
+CALLS_PEOPLE_SHEET = "Kişiler"
+CALLS_STATS_SHEET = "İstatistik"
+CALLS_NAME = "Teams-Aramalar"
+
+CALL_HEADERS = (
+    "Tarih",
+    "Yön",
+    "Karşı taraf",
+    "Tür",
+    "Durum",
+    "Süre",
+    "Süre (dk)",
+    "Toplantı",
+    "Organizatör",
+    "Yanıtım",
+)
+
+CALL_PEOPLE_HEADERS = ("Kişi", "Görüşme", "Süre", "Süre (dk)", "Giden", "Gelen", "Kaçırılan")
+
+# Hucre tipleri; geri kalani metin.
+CALL_KINDS = {0: KIND_DATETIME, 6: KIND_DECIMAL}
+CALL_PEOPLE_KINDS = {1: KIND_NUMBER, 3: KIND_DECIMAL, 4: KIND_NUMBER, 5: KIND_NUMBER, 6: KIND_NUMBER}
+
+
+def build_calls_workbook(
+    context: Any,
+    days: int = calls_intake.DEFAULT_DAYS,
+    q: str = "",
+    direction: str = "",
+    state: str = "",
+    kind: str = "",
+    tz: tzinfo | None = None,
+    now: datetime | None = None,
+) -> bytes:
+    """Arama gecmisini uc sayfalik .xlsx olarak uretir.
+
+    Sayfalar ekranin birebir karsiligidir: Liste sekmesi, Kisiler sekmesi ve
+    ustteki istatistik seridi.
+    """
+    conn = context.connection()
+    rows = repository.list_calls(conn)
+    names = calls_intake.names_from_rows(rows)
+    picked = calls_intake.select(
+        rows, days=days, q=q, direction=direction, state=state, kind=kind, now=now, names=names
+    )
+    stats = calls_intake.build_stats(rows, days=days, now=now, names=names)
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = sheet_title(CALLS_SHEET)
+    _write_call_rows(sheet, picked, tz, names)
+    _write_call_people(book, calls_intake.people_totals(picked, names), tz)
+    _write_call_stats(book, stats, tz)
+
+    buffer = io.BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
+
+
+def _write_call_rows(
+    sheet: Worksheet,
+    rows: list[dict[str, Any]],
+    tz: tzinfo | None,
+    names: dict[str, str] | None = None,
+) -> None:
+    sheet.append(list(CALL_HEADERS))
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+
+    widths = [len(text) for text in CALL_HEADERS]
+    for line, row in enumerate(rows, start=2):
+        card = calls_intake.view(row, names)
+        values = [
+            card["started_at"],
+            card["direction_label"],
+            # Cok kisili aramada "karsi taraf" yoktur: ekranda ne yaziyorsa o.
+            card["title"],
+            card["kind_label"],
+            card["state_label"],
+            card["duration_text"],
+            round((card["duration_ms"] or 0) / 60000, 1),
+            card["meeting_subject"],
+            card["meeting_organizer"],
+            card["my_response"],
+        ]
+        for index, value in enumerate(values):
+            target = sheet.cell(row=line, column=index + 1)
+            width = _write_task_cell(target, value, CALL_KINDS.get(index, KIND_TEXT), tz)
+            if width > widths[index]:
+                widths[index] = width
+
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:{get_column_letter(len(CALL_HEADERS))}{len(rows) + 1}"
+    _fit_columns(sheet, widths)
+
+
+def _write_call_people(book: Workbook, people: list[dict[str, Any]], tz: tzinfo | None) -> None:
+    sheet = book.create_sheet(sheet_title(CALLS_PEOPLE_SHEET))
+    sheet.append(list(CALL_PEOPLE_HEADERS))
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+
+    widths = [len(text) for text in CALL_PEOPLE_HEADERS]
+    for line, person in enumerate(people, start=2):
+        values = [
+            person["name"],
+            person["count"],
+            person["duration_text"],
+            round((person["ms"] or 0) / 60000, 1),
+            person["outgoing"],
+            person["incoming"],
+            person["missed"],
+        ]
+        for index, value in enumerate(values):
+            target = sheet.cell(row=line, column=index + 1)
+            width = _write_task_cell(target, value, CALL_PEOPLE_KINDS.get(index, KIND_TEXT), tz)
+            if width > widths[index]:
+                widths[index] = width
+
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:{get_column_letter(len(CALL_PEOPLE_HEADERS))}{len(people) + 1}"
+    _fit_columns(sheet, widths)
+
+
+def _write_call_stats(book: Workbook, stats: dict[str, Any], tz: tzinfo | None) -> None:
+    """Istatistik sayfasi: ekrandaki kartlarin ayni sirayla duz dokumu."""
+    sheet = book.create_sheet(sheet_title(CALLS_STATS_SHEET))
+    lines: list[tuple[str, Any]] = [
+        ("Pencere (gün)", stats["days"]),
+        ("Arama sayısı", stats["calls"]),
+        ("Görüşülen arama", stats["connected"]),
+        ("Toplam temas", stats["total_text"]),
+        ("Toplam temas (dk)", round((stats["total_ms"] or 0) / 60000, 1)),
+        ("İş günü", stats["workday"]["days"]),
+        ("İş günü başına", stats["workday"]["average_text"]),
+    ]
+    busiest = stats["workday"].get("busiest")
+    if busiest:
+        lines.append(("En yoğun gün", f"{busiest['date']} · {busiest['duration_text']}"))
+
+    lines.append(("", ""))
+    for slice_ in stats["split"]:
+        lines.append(
+            (
+                slice_["label"],
+                f"%{slice_['percent']} · {slice_['duration_text']} · {slice_['count']} arama",
+            )
+        )
+
+    lines.append(("", ""))
+    for name in ("outgoing", "incoming"):
+        part = stats["direction"][name]
+        lines.append((part["label"], f"{part['count']} arama · {part['duration_text']}"))
+    lines.append(("Kaçırılan", stats["direction"]["missed"]))
+    lines.append(("Reddedilen", stats["direction"]["declined"]))
+
+    lines.append(("", ""))
+    lines.append(("En çok görüşülen", ""))
+    for person in stats["top"]:
+        lines.append((person["name"], f"{person['duration_text']} · {person['count']} arama"))
+
+    for line, (label, value) in enumerate(lines, start=1):
+        name_cell = sheet.cell(row=line, column=1, value=label or None)
+        name_cell.font = Font(bold=True)
+        sheet.cell(row=line, column=2, value=value if value != "" else None)
+
+    sheet.column_dimensions["A"].width = 22
+    sheet.column_dimensions["B"].width = min(
+        max((len(str(value)) for _, value in lines), default=20) + 2, COLUMN_WIDTH_LIMIT
+    )
+
+
+def _fit_columns(sheet: Worksheet, widths: list[int]) -> None:
+    for index, width in enumerate(widths):
+        letter = get_column_letter(index + 1)
+        sheet.column_dimensions[letter].width = min(
+            max(width + 2, COLUMN_WIDTH_MIN), COLUMN_WIDTH_LIMIT
+        )
 
 
 # --- adlandirma ---------------------------------------------------------

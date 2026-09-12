@@ -264,6 +264,25 @@
           </div>
         </div>
 
+        <div class="field">
+          <span class="label-text">Arama geçmişi</span>
+          <p class="hint">
+            Ana ekrandaki <strong>Teams Aramalar</strong> bölümü, Teams'in bu bilgisayardaki
+            yerel önbelleğini okur: "Aramalar → Geçmiş" ekranında zaten gördüğünüz kendi
+            kayıtlarınız. Ağa çıkılmaz, hiçbir şey gönderilmez.
+          </p>
+          <p class="warn-note" id="calls-unsupported" hidden>
+            Arama geçmişi yalnız Windows'ta yeni Teams ile okunabilir.
+          </p>
+          <label for="calls-cache-path">Önbellek klasörü (boş = varsayılan)</label>
+          <input type="text" id="calls-cache-path"
+            placeholder="D:\kopya\https_teams.microsoft.com_0.indexeddb.leveldb" />
+          <label class="checkbox">
+            <input type="checkbox" id="calls-scan-on-refresh" />
+            Güncelle işinin sonunda aramaları da çek
+          </label>
+        </div>
+
         <div class="actions">
           <button class="primary" id="teams-save">Kaydet</button>
         </div>

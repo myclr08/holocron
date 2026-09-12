@@ -327,6 +327,44 @@ def _migration_0007_address_book(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0008_teams_calls(conn: sqlite3.Connection) -> None:
+    """Asama 9: Teams arama gecmisi (yerel onbellekten okunan kendi kayitlarim).
+
+    `call_id` birincil anahtardir: tekillestirmenin otoritesi odur. Ayni
+    onbellek iki kez taranirsa satir yeniden yazilir, kopya birikmez.
+    `raw_json` ham kaydi tasir; ileride yeni bir alan gerekirse yeniden
+    taramaya gerek kalmaz.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS teams_calls (
+            call_id           TEXT PRIMARY KEY,
+            started_at        TEXT,
+            ended_at          TEXT,
+            connected_at      TEXT,
+            duration_ms       INTEGER NOT NULL DEFAULT 0,
+            direction         TEXT,
+            state             TEXT,
+            kind              TEXT,
+            counterpart_id    TEXT,
+            counterpart_name  TEXT,
+            forwarded         TEXT,
+            meeting_subject   TEXT,
+            meeting_organizer TEXT,
+            my_response       TEXT,
+            participants_json TEXT,
+            raw_json          TEXT,
+            seen_at           TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_teams_calls_started ON teams_calls(started_at);
+        CREATE INDEX IF NOT EXISTS idx_teams_calls_person
+            ON teams_calls(counterpart_id, started_at);
+        CREATE INDEX IF NOT EXISTS idx_teams_calls_kind ON teams_calls(kind, started_at);
+        """
+    )
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
@@ -336,6 +374,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (5, "mail address lists", _migration_0005_mail_address_lists),
     (6, "teams messages", _migration_0006_teams),
     (7, "address book source", _migration_0007_address_book),
+    (8, "teams calls", _migration_0008_teams_calls),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

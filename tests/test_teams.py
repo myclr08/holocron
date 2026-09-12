@@ -77,7 +77,8 @@ def test_migration_creates_the_teams_tables_and_seeds_templates(conn):
     tables = db.table_names(conn)
     for name in ("contacts", "issue_contacts", "message_templates", "sent_messages"):
         assert name in tables, name
-    assert db.current_version(conn) == 7
+    # Sema en az Teams gocune kadar gelmis olmali (yeni gocler eklendikce artar).
+    assert db.current_version(conn) == db.SCHEMA_VERSION >= 7
 
     seeded = repo.list_templates(conn)
     assert [item["name"] for item in seeded] == ["Son durum", "Güncelleme rica"]

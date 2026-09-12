@@ -24,6 +24,8 @@ from .diagnose import run_diagnostics
 from .jira_client import JiraError
 from .mail import MailError
 from .mail import intake as mail_intake
+from .teamscalls import is_supported as calls_supported
+from .teamscalls import intake as calls_intake
 from .lifecycle import BEAT_INTERVAL_SECONDS
 from .repository import RepositoryError
 from .settings_store import MODE_CLOUD, MODE_SERVER, PROXY_MODES
@@ -846,6 +848,103 @@ def _render_issue_message(context: AppContext, conn: Any, key: str, body: str) -
         local_values,
         base_url,
         schemas=repository.field_schemas(conn),
+    )
+
+
+# --- Teams aramalari (yerel onbellek) -----------------------------------
+#
+# Kaynak, Teams'in kendi makinedeki IndexedDB onbellegidir: kullanicinin
+# "Aramalar -> Gecmis" ekraninda zaten gorunen KENDI kayitlari. Ag cagrisi
+# yok, Graph API yok, baska kullanicinin verisi yok. Windows disinda uclar
+# `feature_unavailable` doner.
+
+
+def calls_source(context: AppContext, config: Any = None) -> Any:
+    """Yapilandirilmis arama kaynagi (uretimde onbellek, testte sahte kaynak)."""
+    return context.calls_factory(getattr(config, "cache_path", "") or "")
+
+
+@router.post("/calls/scan")
+def scan_calls(request: Request) -> dict[str, Any]:
+    """Onbellegi tarar. Ozet: scanned / new / updated / meetings_matched / ms."""
+    context = get_context(request)
+    config = calls_intake.load_config(context.settings)
+    source = calls_source(context, config)
+    started = time.monotonic()
+    with context.db_lock:
+        result = calls_intake.scan(context.connection(), source)
+    result["ms"] = int((time.monotonic() - started) * 1000)
+    stamp = repository.now_iso()
+    context.settings.set("calls.scanned_at", stamp)
+    result["scanned_at"] = stamp
+    return result
+
+
+@router.get("/calls")
+def read_calls(
+    request: Request,
+    days: int = calls_intake.DEFAULT_DAYS,
+    q: str = "",
+    direction: str = "",
+    state: str = "",
+    kind: str = "",
+) -> dict[str, Any]:
+    """Pencere + suzgeclerle arama listesi ve ayni kumeden kisi dokumu."""
+    context = get_context(request)
+    conn = context.connection()
+    rows = repository.list_calls(conn)
+    # Kimlik -> ad sozlugu bir kez kurulur: grup basliklari ve arama da kullanir.
+    names = calls_intake.names_from_rows(rows)
+    picked = calls_intake.select(
+        rows, days=days, q=q, direction=direction, state=state, kind=kind, names=names
+    )
+    return {
+        "calls": [calls_intake.view(row, names) for row in picked],
+        "people": calls_intake.people_totals(picked, names),
+        "count": len(picked),
+        "total": repository.call_count(conn),
+        "days": calls_intake.DEFAULT_DAYS if not days else max(1, min(int(days), 3650)),
+        "windows": list(calls_intake.WINDOW_DAYS),
+        "scanned_at": context.settings.get("calls.scanned_at", "") or "",
+        "supported": calls_supported(),
+    }
+
+
+@router.get("/calls/stats")
+def read_call_stats(request: Request, days: int = calls_intake.DEFAULT_DAYS) -> dict[str, Any]:
+    """Istatistik seridi: top 5, uc dilim, aradim/arandim, is gunu ortalamasi."""
+    context = get_context(request)
+    return calls_intake.build_stats(repository.list_calls(context.connection()), days=days)
+
+
+@router.get("/calls/export.xlsx")
+def export_calls(
+    request: Request,
+    days: int = calls_intake.DEFAULT_DAYS,
+    q: str = "",
+    direction: str = "",
+    state: str = "",
+    kind: str = "",
+):
+    context = get_context(request)
+    payload = export.build_calls_workbook(
+        context, days=days, q=q, direction=direction, state=state, kind=kind
+    )
+    return Response(
+        content=payload,
+        media_type=export.MEDIA_TYPE,
+        headers={"Content-Disposition": export.content_disposition(export.CALLS_NAME)},
+    )
+
+
+@router.get("/calls/person/{counterpart_id}")
+def read_call_person(
+    request: Request, counterpart_id: str, days: int = calls_intake.DEFAULT_DAYS
+) -> dict[str, Any]:
+    """Kisi cekmecesi: ozet, o kisiyle butun gorusmeler, ortak grup/toplantilar."""
+    context = get_context(request)
+    return calls_intake.person_view(
+        repository.list_calls(context.connection()), counterpart_id, days=days
     )
 
 
