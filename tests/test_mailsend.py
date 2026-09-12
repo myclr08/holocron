@@ -206,6 +206,58 @@ def test_addresses_are_split_and_deduplicated():
     assert mailsend.join_addresses([ORNEK, IKINCI]) == f"{ORNEK}; {IKINCI}"
 
 
+# --- adres ayristirici --------------------------------------------------
+#
+# Saha hatasi: adres kutusu metni BOSLUKTA boluyordu; "Mustafa Erhan" secilince
+# iki alici ("mustafa" / "erhan") cikiyor, e-posta hic girmiyordu. Ayirici
+# yalnizca virgul, noktali virgul ve satir sonudur.
+
+
+def test_a_name_with_a_space_is_one_recipient():
+    parsed = mailsend.parse_addresses(f"Mustafa Erhan <{ORNEK}>")
+    assert parsed == [{"name": "Mustafa Erhan", "email": ORNEK}]
+    assert mailsend.split_addresses(f"Mustafa Erhan <{ORNEK}>") == [ORNEK]
+
+
+def test_a_bare_space_never_splits_addresses():
+    assert mailsend.split_addresses("Mustafa Erhan") == []
+    assert mailsend.split_addresses(f"{ORNEK} {IKINCI}") == []
+
+
+def test_the_angle_form_and_plain_addresses_mix():
+    text = f"Mustafa Erhan <{ORNEK}>; {IKINCI}\nÜçüncü Kişi <ucuncu@example.com>"
+    assert mailsend.parse_addresses(text) == [
+        {"name": "Mustafa Erhan", "email": ORNEK},
+        {"name": "", "email": IKINCI},
+        {"name": "Üçüncü Kişi", "email": "ucuncu@example.com"},
+    ]
+
+
+def test_a_quoted_name_loses_its_quotes():
+    assert mailsend.parse_addresses(f'"Mustafa Erhan" <{ORNEK}>')[0]["name"] == "Mustafa Erhan"
+
+
+def test_a_piece_without_an_at_sign_is_dropped():
+    assert mailsend.parse_addresses(f"gecersiz, {ORNEK}") == [{"name": "", "email": ORNEK}]
+    assert mailsend.parse_addresses("Ad Soyad <adres-degil>") == []
+
+
+def test_a_name_equal_to_the_address_is_not_repeated():
+    assert mailsend.parse_addresses(f"{ORNEK} <{ORNEK}>")[0]["name"] == ""
+
+
+def test_the_storage_format_round_trips():
+    entries = [{"name": "Mustafa Erhan", "email": ORNEK}, {"name": "", "email": IKINCI}]
+    stored = mailsend.format_addresses(entries)
+    assert stored == f"Mustafa Erhan <{ORNEK}>; {IKINCI}"
+    assert mailsend.parse_addresses(stored) == entries
+
+
+def test_an_old_plain_template_still_works():
+    """Eski kayitlar duz adres tasiyor: kirilmamali."""
+    assert mailsend.split_addresses(f"{ORNEK},{IKINCI}") == [ORNEK, IKINCI]
+
+
 def test_the_file_name_is_ascii_safe():
     name = mailsend.file_name("Çağrı Filosu", date(2026, 9, 12))
     assert name == "Cagri-Filosu-2026-09-12.xlsx"
@@ -456,6 +508,40 @@ def test_sending_an_empty_selection_is_refused(api_client, conn, sender, temp_ma
     assert response.json()["error"]["code"] == "mail_no_rows"
 
 
+def test_named_addresses_are_accepted_from_the_template_and_the_request(
+    api_client, conn, sender, temp_mail
+):
+    group = setup_group(api_client, conn)
+    template = api_client.post(
+        "/api/mail-templates",
+        json={
+            "name": "Adlı",
+            "to_addresses": f"Mustafa Erhan <{ORNEK}>",
+            "cc_addresses": f"İkinci Kişi <{IKINCI}>",
+            "subject": "{grup}",
+            "body": "{tablo}",
+        },
+    ).json()["template"]
+
+    preview = api_client.post(
+        f"/api/groups/{group['id']}/mail-preview", json={"template_id": template["id"]}
+    ).json()
+    assert preview["to"] == [ORNEK]
+    assert preview["cc"] == [IKINCI]
+
+    api_client.post(
+        f"/api/groups/{group['id']}/mail-send",
+        json={
+            "template_id": template["id"],
+            "to": [f"Mustafa Erhan <{ORNEK}>"],
+            "cc": [IKINCI],
+            "mode": "display",
+        },
+    )
+    assert sender.last["to"] == [ORNEK]
+    assert sender.last["cc"] == [IKINCI]
+
+
 def test_the_edited_html_is_sent_as_written(api_client, conn, sender, temp_mail):
     group = setup_group(api_client, conn)
     api_client.post(
@@ -621,6 +707,55 @@ def test_the_send_modal_hooks_are_in_its_own_script(api_client):
         assert marker in script, marker
 
 
+def test_the_address_box_never_splits_on_a_space(api_client):
+    """Cip kutusunun kurallari tek dosyada: ayirici `, ; \n`, bosluk degil."""
+    script = api_client.get("/static/js/addressbox.js").text
+    for marker in (
+        "ADDRESS_SPLIT = /[,;\\r\\n]+/",
+        "ADDRESS_ANGLE",
+        "function parseAddressText",
+        "function formatAddresses",
+        "function addressEmails",
+        "function createAddressBox",
+        "Geçersiz adres",
+        '"Backspace"',
+        '"Enter"',
+        '"Tab"',
+        "event.preventDefault()",
+        "/api/contacts?q=",
+    ):
+        assert marker in script, marker
+    # Bosluk ayirici DEGIL: eski `[,;\s]+` kalibi geri gelmemeli.
+    assert "\\s+/" not in script
+    # Tamamlamadan secim tek cip eder: ad gorunur, adres saklanir.
+    assert "addEntry({ name: contact.name, email: contact.email })" in script
+    # `blur` tiklamayi yutmasin diye mousedown'da odak birakilmaz.
+    assert 'button.addEventListener("mousedown"' in script
+
+    css = api_client.get("/static/css/app.css").text
+    for name in (".address-box", ".address-chip", ".address-error", ".address-suggest"):
+        assert name in css, name
+
+
+def test_both_pages_load_the_shared_address_box(api_client):
+    home = api_client.get("/").text
+    settings = api_client.get("/settings").text
+    for page in (home, settings):
+        assert "/static/js/addressbox.js" in page
+    # Ortak dosya kendisini kullananlardan ONCE yuklenir.
+    assert home.index("addressbox.js") < home.index("js/mailsend.js")
+    assert settings.index("addressbox.js") < settings.index("mailsend-settings.js")
+
+
+def test_the_send_modal_uses_the_shared_address_box(api_client):
+    script = api_client.get("/static/js/mailsend.js").text
+    assert "createAddressBox" in script
+    assert "addressEmails(toField.entries)" in script
+    assert "toField.setText" in script
+    # Kendi cip kodu kalmadi.
+    assert "mailChipField" not in script
+
+
 def test_the_settings_card_manages_the_templates(api_client):
     page = api_client.get("/settings").text
     for marker in (
@@ -644,6 +779,10 @@ def test_the_settings_card_manages_the_templates(api_client):
         "function renderMailTemplates",
         "function addMailTemplate",
         "function dropMailTemplate",
+        "createAddressBox",
+        "parseAddressText",
+        "toBox.getText()",
+        "function mountNewAddressBoxes",
     ):
         assert marker in script, marker
 

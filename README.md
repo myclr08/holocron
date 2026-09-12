@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.6.0** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.6.1** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -311,7 +311,9 @@ Pencerede ne var:
   açılır).
 - **Kime** ve **CC** çip kutuları. Şablondan dolu gelir, elle eklenip
   çıkarılabilir; iki harften sonra **adres defterinden** öneri gelir (Teams
-  kişileriyle aynı defter, kurum rehberi de oradadır).
+  kişileriyle aynı defter, kurum rehberi de oradadır). Öneriden seçilen kişi
+  **tek çip** olur: çipte adı görünür, üstüne gelince adresi yazar, postaya
+  giden değer adrestir.
 - **Konu** ve **Gövde**. Metin **ham** tutulur: kutuda `{tablo}` yazar,
   **Önizleme** sekmesi onu tabloya çevirip HTML'i bir çerçevede gösterir.
   Gönderilen posta da aynı kaynaktan üretilir.
@@ -333,6 +335,19 @@ Yer tutucular:
 | `{tablo}` | Seçili sütunlarla kayıt tablosu — **yalnız gövdede** |
 
 Bilinmeyen yer tutucu **boş kalır**. Konuda `{tablo}` yazarsanız sessizce düşer.
+
+**Adres yazma kuralları** (hem bu pencerede hem Ayarlar'daki şablon kartında
+aynıdır):
+
+- Ayırıcı yalnızca `,` `;` ve satır sonudur. **Boşluk ayırıcı değildir**:
+  `Mustafa Erhan` tek parçadır, iki alıcı değil.
+- `Ad Soyad <ornek@example.com>` biçimi ayrıştırılır: ad çipte görünür, postaya
+  adres gider. Düz adres de yazılabilir.
+- `@` içermeyen (ya da içinde boşluk kalan) bir parça çip olmaz; kutunun altında
+  kırmızı "geçersiz adres" uyarısı çıkar.
+- `Enter`, `Tab`, `,` ve `;` çip oluşturur; boş kutuda `Backspace` son çipi siler.
+- Şablonda saklanan biçim `;` ile ayrılmış `Ad <adres>` ya da düz adrestir;
+  sunucu ikisini de okur, eski kayıtlar kırılmaz.
 
 Nasıl çalışır:
 
@@ -867,7 +882,7 @@ kilitler. Üçüncüsü etikettir: `v<sürüm>` biçiminde itilir ve release iş
 yanlış numaralı bir release çıkmaz.
 
 ```bash
-git tag v0.6.0 && git push origin v0.6.0
+git tag v0.6.1 && git push origin v0.6.1
 ```
 
 ### Teams sondası
@@ -909,6 +924,7 @@ taşımaz.
 | `app/static/fonts/` | Gömülü OFL yazı tipleri ve lisans metinleri |
 | `app/static/js/starfield.js` | Arka plandaki yıldız alanı (canvas) |
 | `app/static/js/calls.js` | Teams Aramalar ekranı (istatistik şeridi, sekmeler, çekmece) |
+| `app/static/js/addressbox.js` | Ortak adres kutusu: çipler, tamamlama, ayrıştırma |
 | `app/static/js/mailsend.js` | "E-posta ile gönder" penceresi |
 | `app/static/js/mailsend-settings.js` | Ayarlar → E-posta şablonları kartı |
 | `tests/` | pytest testleri, sahte Jira sunucusu |
@@ -923,7 +939,8 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
-| **v0.6.0** | 12 Eylül 2026 | **E-posta ile gönder**: grid'de onay kutusu sütunu, Kime/CC taşıyan e-posta şablonları, Outlook uyumlu HTML tablo, Excel eki, "Outlook'ta aç" / "Doğrudan gönder" kipleri, gönderim geçmişi |
+| **v0.6.1** | 12 Eylül 2026 | Kime/CC adres kutusu: rehberden seçim tek çip, boşlukta bölme yok, `Ad Soyad <adres>` ayrıştırma, geçersiz adres uyarısı |
+| **v0.6.0** | 12 Eylül 2026 | **E-posta ile gönder**: grid'de onay kutusu sütunu, Kime/CC taşıyan e-posta şablonları, çipli adres kutusu (`Ad Soyad <adres>`), Outlook uyumlu HTML tablo, Excel eki, "Outlook'ta aç" / "Doğrudan gönder" kipleri, gönderim geçmişi |
 | **v0.5.0** | 12 Eylül 2026 | Teams'e mesaj (derin bağlantı, `msteams:` protokolü, kurum rehberi içe aktarma) ve **Teams Aramalar**: yerel önbellekten arama geçmişi, kişi kırılımı, istatistik şeridi, üç sayfalık Excel |
 | **v0.4.0** | 11 Eylül 2026 | Outlook e-postalarından görev üretme (COM, üç ayrı adres listesi, klasör ağacı, arama klasörleri, konuşma başına tek görev) |
 | **v0.3.0** | 11 Eylül 2026 | Görevlerim kanban panosu; ağ katmanı (vekil sunucu kipleri, IPv4 önceliği, adım adım teşhis); Star Wars görsel katmanı, taşınabilir paketler ve lite Windows zip'i |

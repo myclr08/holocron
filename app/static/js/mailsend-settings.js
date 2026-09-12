@@ -4,15 +4,25 @@
 // sırası ve kendi gönderim kipi var. Kendi DOMContentLoaded dinleyicisini kurar;
 // aynı olaya birden çok dinleyici takılabilir, dosyalar birbirine dokunmaz.
 
-const mailSendSettings = { templates: [], placeholders: [], mode: "display" };
+const mailSendSettings = { templates: [], placeholders: [], mode: "display", boxes: {} };
+
+/** Etiketli alan: cip kutusu tek basina duruyorsa basligi olsun. */
+function mailSendField(labelText, control) {
+  const wrap = mailSendBox("div", "field");
+  const label = mailSendBox("span", "label-text", labelText);
+  wrap.appendChild(label);
+  wrap.appendChild(control);
+  return wrap;
+}
 
 function mailSendStatus() {
   return document.getElementById("mailsend-status");
 }
 
-function mailSendBox(tag, className) {
+function mailSendBox(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
   return node;
 }
 
@@ -69,24 +79,36 @@ function renderMailTemplates() {
 
   mailSendSettings.templates.forEach((template, index) => {
     const nameBox = mailSendInput(template.name, "Şablon adı");
-    const toBox = mailSendInput(template.to_addresses, "Kime: ornek@example.com");
-    const ccBox = mailSendInput(template.cc_addresses, "CC: ekip@example.com");
+    // Kime/CC ortak cip kutusudur: bosluk ayirici degildir, adres defterinden
+    // secim tek cip eder (ad gorunur, adres saklanir).
+    const toBox = createAddressBox({
+      entries: parseAddressText(template.to_addresses).entries,
+      placeholder: "ornek@example.com",
+    });
+    const ccBox = createAddressBox({
+      entries: parseAddressText(template.cc_addresses).entries,
+      placeholder: "ekip@example.com",
+    });
     const subjectBox = mailSendInput(template.subject, "Konu");
     const bodyBox = document.createElement("textarea");
     bodyBox.rows = 3;
     bodyBox.value = template.body || "";
 
-    const save = () =>
-      saveMailTemplate(template.id, {
+    const save = () => {
+      // Kutuda yarim kalmis metin varsa once cipe cevrilir.
+      toBox.commit();
+      ccBox.commit();
+      return saveMailTemplate(template.id, {
         name: nameBox.value,
-        to_addresses: toBox.value,
-        cc_addresses: ccBox.value,
+        to_addresses: toBox.getText(),
+        cc_addresses: ccBox.getText(),
         subject: subjectBox.value,
         body: bodyBox.value,
       });
+    };
 
     const row = mailSendBox("div", "teams-row");
-    [nameBox, toBox, ccBox].forEach((node) => row.appendChild(node));
+    row.appendChild(nameBox);
     row.appendChild(mailSendButton("↑", "", () => moveMailTemplate(index, -1)));
     row.appendChild(mailSendButton("↓", "", () => moveMailTemplate(index, 1)));
     row.appendChild(mailSendButton("Kaydet", "", save));
@@ -104,8 +126,13 @@ function renderMailTemplates() {
       )
     );
 
+    const addresses = mailSendBox("div", "row");
+    addresses.appendChild(mailSendField("Kime", toBox));
+    addresses.appendChild(mailSendField("CC", ccBox));
+
     const wrap = mailSendBox("div", "teams-entry");
     wrap.appendChild(row);
+    wrap.appendChild(addresses);
     wrap.appendChild(subjectBox);
     wrap.appendChild(bodyBox);
     wrap.appendChild(options);
@@ -160,19 +187,39 @@ function dropMailTemplate(template) {
   );
 }
 
+/** Yeni sablon formundaki Kime/CC kutularini bir kez kurar. */
+function mountNewAddressBoxes() {
+  ["to", "cc"].forEach((which) => {
+    const mount = document.getElementById(`mailsend-new-${which}`);
+    if (!mount || mailSendSettings.boxes[which]) return;
+    const box = createAddressBox({
+      id: `mailsend-new-${which}-input`,
+      placeholder: which === "to" ? "ornek@example.com" : "ekip@example.com",
+    });
+    mount.appendChild(box);
+    mailSendSettings.boxes[which] = box;
+  });
+}
+
 function addMailTemplate() {
   const fields = {
     name: document.getElementById("mailsend-name"),
     subject: document.getElementById("mailsend-new-subject"),
-    to_addresses: document.getElementById("mailsend-new-to"),
-    cc_addresses: document.getElementById("mailsend-new-cc"),
     body: document.getElementById("mailsend-new-body"),
   };
-  const payload = {};
+  const boxes = mailSendSettings.boxes;
+  if (boxes.to) boxes.to.commit();
+  if (boxes.cc) boxes.cc.commit();
+  const payload = {
+    to_addresses: boxes.to ? boxes.to.getText() : "",
+    cc_addresses: boxes.cc ? boxes.cc.getText() : "",
+  };
   Object.entries(fields).forEach(([key, node]) => (payload[key] = node.value));
   mailSendAction(async () => {
     await api("/api/mail-templates", { method: "POST", body: JSON.stringify(payload) });
     Object.values(fields).forEach((node) => (node.value = ""));
+    if (boxes.to) boxes.to.setText("");
+    if (boxes.cc) boxes.cc.setText("");
   }, "Şablon eklendi.");
 }
 
@@ -190,6 +237,7 @@ function saveMailSendMode() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  mountNewAddressBoxes();
   document.getElementById("mailsend-add").addEventListener("click", addMailTemplate);
   document.getElementById("mailsend-save").addEventListener("click", saveMailSendMode);
   api("/api/settings")

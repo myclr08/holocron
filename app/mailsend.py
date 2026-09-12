@@ -69,27 +69,66 @@ LINK_STYLE = "color:#0b5cab;"
 _PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 # Govde HTML mi duz metin mi: bir etiket goruntusu yetiyor.
 _TAG = re.compile(r"<\s*/?\s*[A-Za-z][A-Za-z0-9]*(\s[^<>]*)?>")
-# Adres ayirici: virgul, noktali virgul ve satir sonu.
+# Adres ayirici: virgul, noktali virgul ve satir sonu. BOSLUK AYIRICI DEGILDIR:
+# "Ad Soyad <adres@example.com>" tek bir alicidir, iki degil.
 _ADDRESS_SPLIT = re.compile(r"[,;\r\n]+")
+# "Ad Soyad <adres@example.com>" -- Outlook ve posta istemcilerinin bicimi.
+_ADDRESS_ANGLE = re.compile(r"^\s*(?P<name>.*?)\s*<\s*(?P<email>[^<>]+?)\s*>\s*$")
+_QUOTES = re.compile(r"^[\"']|[\"']$")
 
 
 # --- adresler -----------------------------------------------------------
 
 
-def split_addresses(value: Any) -> list[str]:
-    """'a@x, b@y; c@z' -> ['a@x', 'b@y', 'c@z'] (sira korunur, tekrar duser)."""
+def parse_addresses(value: Any) -> list[dict[str, str]]:
+    """Adres metnini alicilara ayirir: `[{"name", "email"}, ...]`.
+
+    Iki bicim de kabul edilir -- duz adres (`a@x`) ve adli bicim
+    (`Ad Soyad <a@x>`) -- cunku sablonlar ikisini de saklayabiliyor ve eski
+    kayitlar duz adres tasiyor. Ayirici yalnizca virgul, noktali virgul ve
+    satir sonudur: BOSLUKTA BOLUNMEZ, yoksa "Ad Soyad" iki aliciya duserdi.
+
+    `@` icermeyen parca alici sayilmaz ve sessizce dusurulur; arayuz onu
+    kirmizi bir uyariyla gosterir.
+    """
     seen: set[str] = set()
-    picked: list[str] = []
+    picked: list[dict[str, str]] = []
     for part in _ADDRESS_SPLIT.split(str(value or "")):
-        address = part.strip()
-        if not address:
+        piece = part.strip()
+        if not piece:
             continue
-        marker = address.casefold()
+        match = _ADDRESS_ANGLE.match(piece)
+        email = (match.group("email") if match else piece).strip()
+        name = _QUOTES.sub("", match.group("name").strip()) if match else ""
+        # Adres bosluk tasiyamaz: "a@x b@y" gibi bir parca -- bosluk ayirici
+        # olmadigi icin tek parca kalir -- gecerli bir alici degildir.
+        if "@" not in email or any(char.isspace() for char in email):
+            continue
+        if name.casefold() == email.casefold():
+            name = ""
+        marker = email.casefold()
         if marker in seen:
             continue
         seen.add(marker)
-        picked.append(address)
+        picked.append({"name": name, "email": email})
     return picked
+
+
+def split_addresses(value: Any) -> list[str]:
+    """Yalnizca adresler: 'Ad <a@x>; b@y' -> ['a@x', 'b@y']."""
+    return [item["email"] for item in parse_addresses(value)]
+
+
+def format_addresses(entries: Iterable[dict[str, str]]) -> str:
+    """Saklama bicimi: `;` ile ayrilmis `Ad <adres>` ya da duz adres."""
+    parts = []
+    for item in entries or []:
+        email = str((item or {}).get("email") or "").strip()
+        if not email:
+            continue
+        name = str((item or {}).get("name") or "").strip()
+        parts.append(f"{name} <{email}>" if name else email)
+    return "; ".join(parts)
 
 
 def join_addresses(addresses: Iterable[str]) -> str:

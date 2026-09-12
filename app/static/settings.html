@@ -320,14 +320,18 @@
         </div>
         <div class="row">
           <div class="field">
-            <label for="mailsend-new-to">Kime</label>
-            <input type="text" id="mailsend-new-to" placeholder="ornek@example.com" />
+            <span class="label-text">Kime</span>
+            <div id="mailsend-new-to"></div>
           </div>
           <div class="field">
-            <label for="mailsend-new-cc">CC</label>
-            <input type="text" id="mailsend-new-cc" placeholder="ekip@example.com" />
+            <span class="label-text">CC</span>
+            <div id="mailsend-new-cc"></div>
           </div>
         </div>
+        <p class="hint">
+          Adresler <code>,</code> <code>;</code> ya da satır sonuyla ayrılır; boşluk ayırıcı
+          değildir. <code>Ad Soyad &lt;ornek@example.com&gt;</code> biçimi de yazılabilir.
+        </p>
         <div class="field">
           <label for="mailsend-new-body">Gövde</label>
           <textarea id="mailsend-new-body" rows="4"
@@ -380,6 +384,7 @@
   </div>
   <script src="/static/js/starfield.js"></script>
   <script src="/static/js/common.js"></script>
+  <script src="/static/js/addressbox.js"></script>
   <script src="/static/js/settings.js"></script>
   <script src="/static/js/mailsend-settings.js"></script>
 </body>

@@ -1827,9 +1827,11 @@ html.no-motion *::after {
 .mailsend .tabs { margin-bottom: 8px; }
 .mailsend .export-columns { max-height: 180px; }
 
-.mail-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+/* Ortak adres kutusu (addressbox.js): ana ekran ve Ayarlar aynisini kullanir. */
+.address-box { display: flex; flex-direction: column; }
+.address-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 
-.mail-chip {
+.address-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1839,9 +1841,12 @@ html.no-motion *::after {
   font-size: 12px;
   color: var(--text);
   background: var(--panel-2);
+  max-width: 100%;
 }
 
-.mail-chip button {
+.address-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.address-chip button {
   border: none;
   background: none;
   color: var(--muted);
@@ -1850,9 +1855,15 @@ html.no-motion *::after {
   cursor: pointer;
 }
 
-.mail-chip button:hover { color: var(--saber-red); }
+.address-chip button:hover { color: var(--saber-red); }
 
-.mail-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.address-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+
+.address-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--saber-red);
+}
 
 #mailsend-preview {
   width: 100%;

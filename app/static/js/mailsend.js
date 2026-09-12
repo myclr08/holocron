@@ -9,8 +9,6 @@
 // sunucuda tabloya cevirir. Boylece pencerede duzenlenen metin ile giden posta
 // hep ayni kaynaktan uretilir.
 
-const MAILSEND_SUGGEST_MS = 200;
-
 const mailSend = {
   templates: [],
   template: null,
@@ -19,7 +17,6 @@ const mailSend = {
   cc: [],
   columns: [],
   preview: null,
-  suggestTimer: null,
 };
 
 /** ISO damga -> "GG.AA.YYYY SS:dd" (yerel saat). */
@@ -31,105 +28,6 @@ function mailStamp(iso) {
     `${pad(moment.getDate())}.${pad(moment.getMonth() + 1)}.${moment.getFullYear()} ` +
     `${pad(moment.getHours())}:${pad(moment.getMinutes())}`
   );
-}
-
-/** Adres cipleri: kutuya yazilan adres Enter/virgul ile cipe doner. */
-function mailChipField(labelText, list, hintId) {
-  const chips = h("div", { class: "mail-chips" }, []);
-  const input = h("input", {
-    type: "text",
-    id: hintId,
-    placeholder: "ornek@example.com",
-    autocomplete: "off",
-  });
-  const suggestBox = h("div", { class: "mail-suggest" }, []);
-
-  const draw = () => {
-    clear(chips);
-    list.forEach((address, index) => {
-      chips.appendChild(
-        h("span", { class: "mail-chip" }, [
-          h("span", { text: address }),
-          h("button", {
-            text: "×",
-            title: "Çıkar",
-            onclick: () => {
-              list.splice(index, 1);
-              draw();
-            },
-          }),
-        ])
-      );
-    });
-  };
-
-  const add = (value) => {
-    String(value || "")
-      .split(/[,;\s]+/)
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .forEach((address) => {
-        if (!list.some((item) => item.toLowerCase() === address.toLowerCase())) list.push(address);
-      });
-    input.value = "";
-    clear(suggestBox);
-    draw();
-  };
-
-  const suggest = async () => {
-    const typed = input.value.trim();
-    clear(suggestBox);
-    if (typed.length < 2) return;
-    try {
-      const data = await api(`/api/contacts?q=${encodeURIComponent(typed)}&limit=8`);
-      (data.contacts || []).forEach((contact) => {
-        suggestBox.appendChild(
-          h("button", {
-            class: "small",
-            text: contact.name ? `${contact.name} · ${contact.email}` : contact.email,
-            onclick: () => add(contact.email),
-          })
-        );
-      });
-    } catch (err) {
-      // Adres defteri okunamadi; elle yazmak yine calisir.
-    }
-  };
-
-  input.addEventListener("input", () => {
-    clearTimeout(mailSend.suggestTimer);
-    mailSend.suggestTimer = setTimeout(suggest, MAILSEND_SUGGEST_MS);
-  });
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === ",") {
-      event.preventDefault();
-      add(input.value);
-    }
-  });
-  input.addEventListener("blur", () => add(input.value));
-
-  draw();
-  const node = h("div", { class: "field" }, [
-    h("label", { text: labelText }),
-    chips,
-    input,
-    suggestBox,
-  ]);
-  // Sablon degisince liste YERINDE guncellenir (referans korunur), kutu
-  // kendini yeniden cizer: dugum degistirmek olay baglarini koparir.
-  node.redraw = draw;
-  return node;
-}
-
-/** Listeyi yerinde doldurur: referans korunur, cipler yeniden cizilir. */
-function mailFillList(list, text, field) {
-  list.length = 0;
-  String(text || "")
-    .split(/[,;\n]+/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .forEach((address) => list.push(address));
-  if (field && field.redraw) field.redraw();
 }
 
 async function mailSendModal() {
@@ -197,8 +95,18 @@ async function mailSendModal() {
   const bodyTab = h("button", { class: "tab on", id: "mailsend-tab-body", text: "Gövde" });
   const viewTab = h("button", { class: "tab", id: "mailsend-tab-preview", text: "Önizleme" });
 
-  const toField = mailChipField("Kime", mailSend.to, "mailsend-to");
-  const ccField = mailChipField("CC", mailSend.cc, "mailsend-cc");
+  // Adres kutulari ortak bilesen (addressbox.js): bosluk ayirici degildir,
+  // tamamlama listesinden secim TEK cip eder (ad gorunur, adres gider).
+  const toField = createAddressBox({
+    entries: mailSend.to,
+    id: "mailsend-to",
+    onChange: () => refresh(true),
+  });
+  const ccField = createAddressBox({
+    entries: mailSend.cc,
+    id: "mailsend-cc",
+    onChange: () => refresh(true),
+  });
 
   const payload = () => ({
     template_id: mailSend.template ? mailSend.template.id : null,
@@ -241,8 +149,8 @@ async function mailSendModal() {
     bodyInput.value = template.body || "";
     excelInput.checked = !!template.attach_excel;
     tableInput.checked = !!template.inline_table;
-    mailFillList(mailSend.to, template.to_addresses, toField);
-    mailFillList(mailSend.cc, template.cc_addresses, ccField);
+    toField.setText(template.to_addresses);
+    ccField.setText(template.cc_addresses);
     await refresh(true);
   };
 
@@ -290,8 +198,8 @@ async function mailSendModal() {
         }),
       ]),
     ]),
-    toField,
-    ccField,
+    h("div", { class: "field" }, [h("label", { text: "Kime" }), toField]),
+    h("div", { class: "field" }, [h("label", { text: "CC" }), ccField]),
     h("div", { class: "field" }, [h("label", { text: "Konu" }), subjectInput]),
     h("div", { class: "tabs" }, [bodyTab, viewTab]),
     bodyInput,
@@ -341,9 +249,12 @@ async function mailSendModal() {
   ]);
 
   const start = async (mode) => {
+    // Kutuda yarim kalmis metin varsa once cipe cevrilir.
+    toField.commit();
+    ccField.commit();
     const view = await refresh(false);
     if (!view) return;
-    if (!mailSend.to.length) {
+    if (!toField.entries.length) {
       toast("E-posta ile gönder", "Kime alanı boş olamaz.", "error");
       return;
     }
@@ -352,8 +263,8 @@ async function mailSendModal() {
         method: "POST",
         body: JSON.stringify({
           ...payload(),
-          to: mailSend.to,
-          cc: mailSend.cc,
+          to: addressEmails(toField.entries),
+          cc: addressEmails(ccField.entries),
           html: view.html,
           attach_excel: excelInput.checked,
           mode: mode,

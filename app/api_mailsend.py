@@ -285,11 +285,15 @@ def send_mail(
 
 
 def _addresses(value: Any, fallback: Sequence[str]) -> list[str]:
-    """Arayuz duzenlenmis listeyi yollar; yollamazsa sablonunki kullanilir."""
-    if isinstance(value, (list, tuple)):
-        return [str(item).strip() for item in value if str(item).strip()]
+    """Arayuz duzenlenmis listeyi yollar; yollamazsa sablonunki kullanilir.
+
+    Liste de metin de `Ad Soyad <adres@example.com>` tasiyabilir; ayristirma
+    tek yerde (`mailsend.parse_addresses`) yapilir ve yalnizca adres kalir.
+    """
     if value is None:
         return list(fallback)
+    if isinstance(value, (list, tuple)):
+        return mailsend.split_addresses("; ".join(str(item) for item in value))
     return mailsend.split_addresses(value)
 
 

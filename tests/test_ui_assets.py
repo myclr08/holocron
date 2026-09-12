@@ -144,6 +144,7 @@ SCRIPTS = (
     "settings.js",
     "starfield.js",
     "calls.js",
+    "addressbox.js",
     "mailsend.js",
     "mailsend-settings.js",
 )
