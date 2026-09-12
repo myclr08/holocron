@@ -943,6 +943,25 @@ def export_calls(
     )
 
 
+@router.get("/calls/unmatched")
+def read_unmatched_calls(
+    request: Request, days: int = calls_intake.DEFAULT_DAYS
+) -> dict[str, Any]:
+    """Teshis: eslesmemis cok kisili aramalar ve neden eslesmedikleri.
+
+    Takvimi TAZE okur (onbellek acilir), cunku asil soru "yeniden tarasam
+    duzelir mi". Windows disinda `feature_unavailable` doner.
+    """
+    context = get_context(request)
+    config = calls_intake.load_config(context.settings)
+    source = calls_source(context, config)
+    bundle = source.read()
+    calendar = bundle[1] if len(bundle) > 1 else []
+    return calls_intake.diagnose_unmatched(
+        repository.list_calls(context.connection()), calendar, days=days
+    )
+
+
 @router.get("/calls/person/{counterpart_id}")
 def read_call_person(
     request: Request, counterpart_id: str, days: int = calls_intake.DEFAULT_DAYS

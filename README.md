@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.6.1** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.6.2** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -575,8 +575,13 @@ Nasıl çalışır:
   **grup araması** sayılır. Eşleşme iki yoldan denenir: önce **kesin** yol —
   aramanın `threadId` değeri takvim kaydının `skypeTeamsDataObj.cid` alanına
   (ya da toplantı bağlantısına) denk geliyorsa saat hiç hesaba katılmaz —
-  sonra ± 10 dakikalık zaman yakınlığı. Yineleyen serinin şablonu, iptal
-  edilmiş kayıtlar ve "ofiste değilim" eşleşmeye girmez.
+  sonra ± 10 dakikalık zaman yakınlığı. **Tekrarlayan toplantılar** (sabah
+  daily'leri) takvimde çoğu zaman yalnız *seri kaydı* olarak durur,
+  oluşumları ayrı kayıt değildir: bu yüzden seri kaydı — iptal edilmiş olsa
+  bile — **kimlik eşleşmesinde adaydır**, zaman eşleşmesine ise hiç girmez
+  (tarihi serinin ilk günüdür). "Ofiste değilim" hiçbir yolda eşleşmez.
+  Özet balonu kaç toplantının eşleştiğini ve kaçının tekrarlayan seriden
+  geldiğini ayrı ayrı söyler.
 - **Grup sohbetleri.** Aramanın `groupChatThreadId` değeri bir sohbete
   denk geliyorsa başlık o sohbetin **kendi adı** olur ("Grup araması" yerine
   "Proje ekibi"); katılımcı listesi boşsa sohbetin üyeleri yedeğe geçer.
@@ -609,6 +614,13 @@ Nasıl çalışır:
   çekmecesini açar: özet (toplam süre, sayı, giden/gelen, kaçırılan, en uzun,
   son görüşme), o kişiyle bütün görüşmeler ve katıldığı grup/toplantılar.
   Toplantı satırı organizatör, yanıt ve (kayıtta varsa) katılımcıları gösterir.
+- **Eşleşmeyenler.** Bir grup araması toplantı olması gerekirken öyle
+  görünmüyorsa, araç çubuğundaki **Eşleşmeyenler** düğmesi (eşleşmeyen varsa
+  görünür) takvimi yeniden okuyup her arama için nedeni yazar: aramada
+  toplantı kimliği yok, kimlik takvimde bulunamadı, takvimdeki en yakın kayıt
+  N dakika uzakta, ya da "yeniden çekilince eşleşecek". Her aramanın altında
+  en yakın üç takvim kaydı (konu, tür, saat farkı) listelenir. Aynı döküm
+  uçtan da alınabilir: `GET /api/calls/unmatched?days=30`
 - **Pencere.** 7 / 30 / 90 gün. Arama kutusu (`/` kısayolu) kişi adı, toplantı
   konusu ve organizatör üzerinde süzer.
 - **Excel.** **Excel'e aktar** üç sayfalık bir dosya verir: **Aramalar**,
@@ -882,7 +894,7 @@ kilitler. Üçüncüsü etikettir: `v<sürüm>` biçiminde itilir ve release iş
 yanlış numaralı bir release çıkmaz.
 
 ```bash
-git tag v0.6.1 && git push origin v0.6.1
+git tag v0.6.2 && git push origin v0.6.2
 ```
 
 ### Teams sondası
@@ -939,6 +951,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.6.2** | 12 Eylül 2026 | Teams Aramalar: tekrarlayan toplantı serileri (RecurringMaster) kimlikle eşleşir, iptal edilmiş seriler dahil; "Eşleşmeyenler" teşhis çekmecesi; taramada tekrarlayan sayısı |
 | **v0.6.1** | 12 Eylül 2026 | Kime/CC adres kutusu: rehberden seçim tek çip, boşlukta bölme yok, `Ad Soyad <adres>` ayrıştırma, geçersiz adres uyarısı |
 | **v0.6.0** | 12 Eylül 2026 | **E-posta ile gönder**: grid'de onay kutusu sütunu, Kime/CC taşıyan e-posta şablonları, çipli adres kutusu (`Ad Soyad <adres>`), Outlook uyumlu HTML tablo, Excel eki, "Outlook'ta aç" / "Doğrudan gönder" kipleri, gönderim geçmişi |
 | **v0.5.0** | 12 Eylül 2026 | Teams'e mesaj (derin bağlantı, `msteams:` protokolü, kurum rehberi içe aktarma) ve **Teams Aramalar**: yerel önbellekten arama geçmişi, kişi kırılımı, istatistik şeridi, üç sayfalık Excel |

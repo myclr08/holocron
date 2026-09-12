@@ -50,6 +50,15 @@ from app.teamscalls.source import (
 # Cuma 12:00 UTC: pencere hesabi makinenin gunune bagli kalmasin.
 NOW = datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc)
 
+# Gercek bir onbellek sondasindan alinan adlar ve kimlik bicimleri.
+CALL_DB = "Teams:call-history-manager:react-web-client:kiraci:kullanici:tr-tr"
+CALENDAR_DB = "Teams:calendar:react-web-client:kiraci:kullanici:tr-tr"
+PROFILE_DB = "Teams:profiles:react-web-client:kiraci:kullanici:tr-tr"
+THREAD_DB = "Teams:conversation-manager:react-web-client:kiraci:kullanici:tr-tr"
+
+MEETING_THREAD = "19:meeting_NGY3ZjkwZDAtMTIzNC00@thread.v2"
+GROUP_THREAD = "19:abcdef0123456789abcdef0123456789@thread.v2"
+
 
 def moment(days: float = 0, hours: float = 0) -> datetime:
     return NOW - timedelta(days=days, hours=hours)
@@ -681,6 +690,200 @@ def test_when_nothing_can_be_read_the_user_is_told(tmp_path, monkeypatch):
     assert caught.value.code == "calls_read_failed"
 
 
+# --- tekrarlayan toplantilar (seri kaydi) ---------------------------------
+#
+# Saha: sabah daily'leri eslesmiyordu. Sebep, `RecurringMaster` kayitlarinin
+# tamamen atilmasiydi; tekrarlayan toplanti takvimde cogu zaman YALNIZCA seri
+# kaydi olarak duruyor, olusumlar ayri kayit degil.
+
+
+def master(subject: str, start=None, cid: str = MEETING_THREAD, cancelled: bool = False):
+    record = event(
+        subject,
+        local_text(start or moment(200)),  # seri kaydinin tarihi: serinin ilk gunu
+        event_type="RecurringMaster",
+        cid=cid,
+    )
+    record.is_cancelled = cancelled
+    return record
+
+
+def test_a_recurring_master_matches_by_thread_id():
+    """Saat tutmasa da kimlik tutuyorsa tekrarlayan toplanti eslesir."""
+    rows = intake.normalize(
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)],
+        [master("Sabah daily")],
+    )
+    assert rows[0]["kind"] == intake.KIND_MEETING
+    assert rows[0]["meeting_subject"] == "Sabah daily"
+
+
+def test_a_recurring_master_still_never_matches_by_time():
+    """Seri kaydinin tarihi serinin ilk gunudur; saat yakinligi anlamsiz."""
+    started = moment(1)
+    rows = intake.normalize(
+        [call("a", started, call_type=TYPE_MULTI_PARTY)],
+        [master("Sabah daily", start=started, cid="")],
+    )
+    assert rows[0]["kind"] == intake.KIND_GROUP
+
+
+def test_a_cancelled_master_still_matches_by_thread_id():
+    """Iptal edilmis seriye ait GECMIS aramalar var; kimlik yine tutar."""
+    rows = intake.normalize(
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)],
+        [master("İptal edilmiş seri", cancelled=True)],
+    )
+    assert rows[0]["kind"] == intake.KIND_MEETING
+    assert rows[0]["meeting_subject"] == "İptal edilmiş seri"
+
+
+def test_a_cancelled_occurrence_still_stays_out_of_the_time_match():
+    started = moment(1)
+    cancelled = event("İptal", local_text(started))
+    cancelled.is_cancelled = True
+    rows = intake.normalize([call("a", started, call_type=TYPE_MULTI_PARTY)], [cancelled])
+    assert rows[0]["kind"] == intake.KIND_GROUP
+
+
+def test_the_group_chat_thread_is_compared_with_the_cid_too():
+    rows = intake.normalize(
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, group_thread_id=MEETING_THREAD)],
+        [master("Ekip toplantısı")],
+    )
+    assert rows[0]["kind"] == intake.KIND_MEETING
+    assert rows[0]["meeting_subject"] == "Ekip toplantısı"
+
+
+def test_the_scan_counts_the_recurring_matches(conn):
+    source = FakeCallSource(
+        calls=[
+            call("seri", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD),
+            call("tek", moment(2), call_type=TYPE_MULTI_PARTY, thread_id=GROUP_THREAD),
+        ],
+        calendar=[
+            master("Sabah daily"),
+            event("Tek seferlik", local_text(moment(2)), cid=GROUP_THREAD),
+        ],
+    )
+    result = intake.scan(conn, source)
+    assert result["meetings_matched"] == 2
+    assert result["recurring_matched"] == 1
+
+
+def test_the_event_type_is_not_stored_on_the_row(conn):
+    """Seri sayaci gecici bir alandir; tabloda sutunu yok."""
+    intake.scan(
+        conn,
+        FakeCallSource(
+            calls=[call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)],
+            calendar=[master("Sabah daily")],
+        ),
+    )
+    assert "matched_event_type" not in repo.get_call(conn, "a")
+
+
+# --- teshis: eslesmeyenler dokumu ----------------------------------------
+
+
+def unmatched_rows():
+    return intake.normalize(
+        [
+            # Kimligi var, takvimde karsiligi yok.
+            call("kimlikli", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD),
+            # Hic kimlik tasimiyor.
+            call("kimliksiz", moment(2), call_type=TYPE_MULTI_PARTY, participants=[PERSON_ONE]),
+            # Birebir arama teshise hic girmez.
+            call("birebir", moment(1), other=PERSON_ONE),
+        ],
+        names={PERSON_ONE: "Örnek Kişi"},
+    )
+
+
+def test_the_diagnosis_only_covers_unmatched_group_calls():
+    data = intake.diagnose_unmatched(unmatched_rows(), [], days=30, now=NOW)
+    assert [item["call_id"] for item in data["calls"]] == ["kimlikli", "kimliksiz"]
+    assert data["summary"]["unmatched"] == 2
+
+
+def test_a_call_without_a_thread_id_says_so():
+    data = intake.diagnose_unmatched(unmatched_rows(), [], days=30, now=NOW)
+    entry = next(item for item in data["calls"] if item["call_id"] == "kimliksiz")
+    assert entry["reason"] == "no_thread_id"
+    assert entry["participants"] == ["Örnek Kişi"]
+    assert data["summary"]["no_thread_id"] == 1
+
+
+def test_a_call_whose_core_is_missing_from_the_calendar_says_so():
+    data = intake.diagnose_unmatched(unmatched_rows(), [], days=30, now=NOW)
+    entry = next(item for item in data["calls"] if item["call_id"] == "kimlikli")
+    assert entry["reason"] == "no_calendar_with_core"
+    assert entry["thread_core"] == intake.thread_core(MEETING_THREAD)
+    assert data["summary"]["core_not_in_calendar"] == 1
+
+
+def test_a_near_miss_reports_the_gap_in_minutes():
+    rows = intake.normalize(
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=GROUP_THREAD)]
+    )
+    near = event("Yakın toplantı", local_text(moment(1) + timedelta(minutes=42)))
+    data = intake.diagnose_unmatched(rows, [near], days=30, now=NOW)
+    entry = data["calls"][0]
+    assert entry["reason"].startswith("only_time_gap:")
+    assert entry["reason"].endswith("42")
+    assert entry["candidates"][0]["subject"] == "Yakın toplantı"
+    assert entry["candidates"][0]["gap_minutes"] == 42
+
+
+def test_the_diagnosis_says_which_calls_a_rescan_would_fix():
+    rows = intake.normalize(
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)]
+    )
+    data = intake.diagnose_unmatched(rows, [master("Sabah daily")], days=30, now=NOW)
+    entry = data["calls"][0]
+    assert entry["reason"] == "matches_now"
+    assert entry["would_match"]["subject"] == "Sabah daily"
+    assert data["summary"]["matched_after_fix"] == 1
+
+
+def test_the_candidate_list_stops_at_three():
+    rows = intake.normalize(
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=GROUP_THREAD)]
+    )
+    events = [
+        event(f"Toplantı {index}", local_text(moment(1) + timedelta(minutes=20 + index)))
+        for index in range(6)
+    ]
+    data = intake.diagnose_unmatched(rows, events, days=30, now=NOW)
+    assert len(data["calls"][0]["candidates"]) == 3
+    # En yakindan uzaga siralanir.
+    gaps = [item["gap_minutes"] for item in data["calls"][0]["candidates"]]
+    assert gaps == sorted(gaps)
+
+
+def test_the_diagnosis_endpoint_answers(api_client, fake_calls):
+    fake_calls.calls = [
+        call("kimliksiz", moment(1), call_type=TYPE_MULTI_PARTY, participants=[PERSON_ONE]),
+        call("birebir", moment(2), other=PERSON_ONE),
+    ]
+    api_client.post("/api/calls/scan")
+    data = api_client.get("/api/calls/unmatched?days=90").json()
+    assert data["summary"]["unmatched"] == 1
+    assert data["summary"]["no_thread_id"] == 1
+    assert data["calls"][0]["reason"] == "no_thread_id"
+    assert data["calls"][0]["duration_text"]
+
+
+def test_the_diagnosis_endpoint_needs_the_cache(api_client, context, monkeypatch):
+    from app import teamscalls
+
+    monkeypatch.setattr("app.teamscalls.is_supported", lambda: False)
+    context.calls_factory = teamscalls.default_source
+    response = api_client.get("/api/calls/unmatched")
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "feature_unavailable"
+
+
 # --- tekillestirme --------------------------------------------------------
 
 
@@ -879,15 +1082,6 @@ def test_an_unknown_person_gets_an_empty_but_valid_view():
 # takvim saatleri `datetime`, bazi dizgeler `bytes`, katilimcilar
 # `participantList` altinda ve `displayName` hep `null`.
 
-CALL_DB = "Teams:call-history-manager:react-web-client:kiraci:kullanici:tr-tr"
-CALENDAR_DB = "Teams:calendar:react-web-client:kiraci:kullanici:tr-tr"
-PROFILE_DB = "Teams:profiles:react-web-client:kiraci:kullanici:tr-tr"
-THREAD_DB = "Teams:conversation-manager:react-web-client:kiraci:kullanici:tr-tr"
-
-MEETING_THREAD = "19:meeting_NGY3ZjkwZDAtMTIzNC00@thread.v2"
-GROUP_THREAD = "19:abcdef0123456789abcdef0123456789@thread.v2"
-
-
 def test_the_four_databases_we_need_are_recognised():
     assert teams_cache.database_role(CALL_DB) == "call-history-manager"
     assert teams_cache.database_role(CALENDAR_DB) == "calendar"
@@ -1034,14 +1228,6 @@ def test_a_raw_calendar_record_keeps_its_datetime():
     assert record.attendees == ["İkinci Örnek"]
     assert record.cid == MEETING_THREAD
     assert teams_cache.calendar_from_value({"subject": "saatsiz"}) is None
-
-
-def test_a_cancelled_meeting_never_matches():
-    started = moment(1)
-    cancelled = event("İptal", local_text(started))
-    cancelled.is_cancelled = True
-    rows = intake.normalize([call("a", started, call_type=TYPE_MULTI_PARTY)], [cancelled])
-    assert rows[0]["kind"] == intake.KIND_GROUP
 
 
 def test_profile_records_feed_the_name_map():

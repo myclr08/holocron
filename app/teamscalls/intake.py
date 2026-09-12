@@ -17,7 +17,7 @@ Uc soru burada cevaplanir:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Sequence
 
@@ -204,8 +204,12 @@ def counterpart_of(call: CallRecord, names: dict[str, str] | None) -> tuple[str,
 
 
 def usable_events(calendar: Iterable[CalendarRecord]) -> list[CalendarRecord]:
-    """Yineleyen serinin sablonu, iptal edilmis kayit ve 'ofiste degilim'
-    eslesmeye girmez."""
+    """**Zaman** eslemesine girebilecek takvim kayitlari.
+
+    Yineleyen serinin sablonu (`RecurringMaster`) buraya GIRMEZ: tarihi
+    serinin ilk gunudur, bugunku aramayla saat karsilastirmak anlamsiz olur.
+    Iptal edilmis kayit ve "ofiste degilim" de girmez.
+    """
     picked: list[CalendarRecord] = []
     for event in calendar or ():
         if clean_text(event.event_type) == EVENT_RECURRING_MASTER:
@@ -218,6 +222,46 @@ def usable_events(calendar: Iterable[CalendarRecord]) -> list[CalendarRecord]:
             continue
         picked.append(event)
     return picked
+
+
+def identity_events(calendar: Iterable[CalendarRecord]) -> list[CalendarRecord]:
+    """**Kimlik** eslemesine girebilecek kayitlar (kimligi olan her sey).
+
+    Tekrarlayan toplantilar (sabah daily'leri) takvimde cogu zaman yalnizca
+    seri kaydi olarak durur; olusumlar ayri kayit olmayabilir. Kimlik
+    eslemesinde saat rol oynamadigi icin seri kaydi da, iptal edilmis seri de
+    adaydir: gecmis aramalar iptal edilmis bir seriye ait olabilir.
+    """
+    picked: list[CalendarRecord] = []
+    for event in calendar or ():
+        if clean_text(event.show_as) == SHOW_AS_OOF:
+            continue
+        if not clean_text(getattr(event, "cid", "")) and not clean_text(
+            getattr(event, "meeting_url", "")
+        ):
+            continue
+        picked.append(event)
+    return picked
+
+
+@dataclass
+class EventPools:
+    """Iki ayri havuz: kimlikle eslesenler ve saatle eslesenler."""
+
+    identity: list[CalendarRecord] = dataclass_field(default_factory=list)
+    time: list[CalendarRecord] = dataclass_field(default_factory=list)
+
+    def __iter__(self):
+        """Eski kod bunu duz bir takvim listesi gibi gezebilsin."""
+        return iter(self.time)
+
+
+def event_pools(calendar: Iterable[CalendarRecord]) -> EventPools:
+    """Takvimi bir kez suzup iki havuza ayirir (her arama icin tekrar etmesin)."""
+    if isinstance(calendar, EventPools):
+        return calendar
+    records = list(calendar or ())
+    return EventPools(identity=identity_events(records), time=usable_events(records))
 
 
 def thread_core(thread_id: Any) -> str:
@@ -251,19 +295,40 @@ def thread_matches(thread_id: Any, event: CalendarRecord) -> bool:
     return bool(url and core in url)
 
 
+def call_threads(call: CallRecord) -> list[str]:
+    """Aramanin tasidigi sohbet kimlikleri (toplanti ve grup sohbeti)."""
+    markers = [clean_text(call.thread_id), clean_text(call.group_thread_id)]
+    return [marker for marker in markers if marker]
+
+
+def match_by_thread(
+    call: CallRecord, events: Iterable[CalendarRecord]
+) -> CalendarRecord | None:
+    """Kimlikle kesin eslesme: `threadId` ya da `groupChatThreadId` <-> `cid`."""
+    markers = call_threads(call)
+    if not markers:
+        return None
+    for event in events:
+        if any(thread_matches(marker, event) for marker in markers):
+            return event
+    return None
+
+
 def match_event(
     call: CallRecord,
-    events: Sequence[CalendarRecord],
+    events: Any,
     tolerance_minutes: int = MEETING_TOLERANCE_MINUTES,
 ) -> CalendarRecord | None:
     """Aramanin takvim kaydi.
 
-    Once **kesin** yol denenir: aramanin `threadId` degeri takvim kaydinin
-    `skypeTeamsDataObj.cid` alanina (ya da toplanti baglantisina) denk
-    geliyorsa saat hic hesaba katilmaz. Yoksa baslangic saatine en yakin
-    kayit alinir; pencere disi eslesmez.
+    Once **kesin** yol denenir: aramanin `threadId` ya da `groupChatThreadId`
+    degeri takvim kaydinin `skypeTeamsDataObj.cid` alanina (ya da toplanti
+    baglantisinin govdesine) denk geliyorsa saat hic hesaba katilmaz --
+    tekrarlayan toplantilar yalnizca boyle eslesir. Kimlik tutmuyorsa
+    baslangic saatine en yakin kayit alinir; pencere disi eslesmez.
     """
-    exact = next((event for event in events if thread_matches(call.thread_id, event)), None)
+    pools = event_pools(events)
+    exact = match_by_thread(call, pools.identity)
     if exact is not None:
         return exact
 
@@ -273,7 +338,7 @@ def match_event(
     window = timedelta(minutes=max(0, int(tolerance_minutes)))
     best: CalendarRecord | None = None
     best_gap: timedelta | None = None
-    for event in events:
+    for event in pools.time:
         moment = parse_local(event.start_time)
         if moment is None:
             continue
@@ -309,7 +374,7 @@ def thread_of(call: CallRecord, threads: dict[str, ThreadRecord]) -> ThreadRecor
 
 def normalize_call(
     call: CallRecord,
-    events: Sequence[CalendarRecord] = (),
+    events: Any = (),
     names: dict[str, str] | None = None,
     seen_at: str | None = None,
     threads: dict[str, ThreadRecord] | None = None,
@@ -370,6 +435,9 @@ def normalize_call(
         "attendees_json": json.dumps(attendees, ensure_ascii=False),
         "raw_json": json.dumps(jsonable(call.raw or {}), ensure_ascii=False, default=str),
         "seen_at": seen_at or repository.now_iso(),
+        # Saklanmaz (tabloda sutunu yok): yalnizca tarama ozetindeki
+        # "kac tekrarlayan toplanti eslesti" sayimi icin tasinir.
+        "matched_event_type": clean_text(event.event_type) if event is not None else "",
     }
 
 
@@ -381,7 +449,7 @@ def normalize(
     threads: Iterable[ThreadRecord] = (),
 ) -> list[dict[str, Any]]:
     """Ham kayitlar -> veritabani satirlari (eskiden yeniye)."""
-    events = usable_events(calendar)
+    events = event_pools(calendar)
     known_threads = thread_index(threads)
     stamp = seen_at or repository.now_iso()
     rows: list[dict[str, Any]] = []
@@ -822,6 +890,141 @@ def person_view(
     }
 
 
+# --- teshis: neden eslesmedi? --------------------------------------------
+#
+# Tekrarlayan toplantilar uzun sure "grup aramasi" olarak kaldi. Bu bolum
+# kullanicinin ekranindan tek tikla toplanabilen bir dokum uretir: hangi
+# arama hangi sebeple eslesmedi, takvimde en yakin adaylar neydi.
+
+# Bir arama icin en fazla kac takvim adayi gosterilir.
+MAX_CANDIDATES = 3
+# Aday sayilabilmek icin en fazla bu kadar uzakta olabilir.
+CANDIDATE_WINDOW_HOURS = 24
+
+REASON_NO_THREAD = "no_thread_id"
+REASON_NO_CORE = "no_calendar_with_core"
+REASON_TIME_GAP = "only_time_gap"
+REASON_MATCHES_NOW = "matches_now"
+
+
+def row_threads(row: dict[str, Any]) -> list[str]:
+    markers = [clean_text(row.get("thread_id")), clean_text(row.get("group_thread_id"))]
+    return [marker for marker in markers if marker]
+
+
+def event_view(event: CalendarRecord, gap_minutes: int | None = None) -> dict[str, Any]:
+    """Takvim adayinin teshis dokumu (kimlik govdeleriyle)."""
+    url = clean_text(getattr(event, "meeting_url", ""))
+    moment = parse_local(event.start_time)
+    return {
+        "subject": clean_text(event.subject),
+        "event_type": clean_text(event.event_type),
+        "start_time": iso_text(moment),
+        "cid_core": thread_core(getattr(event, "cid", "")),
+        "url_core": url[-40:] if url else "",
+        "is_cancelled": bool(getattr(event, "is_cancelled", False)),
+        "gap_minutes": gap_minutes,
+    }
+
+
+def candidates_for(
+    row: dict[str, Any], events: Sequence[CalendarRecord], limit: int = MAX_CANDIDATES
+) -> list[dict[str, Any]]:
+    """Aramaya zaman olarak en yakin takvim kayitlari (neden eslesmedigi icin)."""
+    started = parse_utc(row.get("started_at"))
+    if started is None:
+        return []
+    window = timedelta(hours=CANDIDATE_WINDOW_HOURS)
+    near: list[tuple[timedelta, CalendarRecord]] = []
+    for event in events:
+        moment = parse_local(event.start_time)
+        if moment is None:
+            continue
+        gap = abs(moment - started)
+        if gap <= window:
+            near.append((gap, event))
+    near.sort(key=lambda item: item[0])
+    return [
+        event_view(event, int(gap.total_seconds() // 60)) for gap, event in near[:limit]
+    ]
+
+
+def diagnose_unmatched(
+    rows: Iterable[dict[str, Any]],
+    calendar: Iterable[CalendarRecord] = (),
+    days: Any = DEFAULT_DAYS,
+    now: datetime | None = None,
+    names: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Eslesmemis cok kisili aramalarin dokumu + neden eslesmedikleri.
+
+    `calendar` TAZE okunan takvimdir: bir satirin bugun eslesip eslesmeyecegi
+    ("yeniden tarasam duzelir mi") ancak boyle anlasilir.
+    """
+    stored = list(rows)
+    known = names_from_rows(stored) if names is None else names
+    since = since_of(days, now)
+    pools = event_pools(calendar)
+
+    entries: list[dict[str, Any]] = []
+    counts = {REASON_NO_THREAD: 0, REASON_NO_CORE: 0, REASON_MATCHES_NOW: 0}
+    for row in stored:
+        if row.get("kind") != KIND_GROUP or not in_window(row, since):
+            continue
+        markers = row_threads(row)
+        fresh = next(
+            (
+                event
+                for event in pools.identity
+                if any(thread_matches(marker, event) for marker in markers)
+            ),
+            None,
+        )
+        candidates = candidates_for(row, pools.time or pools.identity)
+
+        if not markers:
+            reason = REASON_NO_THREAD
+            counts[REASON_NO_THREAD] += 1
+        elif fresh is not None:
+            reason = REASON_MATCHES_NOW
+            counts[REASON_MATCHES_NOW] += 1
+        elif candidates and candidates[0]["gap_minutes"] is not None:
+            reason = f"{REASON_TIME_GAP}:{candidates[0]['gap_minutes']}"
+            counts[REASON_NO_CORE] += 1
+        else:
+            reason = REASON_NO_CORE
+            counts[REASON_NO_CORE] += 1
+
+        entries.append(
+            {
+                "call_id": row.get("call_id", ""),
+                "started_at": row.get("started_at", ""),
+                "duration_text": duration_text(row.get("duration_ms")),
+                "thread_id": clean_text(row.get("thread_id")),
+                "group_thread_id": clean_text(row.get("group_thread_id")),
+                "thread_core": thread_core(markers[0]) if markers else "",
+                "participants": participant_labels(row, known),
+                "title": display_party(row, known),
+                "reason": reason,
+                "candidates": candidates,
+                "would_match": {"subject": clean_text(fresh.subject)} if fresh is not None else None,
+            }
+        )
+
+    entries.sort(key=lambda item: str(item.get("started_at") or ""), reverse=True)
+    return {
+        "days": _as_days(days),
+        "calendar_events": len(pools.identity) + len(pools.time),
+        "summary": {
+            "unmatched": len(entries),
+            "no_thread_id": counts[REASON_NO_THREAD],
+            "core_not_in_calendar": counts[REASON_NO_CORE],
+            "matched_after_fix": counts[REASON_MATCHES_NOW],
+        },
+        "calls": entries,
+    }
+
+
 # --- tarama --------------------------------------------------------------
 
 
@@ -852,6 +1055,14 @@ def scan(conn: Any, source: CallSource, seen_at: str | None = None) -> dict[str,
     rows = normalize(calls, calendar, names, seen_at, threads)
     report = repository.import_calls(conn, rows)
     report["meetings_matched"] = sum(1 for row in rows if row["kind"] == KIND_MEETING)
+    # Tekrarlayan toplantilar yalnizca kimlik eslemesiyle yakalanir; kac
+    # tanesinin seri kaydindan geldigi ayrica sayilir.
+    report["recurring_matched"] = sum(
+        1
+        for row in rows
+        if row["kind"] == KIND_MEETING
+        and clean_text(row.get("matched_event_type")) == EVENT_RECURRING_MASTER
+    )
     report["latest_call_at"] = max(
         (row["started_at"] for row in rows if row["started_at"]), default=""
     )

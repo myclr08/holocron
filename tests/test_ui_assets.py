@@ -457,6 +457,8 @@ def test_calls_view_hooks_are_on_the_page(api_client):
         "Aramaları çek",
         'id="calls-export"',
         'id="calls-stats"',
+        'id="calls-unmatched"',
+        "Eşleşmeyenler",
         'id="calls-tab-list"',
         'id="calls-tab-people"',
         ">Liste<",
@@ -504,6 +506,14 @@ def test_calls_script_covers_the_strip_the_tabs_and_the_drawer(api_client):
     # Katilanlar (arama kaydi) ile davetliler (takvim) ayri baslikta.
     for marker in ('"Katılanlar"', '"Davetliler"', "call.attendees"):
         assert marker in script, marker
+    # Teshis: eslesmeyenler dugmesi, nedenler ve takvim adaylari.
+    for marker in ("/api/calls/unmatched", "function openUnmatched", "function renderUnmatched",
+                   "only_time_gap:", "no_thread_id", "matches_now", "recurring_matched"):
+        assert marker in script, marker
+    css_markers = (".unmatched", ".unmatched-why", ".unmatched-candidate")
+    css = api_client.get("/static/css/app.css").text
+    for marker in css_markers:
+        assert marker in css, marker
 
 
 def test_calls_styles_are_defined(api_client):

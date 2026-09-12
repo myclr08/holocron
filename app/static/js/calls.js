@@ -120,7 +120,8 @@ async function scanCalls() {
       "Aramalar çekildi",
       `${result.scanned} kayıt, en yeni: ${newest}` +
         ` · ${result.new} yeni · ${result.updated} güncellendi` +
-        (result.meetings_matched ? ` · ${result.meetings_matched} toplantı eşleşti` : ""),
+        (result.meetings_matched ? ` · ${result.meetings_matched} toplantı eşleşti` : "") +
+        (result.recurring_matched ? ` (${result.recurring_matched} tekrarlayan)` : ""),
       result.warning ? "error" : "ok",
       notes
     );
@@ -174,6 +175,10 @@ function renderCallWindows() {
 
 function renderCalls() {
   el("calls-count").textContent = `${callsState.calls.length} arama`;
+  // Eslesmeyenler: takvimle eslesmemis grup aramalari (yoksa dugme gizli).
+  const orphans = callsState.calls.filter((call) => call.kind === "group_call").length;
+  el("calls-unmatched").hidden = orphans === 0;
+  el("calls-unmatched-count").textContent = String(orphans);
   el("calls-hint").textContent = callsHint();
   el("calls-scan").disabled = !callsState.supported;
   el("calls-tab-list").classList.toggle("on", callsState.tab === "list");
@@ -416,6 +421,90 @@ function renderCallPeople() {
   });
 }
 
+// --- teshis: neden eslesmedi? -------------------------------------------
+
+const UNMATCHED_REASONS = {
+  no_thread_id: "Aramada toplantı kimliği yok",
+  no_calendar_with_core: "Bu kimlik takvimde bulunamadı",
+  matches_now: "Yeniden çekilince eşleşecek",
+};
+
+function reasonText(reason) {
+  const marker = String(reason || "");
+  if (marker.startsWith("only_time_gap:")) {
+    return `Takvimde en yakın kayıt ${marker.split(":")[1]} dk uzakta`;
+  }
+  return UNMATCHED_REASONS[marker] || marker;
+}
+
+async function openUnmatched() {
+  const body = openCallsDrawer("Eşleşmeyen aramalar", "Teşhis");
+  clear(body);
+  body.appendChild(h("p", { class: "hint", text: "Takvim okunuyor..." }));
+  try {
+    const data = await api("/api/calls/unmatched?days=" + callsState.days);
+    renderUnmatched(body, data);
+  } catch (err) {
+    clear(body);
+    body.appendChild(h("p", { class: "hint", text: err.message }));
+  }
+}
+
+function renderUnmatched(body, data) {
+  clear(body);
+  const summary = data.summary || {};
+  const lines = [
+    ["Eşleşmeyen", String(summary.unmatched || 0)],
+    ["Kimliği yok", String(summary.no_thread_id || 0)],
+    ["Takvimde yok", String(summary.core_not_in_calendar || 0)],
+    ["Yeniden çekince düzelir", String(summary.matched_after_fix || 0)],
+    ["Takvim kaydı", String(data.calendar_events || 0)],
+  ];
+  lines.forEach(([label, value]) =>
+    body.appendChild(
+      h("div", { class: "detail-row" }, [
+        h("div", { class: "label", text: label }),
+        h("div", { class: "value", text: value }),
+      ])
+    )
+  );
+
+  if (!(data.calls || []).length) {
+    body.appendChild(h("p", { class: "hint", text: "Eşleşmeyen arama yok." }));
+    return;
+  }
+
+  body.appendChild(h("h3", { text: "Aramalar" }));
+  data.calls.forEach((call) => {
+    const box = h("div", { class: "unmatched" }, [
+      h("div", { class: "unmatched-head" }, [
+        h("span", { class: "when", text: stamp(call.started_at) }),
+        h("span", { class: "what", text: call.title }),
+        h("span", { class: "much", text: call.duration_text }),
+      ]),
+      h("div", { class: "unmatched-why", text: reasonText(call.reason) }),
+    ]);
+    if (call.thread_core) {
+      box.appendChild(h("div", { class: "unmatched-id", text: "kimlik: " + call.thread_core }));
+    }
+    if ((call.participants || []).length) {
+      box.appendChild(
+        h("div", { class: "unmatched-id", text: "katılanlar: " + call.participants.join(", ") })
+      );
+    }
+    (call.candidates || []).forEach((item) =>
+      box.appendChild(
+        h("div", { class: "unmatched-candidate" }, [
+          h("span", { class: "when", text: stamp(item.start_time) }),
+          h("span", { class: "what", text: item.subject || "(konusuz)" }),
+          h("span", { class: "much", text: `${item.event_type || "?"} · ${item.gap_minutes} dk` }),
+        ])
+      )
+    );
+    body.appendChild(box);
+  });
+}
+
 // --- cekmece -------------------------------------------------------------
 
 function openCallsDrawer(title, kindLabel) {
@@ -585,6 +674,7 @@ function bindCalls() {
   });
   el("calls-scan").addEventListener("click", scanCalls);
   el("calls-export").addEventListener("click", exportCalls);
+  el("calls-unmatched").addEventListener("click", openUnmatched);
   el("calls-drawer-close").addEventListener("click", closeCallsDrawer);
   el("calls-tab-list").addEventListener("click", () => {
     callsState.tab = "list";

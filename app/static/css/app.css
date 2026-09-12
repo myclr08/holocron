@@ -1747,6 +1747,35 @@ html.crawl-open .layout { visibility: hidden; }
 .call-line .what { flex: 1; overflow-wrap: anywhere; }
 .call-line .much { color: var(--muted); font-family: var(--mono); white-space: nowrap; }
 
+/* Teshis dokumu: eslesmeyen arama ve takvim adaylari. */
+.unmatched {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.unmatched:last-child { border-bottom: 0; }
+.unmatched-head { display: flex; gap: 8px; align-items: baseline; }
+.unmatched-head .when { color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+.unmatched-head .what { flex: 1; overflow-wrap: anywhere; }
+.unmatched-head .much { color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+.unmatched-why { color: var(--accent); margin-top: 2px; }
+.unmatched-id { color: var(--muted); font-family: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
+
+.unmatched-candidate {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 4px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+}
+
+.unmatched-candidate .when { font-family: var(--mono); white-space: nowrap; }
+.unmatched-candidate .what { flex: 1; overflow-wrap: anywhere; }
+.unmatched-candidate .much { font-family: var(--mono); white-space: nowrap; }
+
 /* 1024'te bes kart iki satira iner. */
 @media (max-width: 1024px) {
   .stats-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
