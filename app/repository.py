@@ -2221,6 +2221,38 @@ def history_call_ids(conn: sqlite3.Connection) -> set[str]:
     return {str(row["call_id"]) for row in rows}
 
 
+def prune_chat_calls(
+    conn: sqlite3.Connection, keep_ids: Iterable[str], since: str = ""
+) -> int:
+    """Toplanti sohbetinden gelmis ama artik uretilmeyen satirlari siler.
+
+    Yalnizca `source='chat'` satirlarina ve yalnizca taranan PENCERE icine
+    dokunur: pencerenin disinda kalan eski katilim kayitlari durur, `history`
+    satirlarina hic dokunulmaz. Birlestirme anahtari degisince eski (yanlis)
+    kayitlarin temizlenmesi icin var.
+    """
+    keep = {str(item) for item in keep_ids}
+    marker = str(since or "").strip()
+    if marker:
+        rows = conn.execute(
+            "SELECT call_id FROM teams_calls WHERE source = 'chat' AND started_at >= ?",
+            (marker,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT call_id FROM teams_calls WHERE source = 'chat'"
+        ).fetchall()
+    stale = [str(row["call_id"]) for row in rows if str(row["call_id"]) not in keep]
+    if not stale:
+        return 0
+    with conn:
+        conn.executemany(
+            "DELETE FROM teams_calls WHERE call_id = ? AND source = 'chat'",
+            [(item,) for item in stale],
+        )
+    return len(stale)
+
+
 def call_count(conn: sqlite3.Connection) -> int:
     row = conn.execute("SELECT COUNT(*) AS n FROM teams_calls").fetchone()
     return int(row["n"]) if row else 0

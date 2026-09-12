@@ -609,7 +609,10 @@ function renderAttendance(body, data) {
         class: "unmatched-id",
         text:
           `tür: ${item.event_kind} · katılımcı: ${item.part_count}` +
-          ` · ben: ${item.me_present || "yok"}`,
+          ` · ben: ${item.me_present || "yok"}` +
+          ` · callid: ${item.has_call_id ? "var" : "yok"}` +
+          ` · icaluid: ${item.has_ical_uid ? "var" : "yok"}` +
+          (item.day ? ` · gün: ${item.day}` : ""),
       }),
     ]);
     body.appendChild(box);

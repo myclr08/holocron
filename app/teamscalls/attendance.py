@@ -40,11 +40,12 @@ PARTLIST_ENDED = "ended"
 PARTLIST_STARTED = "started"
 
 # Bozuk XML icin yedek yol.
-_PARTLIST_TAG = re.compile(r"<partlist\b[^>]*>", re.IGNORECASE)
+_PARTLIST_TAG = re.compile(r"<\s*[\w.-]*:?partlist\b[^>]*>", re.IGNORECASE)
 _ATTR_TYPE = re.compile(r'\btype\s*=\s*"([^"]*)"', re.IGNORECASE)
 _ATTR_CALL_ID = re.compile(r'\bcallid\s*=\s*"([^"]*)"', re.IGNORECASE)
 _PART_BLOCK = re.compile(
-    r'<part\b[^>]*\bidentity\s*=\s*"([^"]*)"[^>]*>(.*?)</part\s*>', re.IGNORECASE | re.DOTALL
+    r'<\s*[\w.-]*:?part\b[^>]*\bidentity\s*=\s*"([^"]*)"[^>]*>(.*?)</\s*[\w.-]*:?part\s*>',
+    re.IGNORECASE | re.DOTALL,
 )
 _DURATION = re.compile(r"<duration\b[^>]*>\s*(\d+)\s*</duration\s*>", re.IGNORECASE)
 _ELEMENT_EVENT_TYPE = re.compile(
@@ -52,6 +53,8 @@ _ELEMENT_EVENT_TYPE = re.compile(
 )
 _ELEMENT_ENDED = re.compile(r"<ended\b", re.IGNORECASE)
 _ELEMENT_ICAL = re.compile(r"<icaluid\b[^>]*>\s*([^<]*)\s*</icaluid\s*>", re.IGNORECASE)
+_ELEMENT_CALL_ID = re.compile(r"<callid\b[^>]*>\s*([^<]*)\s*</callid\s*>", re.IGNORECASE)
+_ELEMENT_ENDTIME = re.compile(r"<endtime\b[^>]*>\s*([^<]*)\s*</endtime\s*>", re.IGNORECASE)
 
 
 MATCH_EXACT = "exact"
@@ -100,6 +103,9 @@ class MeetingAttendance:
     # Olay turu: "ended", "started" ya da bos (yazmayan bloklar).
     kind: str = ""
     parts: list[MeetingPart] = field(default_factory=list)
+    # Mesajin kendi anahtari (`messageMap` anahtari): son care birlestirme
+    # anahtari olarak kullanilir, iki mesaj asla ayni anahtara dusmesin diye.
+    message_id: str = ""
     # `meetingdetails` altindan: takvim eslemesinin en kesin yolu.
     ical_uid: str = ""
     start_time: Any = ""
@@ -138,8 +144,12 @@ def is_call_event(message_type: Any) -> bool:
     return any(hint in marker for hint in CALL_EVENT_HINTS)
 
 
+# `<partlist`, `<ns:partlist`, `<PartList` -- hepsi ayni sey.
+_PARTLIST_ANY = re.compile(r"<\s*[\w.-]*:?partlist\b", re.IGNORECASE)
+
+
 def has_partlist(content: Any) -> bool:
-    return "<partlist" in clean_text(content).casefold()
+    return bool(_PARTLIST_ANY.search(clean_text(content)))
 
 
 # --- XML cozumu ----------------------------------------------------------
@@ -181,7 +191,14 @@ class Partlist:
 
 
 def _tag(element: Any) -> str:
-    return str(getattr(element, "tag", "")).rsplit("}", 1)[-1].casefold()
+    """Etiketin yerel adi, kucuk harf.
+
+    `{uri}partlist` (ad alani) ve `ns:partlist` (onek) ayni sekilde
+    `partlist` olur: sahada `calleventtype` ve `callid` bulunamamasinin
+    olasi nedeni bu karsilastirmaydi.
+    """
+    name = str(getattr(element, "tag", ""))
+    return name.rsplit("}", 1)[-1].rsplit(":", 1)[-1].casefold()
 
 
 def _child(element: Any, name: str) -> Any:
@@ -316,18 +333,26 @@ def _parse_with_regex(text: str) -> Partlist:
         parts.append(MeetingPart(mri=marker, seconds=int(found.group(1)) if found else 0))
 
     ical = _ELEMENT_ICAL.search(text)
+    element_call = _ELEMENT_CALL_ID.search(text)
+    end_time = _ELEMENT_ENDTIME.search(text)
     return Partlist(
         kind=kind,
-        call_id=clean_text(found_call.group(1)) if found_call else "",
+        # Oznitelik (eski bicim) ya da eleman (yeni bicim): ikisi de okunur.
+        call_id=clean_text(found_call.group(1))
+        if found_call
+        else (clean_text(element_call.group(1)) if element_call else ""),
         parts=parts,
         ical_uid=clean_text(ical.group(1)) if ical else "",
+        end_time=clean_text(end_time.group(1)) if end_time else "",
     )
 
 
 # --- mesaj -> katilim kaydi ----------------------------------------------
 
 
-def attendance_of(message: Any, thread_id: Any = "") -> MeetingAttendance | None:
+def attendance_of(
+    message: Any, thread_id: Any = "", message_id: Any = ""
+) -> MeetingAttendance | None:
     """Tek mesaj -> katilim kaydi (SUZMEDEN).
 
     Burada karar verilmez: `started` mesaji da, suresiz blok da oldugu gibi
@@ -358,6 +383,7 @@ def attendance_of(message: Any, thread_id: Any = "") -> MeetingAttendance | None
     return MeetingAttendance(
         thread_id=clean_text(thread_id) or clean_text(message.get("conversationId")),
         call_id=block.call_id or clean_text(message.get("callId")),
+        message_id=clean_text(message_id) or clean_text(message.get("id")),
         ended_at=ended,
         kind=block.kind,
         parts=block.parts,
@@ -384,8 +410,8 @@ def attendance_from_record(value: Any) -> list[MeetingAttendance]:
         return []
 
     found: list[MeetingAttendance] = []
-    for message in messages.values():
-        record = attendance_of(message, thread_id)
+    for key, message in messages.items():
+        record = attendance_of(message, thread_id, key)
         if record is not None:
             found.append(record)
     return found

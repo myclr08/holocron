@@ -1158,7 +1158,8 @@ def test_attendance_becomes_a_meeting_row():
     assert row["kind"] == intake.KIND_MEETING
     assert row["source"] == "chat"
     assert row["duration_ms"] == 1863 * 1000
-    assert row["call_id"] == "cagri-1"
+    # Anahtar `callid` + gun: ayni cagri farkli gunde ayri satir olur.
+    assert row["call_id"] == "cagri-1:" + intake.attendance_day(fake_attended())
     assert intake.duration_text(row["duration_ms"]) == "31 dk"
     # Baslangic, bitisten kendi surem kadar oncesi.
     from app.teamscalls.source import parse_utc
@@ -1200,9 +1201,10 @@ def test_the_calendar_subject_is_attached_by_thread():
     assert rows[0]["meeting_subject"] == "Sabah daily"
 
 
-def test_a_call_without_an_id_gets_one_from_the_thread_and_time():
-    rows = intake.normalize_attendance([fake_attended(call_id="")], MY_MRI)
-    assert rows[0]["call_id"].startswith("19:meeting_ABC123456789@thread.v2:")
+def test_a_call_without_an_id_gets_one_from_the_thread_and_the_day():
+    record = fake_attended(call_id="")
+    rows = intake.normalize_attendance([record], MY_MRI)
+    assert rows[0]["call_id"] == "ABC123456789:" + intake.attendance_day(record)
 
 
 def test_a_call_already_in_the_history_is_not_added_twice():
@@ -1222,7 +1224,9 @@ def test_the_scan_merges_both_sources(conn):
     assert result["from_chat"] == 1
     assert result["my_mri_known"] is True
     sources = {row["call_id"]: row["source"] for row in repo.list_calls(conn)}
-    assert sources == {"gecmis": "history", "cagri-1": "chat"}
+    assert sources["gecmis"] == "history"
+    chat_ids = [key for key, value in sources.items() if value == "chat"]
+    assert len(chat_ids) == 1 and chat_ids[0].startswith("cagri-1:")
 
 
 def test_a_history_call_beats_the_chat_record(conn):
@@ -1234,6 +1238,7 @@ def test_a_history_call_beats_the_chat_record(conn):
     )
     assert result["from_chat"] == 0
     assert repo.get_call(conn, "cagri-1")["source"] == "history"
+    assert repo.call_count(conn) == 1
 
 
 def test_a_chat_record_survives_a_second_scan(conn):
@@ -1545,11 +1550,10 @@ def test_several_sessions_of_one_meeting_are_summed():
     )
     assert len(plan.rows) == 1
     assert plan.rows[0]["duration_ms"] == 1800 * 1000
-    assert [note["decision"] for note in plan.decisions] == [
-        "created",
-        "merged:cagri-1",
-        "merged:cagri-1",
-    ]
+    key = plan.rows[0]["call_id"]
+    # Anahtar gun ekini tasir: farkli gun asla birlesmez.
+    assert key.startswith("cagri-1:")
+    assert [note["decision"] for note in plan.decisions] == ["created", f"merged:{key}", f"merged:{key}"]
 
 
 def test_without_a_call_id_the_key_is_the_ical_and_the_day():
@@ -1566,7 +1570,9 @@ def test_without_a_call_id_the_key_is_the_ical_and_the_day():
         "19:meeting_x@thread.v2",
     )
     key = intake.attendance_key(record)
-    assert key.startswith("ICAL-7:")
+    # Sohbet cekirdegi varsa once o kullanilir; gun her zaman eklenir.
+    assert key.startswith("x:")
+    assert key.endswith(intake.attendance_day(record))
     assert intake.normalize_attendance([record], MY_MRI)[0]["call_id"] == key
 
 
@@ -1619,6 +1625,178 @@ def test_the_diagnosis_names_the_meeting_when_the_calendar_knows_it(api_client, 
     fake_calls.my_mri = MY_MRI
     data = api_client.get("/api/calls/attendance-diagnose?days=90").json()
     assert data["meetings"][0]["subject"] == "Sabah daily"
+
+
+# --- birlestirme anahtari: asla dejenere olmaz ---------------------------
+#
+# Saha: 55 mesajin 32'si "merged" cikti -- farkli thread'ler, farkli gunler.
+# `callid` okunamayinca anahtar sabitlesmis ve her sey tek kayda toplanmisti.
+
+
+def chat_record(thread: str, ended, call_id: str = "", ical: str = "", seconds: int = 600,
+                message_id: str = ""):
+    record = attended(thread, ended, parts=[(MY_MRI, seconds)], call_id=call_id)
+    record.ical_uid = ical
+    record.message_id = message_id
+    record.kind = "ended"
+    return record
+
+
+def test_two_threads_never_merge():
+    plan = intake.plan_attendance(
+        [
+            chat_record("19:meeting_AAAAAAAAAAAA@thread.v2", NOW - timedelta(days=1)),
+            chat_record("19:meeting_BBBBBBBBBBBB@thread.v2", NOW - timedelta(days=1)),
+        ],
+        MY_MRI,
+    )
+    assert len(plan.rows) == 2
+    assert [note["decision"] for note in plan.decisions] == ["created", "created"]
+
+
+def test_two_days_of_the_same_meeting_never_merge():
+    """Daily toplantisi: ayni thread, farkli gun -> her gun ayri satir."""
+    thread = "19:meeting_DAILY0123456789@thread.v2"
+    plan = intake.plan_attendance(
+        [
+            chat_record(thread, NOW - timedelta(days=1)),
+            chat_record(thread, NOW - timedelta(days=2)),
+            chat_record(thread, NOW - timedelta(days=28)),
+        ],
+        MY_MRI,
+    )
+    assert len(plan.rows) == 3
+    assert len({row["call_id"] for row in plan.rows}) == 3
+
+
+def test_the_same_call_id_on_two_days_never_merges():
+    plan = intake.plan_attendance(
+        [
+            chat_record("19:meeting_X0123456789@thread.v2", NOW - timedelta(days=1), call_id="c"),
+            chat_record("19:meeting_X0123456789@thread.v2", NOW - timedelta(days=3), call_id="c"),
+        ],
+        MY_MRI,
+    )
+    assert len(plan.rows) == 2
+
+
+def test_rejoining_the_same_meeting_on_the_same_day_is_summed():
+    """Yeniden katilma: ayni thread, ayni gun -> tek satir, sureler toplanir."""
+    thread = "19:meeting_REJOIN0123456@thread.v2"
+    day = NOW - timedelta(days=1)
+    plan = intake.plan_attendance(
+        [
+            chat_record(thread, day, seconds=600),
+            chat_record(thread, day + timedelta(minutes=30), seconds=300),
+        ],
+        MY_MRI,
+    )
+    assert len(plan.rows) == 1
+    assert plan.rows[0]["duration_ms"] == 900 * 1000
+
+
+def test_the_key_is_never_empty_or_constant():
+    """Hicbir isaret yoksa bile iki mesaj ayni anahtara dusmez."""
+    blank = [
+        chat_record("", "", message_id="m1"),
+        chat_record("", "", message_id="m2"),
+    ]
+    keys = {intake.attendance_key(record) for record in blank}
+    assert keys == {"m1", "m2"}
+    assert all(key.strip() for key in keys)
+
+    nameless = chat_record("", "")
+    assert intake.attendance_key(nameless, fallback="mesaj-7") == "mesaj-7"
+    assert intake.attendance_key(nameless).strip()
+
+
+def test_the_key_prefers_the_call_id_then_the_thread_then_the_ical():
+    day = NOW - timedelta(days=1)
+    with_call = chat_record("19:meeting_T0123456789@thread.v2", day, call_id="cagri")
+    assert intake.attendance_key(with_call).startswith("cagri:")
+    with_thread = chat_record("19:meeting_T0123456789@thread.v2", day, ical="ICAL")
+    assert intake.attendance_key(with_thread).startswith("T0123456789:")
+    only_ical = chat_record("", day, ical="ICAL")
+    assert intake.attendance_key(only_ical).startswith("ICAL:")
+
+
+def test_the_diagnosis_says_what_the_key_rests_on():
+    plan = intake.plan_attendance(
+        [chat_record("19:meeting_T0123456789@thread.v2", NOW - timedelta(days=1))], MY_MRI
+    )
+    note = plan.decisions[0]
+    assert note["has_call_id"] is False
+    assert note["has_ical_uid"] is False
+    assert note["day"] == intake.attendance_day(
+        chat_record("19:meeting_T0123456789@thread.v2", NOW - timedelta(days=1))
+    )
+
+
+def test_a_daily_gets_its_subject_from_the_recurring_master():
+    thread = "19:meeting_DAILY0123456789@thread.v2"
+    rows = intake.normalize_attendance(
+        [
+            chat_record(thread, NOW - timedelta(days=1)),
+            chat_record(thread, NOW - timedelta(days=2)),
+        ],
+        MY_MRI,
+        events=[master("Sabah daily", cid=thread)],
+    )
+    assert len(rows) == 2
+    assert {row["meeting_subject"] for row in rows} == {"Sabah daily"}
+
+
+# --- yeniden tarama eski (yanlis) kayitlari temizler ---------------------
+
+
+def test_a_rescan_removes_chat_rows_that_are_no_longer_produced(conn):
+    thread = "19:meeting_T0123456789@thread.v2"
+    first = FakeCallSource(
+        attendance=[chat_record(thread, NOW - timedelta(days=1))], my_mri=MY_MRI
+    )
+    intake.scan(conn, first)
+    assert repo.call_count(conn) == 1
+    stale = repo.list_calls(conn)[0]["call_id"]
+
+    # Ikinci taramada baska bir gun geliyor: eski satir artik uretilmiyor.
+    second = FakeCallSource(
+        attendance=[chat_record(thread, NOW - timedelta(days=2))], my_mri=MY_MRI
+    )
+    result = intake.scan(conn, second)
+    assert result["chat_removed"] == 1
+    ids = {row["call_id"] for row in repo.list_calls(conn)}
+    assert stale not in ids
+    assert len(ids) == 1
+
+
+def test_a_rescan_never_touches_the_history_rows(conn):
+    source = FakeCallSource(
+        calls=[call("gecmis", moment(1))],
+        attendance=[chat_record("19:meeting_T0123456789@thread.v2", NOW - timedelta(days=1))],
+        my_mri=MY_MRI,
+    )
+    intake.scan(conn, source)
+    source.attendance = []
+    result = intake.scan(conn, source)
+    assert result["chat_removed"] == 1
+    assert [row["call_id"] for row in repo.list_calls(conn)] == ["gecmis"]
+
+
+def test_chat_rows_outside_the_window_are_left_alone(conn):
+    """Pencerenin disinda kalan eski katilim kayitlari silinmez."""
+    old_row = dict(
+        call_id="eski-chat",
+        started_at=intake.iso_text(NOW - timedelta(days=300)),
+        duration_ms=600000,
+        kind="meeting",
+        source="chat",
+    )
+    repo.import_calls(conn, [old_row])
+    removed = repo.prune_chat_calls(
+        conn, keep_ids=set(), since=intake.iso_text(intake.since_of(90, NOW))
+    )
+    assert removed == 0
+    assert repo.get_call(conn, "eski-chat") is not None
 
 
 # --- tekillestirme --------------------------------------------------------

@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.7.2** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.7.3** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -573,7 +573,11 @@ Nasıl çalışır:
   oluşmaz — yedek olarak "toplantının en uzun katılımı" kullanılmaz, bu
   katılmadığınız toplantıların listelenmesine yol açıyordu. Kimliğiniz listede
   `8:orgid:<guid>` yerine `8:<guid>` ya da farklı harf büyüklüğüyle geçse de
-  tanınır; çok oturumlu bir toplantının parçaları tek kayıtta **toplanır**;
+  tanınır; **aynı gün aynı toplantıya** yeniden katılmanın parçaları tek
+  kayıtta **toplanır** (farklı gün ya da farklı sohbet asla birleşmez:
+  birleştirme anahtarı `callid`/sohbet/`icaluid` **artı gün**, hiçbir koşulda
+  boş kalmaz); her yeni tarama sohbetten gelen kayıtları yeniden üretir ve
+  artık üretilmeyen eskilerini siler (arama geçmişi kayıtlarına dokunmaz);
   `<partlist>` taşıyan her mesaj adaydır (tür alanının `Event/Call` olması
   şart değil). Aynı arama zaten arama geçmişinde varsa ikinci kayıt oluşmaz.
 
@@ -941,7 +945,7 @@ kilitler. Üçüncüsü etikettir: `v<sürüm>` biçiminde itilir ve release iş
 yanlış numaralı bir release çıkmaz.
 
 ```bash
-git tag v0.7.2 && git push origin v0.7.2
+git tag v0.7.3 && git push origin v0.7.3
 ```
 
 ### Teams sondası
@@ -998,6 +1002,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.7.3** | 12 Eylül 2026 | Toplantı katılımı: birleştirme anahtarı toplantı kimliği + gün (farklı gün/thread asla birleşmez), ad alanlı XML etiketleri, yeniden taramada eski sohbet kayıtlarının temizlenmesi |
 | **v0.7.2** | 12 Eylül 2026 | Teams Aramalar: tek `view` isteği, SQL pencere ve indeks (1.000 kayıtta < 30 ms), önbellek yalnız çekim ve teşhiste; katılım kuralı sertleşti (kendi süre yoksa kayıt yok, GUID eşleşme, oturum toplama); "Katılım teşhisi" çekmecesi |
 | **v0.7.1** | 12 Eylül 2026 | Toplantı katılımı: yeni partlist biçimi (calleventtype, ended, meetingdetails), iCalUid ile takvim eşleşmesi, kendi kimlik veritabanı adından; sonda iskelet çıktısı |
 | **v0.7.0** | 12 Eylül 2026 | Teams Aramalar: toplantı sohbetlerindeki katılım kayıtlarından (partlist) gerçek katılım süresiyle toplantılar; "sohbetten" rozeti; Kendi Teams kimliğim ayarı; sonda `--meetings` |

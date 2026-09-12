@@ -1159,21 +1159,35 @@ DECISION_HISTORY = "deduped:history"
 DECISION_MERGED = "merged"
 
 
-def attendance_key(record: MeetingAttendance) -> str:
+def attendance_day(record: MeetingAttendance) -> str:
+    """Katilimin YEREL gunu ("2026-09-11"); okunamazsa bos."""
+    moment = parse_utc(record.ended_at)
+    return moment.astimezone().date().isoformat() if moment is not None else ""
+
+
+def attendance_key(record: MeetingAttendance, fallback: str = "") -> str:
     """Ayni toplantinin parcalarini birlestiren anahtar.
 
-    Cok oturumlu toplantida ayni `callid` icin birden fazla `ended` mesaji
-    duser; sureler TOPLANIR, tek kayit olur. `callid` yoksa `icaluid` + gun.
+    Sirasiyla `callid`, sohbet cekirdegi, `icaluid`; hepsinin yanina **gun**
+    eklenir. Ayni gun icinde ayni toplantiya yeniden katilmak tek satirda
+    toplanir; **farkli thread ya da farkli gun asla birlesmez**.
+
+    Anahtar hicbir kosulda bos ya da sabit olamaz: sahada `callid`
+    okunamayinca butun mesajlar tek kayda toplanip yanlis toplantinin adini
+    almisti. Hicbir isaret yoksa mesajin kendi anahtari kullanilir.
     """
-    call_id = clean_text(record.call_id)
-    if call_id:
-        return call_id
-    ical = clean_text(record.ical_uid)
-    moment = parse_utc(record.ended_at)
-    day = moment.astimezone().date().isoformat() if moment is not None else ""
-    if ical:
-        return f"{ical}:{day}"
-    return f"{clean_text(record.thread_id)}:{day or clean_text(record.ended_at)}"
+    day = attendance_day(record)
+    core = thread_core(record.thread_id) or clean_text(record.thread_id)
+    marker = clean_text(record.call_id)
+    if not marker:
+        marker = core or clean_text(record.ical_uid)
+    if marker and day:
+        return f"{marker}:{day}"
+    if marker:
+        # Gun okunamadi: mesaji kendi basina birak, yanlis birlesme olmasin.
+        unique = clean_text(record.message_id) or clean_text(fallback)
+        return f"{marker}:{unique}" if unique else marker
+    return clean_text(record.message_id) or clean_text(fallback) or f"attendance:{id(record)}"
 
 
 @dataclass
@@ -1210,8 +1224,8 @@ def plan_attendance(
     skip = {clean_text(item) for item in known_ids}
     made: dict[str, dict[str, Any]] = {}
 
-    for record in records or ():
-        key = attendance_key(record)
+    for index, record in enumerate(records or ()):
+        key = attendance_key(record, fallback=f"mesaj-{index}")
         mine, how = record.match_for(marker) if marker else (None, "")
         seconds = mine.seconds if mine is not None else 0
         note = {
@@ -1225,11 +1239,17 @@ def plan_attendance(
             "me_present": how or "",
             "my_seconds": int(seconds),
             "ical_uid": clean_text(record.ical_uid),
+            # Anahtarin neye dayandigi: teshiste "neden birlesti" sorusu.
+            "has_call_id": bool(clean_text(record.call_id)),
+            "has_ical_uid": bool(clean_text(record.ical_uid)),
+            "day": attendance_day(record),
         }
 
         if clean_text(record.kind) == PARTLIST_STARTED:
             note["decision"] = DECISION_STARTED
-        elif key in skip:
+        elif key in skip or (clean_text(record.call_id) and record.call_id in skip):
+            # Gecmis kaydiyla karsilastirma HAM `callid` uzerinden de yapilir:
+            # birlestirme anahtari artik gun ekini tasiyor.
             note["decision"] = DECISION_HISTORY
         elif mine is None:
             note["decision"] = DECISION_NO_ME
@@ -1343,8 +1363,8 @@ def diagnose_attendance(
     pools = event_pools(events)
 
     subjects: dict[str, str] = {}
-    for record in picked:
-        key = attendance_key(record)
+    for index, record in enumerate(picked):
+        key = attendance_key(record, fallback=f"mesaj-{index}")
         if key in subjects:
             continue
         event = match_attendance(record, pools)
@@ -1416,6 +1436,14 @@ def scan(
     )
     rows = rows + chat_rows
     report = repository.import_calls(conn, rows)
+    # Onceki taramanin (yanlis anahtarla) urettigi chat kayitlari kalmasin:
+    # pencere icinde artik uretilmeyen `source='chat'` satirlari silinir.
+    # `history` satirlarina dokunulmaz.
+    report["chat_removed"] = repository.prune_chat_calls(
+        conn,
+        keep_ids={row["call_id"] for row in chat_rows},
+        since=iso_text(since_of(ATTENDANCE_DAYS)),
+    )
     report["from_chat"] = len(chat_rows)
     report["my_mri_known"] = bool(marker)
     report["meetings_matched"] = sum(1 for row in rows if row["kind"] == KIND_MEETING)

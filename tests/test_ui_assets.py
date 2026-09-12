@@ -516,7 +516,8 @@ def test_calls_script_covers_the_strip_the_tabs_and_the_drawer(api_client):
     assert "callsState.unmatched" in script
     # Katilim teshisi ayri dugmeye bagli.
     for marker in ("/api/calls/attendance-diagnose", "function openAttendance",
-                   "skipped:no_duration", "skipped:no_me"):
+                   "skipped:no_duration", "skipped:no_me",
+                   "has_call_id", "has_ical_uid"):
         assert marker in script, marker
     # Teshis: eslesmeyenler dugmesi, nedenler ve takvim adaylari.
     for marker in ("/api/calls/unmatched", "function openUnmatched", "function renderUnmatched",

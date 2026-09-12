@@ -96,11 +96,16 @@ def attended(
     call_id: str = "",
 ) -> MeetingAttendance:
     """Toplanti sohbetindeki `<partlist type="ended">` kaydinin karsiligi."""
-    moment = ended if ended.tzinfo else ended.replace(tzinfo=timezone.utc)
+    # Damgasiz kayit da uretilebilsin: teshis testleri bunu kullaniyor.
+    if isinstance(ended, datetime):
+        moment = ended if ended.tzinfo else ended.replace(tzinfo=timezone.utc)
+        stamp = moment.isoformat().replace("+00:00", "Z")
+    else:
+        stamp = str(ended or "")
     return MeetingAttendance(
         thread_id=thread_id,
         call_id=call_id,
-        ended_at=moment.isoformat().replace("+00:00", "Z"),
+        ended_at=stamp,
         parts=[MeetingPart(mri=mri, seconds=seconds) for mri, seconds in parts],
     )
 
