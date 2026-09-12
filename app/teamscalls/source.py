@@ -129,8 +129,6 @@ class CallRecord:
     forwarded: str = ""
     thread_id: str = ""
     group_thread_id: str = ""
-    # Kullanicinin kendi kimligi (GUID); katilim kaydinda MRI olarak gecer.
-    user_participant_id: str = ""
     subject: str = ""
     participants: list[str] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
@@ -161,6 +159,9 @@ class CalendarRecord:
     location: str = ""
     event_type: str = ""
     show_as: str = ""
+    # Takvim kaydinin evrensel kimligi; katilim kaydindaki `icaluid` ile
+    # eslesir (thread kimliginden bile kesin bir yol).
+    ical_uid: str = ""
     cid: str = ""
     meeting_url: str = ""
     attendees: list[str] = field(default_factory=list)
@@ -383,6 +384,27 @@ def canonical_type(value: Any) -> str:
 # katilimci listelerinde ise MRI olarak (`8:orgid:<guid>`).
 MRI_PREFIX = "8:orgid:"
 _GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+# `Teams:<rol>:react-web-client:<kiraci-guid>:<kullanici-guid>:<dil>`
+_MRI_IN_TEXT = re.compile(r"8:orgid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+
+def mri_from_database_name(name: Any) -> str:
+    """Veritabani adindan kullanicinin kendi kimligi.
+
+    Ad `Teams:<rol>:react-web-client:<kiraci>:<kullanici>:<dil>` bicimindedir;
+    besinci segment kullanicinin GUID'idir. Bazi veritabani adlari kimligi
+    dogrudan `8:orgid:<guid>` olarak da tasir.
+    """
+    text = clean_text(name)
+    found = _MRI_IN_TEXT.search(text)
+    if found:
+        return found.group(0).casefold()
+    parts = text.split(":")
+    if len(parts) > 4 and _GUID.match(parts[4]):
+        return f"{MRI_PREFIX}{parts[4].casefold()}"
+    return ""
 
 
 def as_mri(value: Any) -> str:

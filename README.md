@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.7.0** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.7.1** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -570,10 +570,20 @@ Nasıl çalışır:
   bloktan kendi katılımınızı çıkarır — süreniz *sizin* `duration`'ınızdır,
   listede **sohbetten** rozetiyle görünür. **Katılmadığınız toplantı kayıt
   üretmez**: kabul edip gitmediğiniz toplantıda katılımcı listesinde yoksunuz.
-  Aynı arama zaten arama geçmişinde varsa ikinci kayıt oluşmaz. Kendi
-  kimliğiniz arama geçmişindeki `userParticipantId` alanından türetilir;
-  bulunamazsa **Ayarlar → Teams → Kendi Teams kimliğim** alanına elle
-  yazabilirsiniz (bu alan boşken sohbet kaydı hiç üretilmez). Pencere son
+  Aynı arama zaten arama geçmişinde varsa ikinci kayıt oluşmaz.
+
+  Mesajın yapısı iki biçimde geliyor: eskisi olay türünü `type="ended"`
+  özniteliğinde, yenisi `<calleventtype>` elemanında taşır; ikisi de okunur.
+  Yeni biçimdeki `<meetingdetails>` bloğu toplantının `icaluid` değerini de
+  veriyor — takvim eşleşmesinin **en kesin yolu** budur, thread kimliğinden
+  önce denenir. Türü yazmayan bloklarda süre varsa toplantı bitmiş sayılır,
+  süre yoksa mesaj atlanır ("başladı" mesajı katılım bilgisi taşımaz).
+
+  Kendi kimliğiniz **veritabanı adından** okunur
+  (`Teams:<rol>:react-web-client:<kiracı>:<kullanıcı>:<dil>`), olmazsa kendi
+  gönderdiğiniz bir mesajın `creator` alanından; **Ayarlar → Teams → Kendi
+  Teams kimliğim** alanına elle de yazabilirsiniz (ayar her ikisini de ezer).
+  Kimlik bulunamazsa sohbetten gelen toplantı hiç eklenmez. Pencere son
   90 gündür.
 - **Ne okunur.** Önbellekte yüzden fazla veritabanı var; Holocron yalnızca
   **beşini** açar — `call-history-manager` (aramalar), `calendar`
@@ -916,7 +926,7 @@ kilitler. Üçüncüsü etikettir: `v<sürüm>` biçiminde itilir ve release iş
 yanlış numaralı bir release çıkmaz.
 
 ```bash
-git tag v0.7.0 && git push origin v0.7.0
+git tag v0.7.1 && git push origin v0.7.1
 ```
 
 ### Teams sondası
@@ -973,6 +983,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.7.1** | 12 Eylül 2026 | Toplantı katılımı: yeni partlist biçimi (calleventtype, ended, meetingdetails), iCalUid ile takvim eşleşmesi, kendi kimlik veritabanı adından; sonda iskelet çıktısı |
 | **v0.7.0** | 12 Eylül 2026 | Teams Aramalar: toplantı sohbetlerindeki katılım kayıtlarından (partlist) gerçek katılım süresiyle toplantılar; "sohbetten" rozeti; Kendi Teams kimliğim ayarı; sonda `--meetings` |
 | **v0.6.3** | 12 Eylül 2026 | Teams Aramalar: takvim saatleri UTC olarak okunur (3 saatlik kayma düzeltildi); grup sohbeti aramaları teşhiste ayrı sayılır, rozet yalnız şüphelileri gösterir |
 | **v0.6.2** | 12 Eylül 2026 | Teams Aramalar: tekrarlayan toplantı serileri (RecurringMaster) kimlikle eşleşir, iptal edilmiş seriler dahil; "Eşleşmeyenler" teşhis çekmecesi; taramada tekrarlayan sayısı |

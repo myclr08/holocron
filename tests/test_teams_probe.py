@@ -11,6 +11,7 @@ import datetime as dt
 import importlib.util
 import sys
 import zipfile
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -323,3 +324,93 @@ def test_probe_dry_run_names_its_own_zip(capsys):
     output = capsys.readouterr().out
     assert "holocron-teams-probe.zip" in output
     assert "vendor/" in output
+
+
+# --- sonda v2/v3: toplanti katilimi (--meetings) -------------------------
+#
+# Bu mod `replychains` store'unu olcer. Gizlilik kurali aynen gecerli:
+# ad, mesaj metni, sure DEGERI ve kimlik ciktiya girmez.
+
+MEETING_XML = (
+    '<partlist alt="Toplantı sona erdi">'
+    "<calleventtype>ended</calleventtype>"
+    "<callid>cagri-9</callid>"
+    "<meetingdetails><icaluid>ICAL-42</icaluid><meetingtype>Scheduled</meetingtype>"
+    "<organizerupn>gizli@example.com</organizerupn></meetingdetails>"
+    '<part identity="8:orgid:benim"><name>Gizli Ad</name><duration>1863</duration></part>'
+    '<part identity="8:orgid:baska"><name>Başka Ad</name><duration>1800</duration></part>'
+    "</partlist>"
+)
+
+USER_GUID = "0f8fad5b-d9cb-469f-a165-70867728950e"
+
+
+def meeting_report():
+    report = probe.ChainReport("toplanti sohbetleri (19:meeting_)")
+    probe.scan_message(
+        report,
+        {
+            "messageType": "Event/Call",
+            "content": MEETING_XML,
+            "originalArrivalTime": 1789000000000,
+        },
+        "8:orgid:benim",
+    )
+    return report
+
+
+def test_the_meeting_probe_counts_without_printing_values():
+    report = meeting_report()
+    assert report.partlists == 1
+    assert report.parts_max == 2
+    assert report.with_duration == 1
+    assert report.mine == 1
+    assert report.event_types == Counter({"ended": 1})
+    assert report.meeting_types == Counter({"Scheduled": 1})
+
+
+@pytest.mark.parametrize(
+    "secret",
+    ["Gizli Ad", "Başka Ad", "gizli@example.com", "ICAL-42", "1863", "cagri-9", "8:orgid:benim"],
+)
+def test_no_meeting_value_survives_the_render(secret):
+    text = probe.render_meetings(Path("x/leveldb"), [meeting_report()], "veritabani adi", 1.0)
+    assert secret not in text
+
+
+def test_the_render_keeps_the_whole_report():
+    """Iskelet dongusu ciktinin geri kalanini yutmamali."""
+    text = probe.render_meetings(Path("x/leveldb"), [meeting_report()], "veritabani adi", 1.0)
+    assert "TOPLANTI SOHBETLERI" in text
+    assert "calleventtype     : ended x1" in text
+    assert "icerik iskeleti" in text
+    assert text.rstrip().endswith("Son.")
+
+
+def test_the_skeleton_shows_names_and_lengths_only():
+    shape = probe.skeleton_of(MEETING_XML)
+    assert shape[0] == "partlist(alt)"
+    assert any(line.strip() == "part(identity)" for line in shape)
+    assert any(line.strip().startswith("duration(len") for line in shape)
+    for line in shape:
+        assert "Gizli" not in line
+        assert "1863" not in line
+
+
+def test_a_broken_content_does_not_break_the_skeleton():
+    assert probe.skeleton_of("<partlist><part identity=") == ["(cozulemedi)"]
+
+
+def test_the_user_identity_comes_from_the_database_name():
+    name = f"Teams:calendar:react-web-client:11111111-1111-1111-1111-111111111111:{USER_GUID}:tr-tr"
+    assert probe.mri_from_database_name(name) == f"8:orgid:{USER_GUID}"
+    assert probe.mri_from_database_name(f"Teams:x:y:z:8:orgid:{USER_GUID}:tr") == (
+        f"8:orgid:{USER_GUID}"
+    )
+    assert probe.mri_from_database_name("Teams:messages:react-web-client:a:b:tr") == ""
+
+
+def test_the_probe_tells_how_it_found_the_identity_not_what_it_is():
+    text = probe.render_meetings(Path("x/leveldb"), [meeting_report()], "veritabani adi", 1.0)
+    assert "Kendi kimligim    : veritabani adi" in text
+    assert USER_GUID not in text

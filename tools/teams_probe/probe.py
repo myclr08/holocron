@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import re
+import xml.etree.ElementTree as ET
 import os
 import shutil
 import sys
@@ -644,6 +645,9 @@ class ChainReport:
     parts_max: int = 0
     with_duration: int = 0
     mine: int = 0
+    event_types: Counter = field(default_factory=Counter)
+    meeting_types: Counter = field(default_factory=Counter)
+    skeletons: dict = field(default_factory=dict)
     oldest: dt.datetime | None = None
     newest: dt.datetime | None = None
 
@@ -686,6 +690,14 @@ def scan_message(report: ChainReport, message: Any, my_mri: str) -> None:
 
     report.partlists += 1
     report.tags |= content_tags(text)
+    for name, target in (("calleventtype", report.event_types), ("meetingtype", report.meeting_types)):
+        # Bunlar sabit sozcuklerdir (ended/started/Scheduled...), kisisel degil.
+        found = re.search(rf"<{name}\b[^>]*>\s*([^<]{{0,40}})\s*</{name}\s*>", text, re.IGNORECASE)
+        if found:
+            target[found.group(1).strip() or "(bos)"] += 1
+    if len(report.skeletons) < 3:
+        lines = skeleton_of(text)
+        report.skeletons.setdefault(skeleton_key(lines), lines)
     found = _PARTLIST_TYPE.search(text)
     report.partlist_types[(found.group(1) if found else "(yok)").casefold()] += 1
     count = len(_PART_COUNT.findall(text))
@@ -697,40 +709,118 @@ def scan_message(report: ChainReport, message: Any, my_mri: str) -> None:
         report.mine += 1
 
 
-def find_my_mri(wrapper: Any) -> str:
-    """Kullanicinin kendi kimligi: `call-history.userParticipantId`.
+_MRI_IN_TEXT = re.compile(
+    r"8:orgid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
+)
+_GUID_ONLY = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
 
-    Ciktiya YAZILMAZ; yalnizca "kac mesajda kendim geciyorum" sayimi icin
-    kullanilir.
+
+def mri_from_database_name(name: Any) -> str:
+    """Veritabani adindan kullanicinin kendi kimligi.
+
+    Ad `Teams:<rol>:react-web-client:<kiraci>:<kullanici>:<dil>` bicimindedir;
+    besinci segment kullanicinin GUID'idir. Bazi adlar kimligi dogrudan
+    `8:orgid:<guid>` olarak tasir.
+    """
+    text = str(name or "").strip()
+    found = _MRI_IN_TEXT.search(text)
+    if found:
+        return found.group(0).casefold()
+    parts = text.split(":")
+    if len(parts) > 4 and _GUID_ONLY.match(parts[4]):
+        return f"8:orgid:{parts[4].casefold()}"
+    return ""
+
+
+def find_my_mri(wrapper: Any) -> tuple[str, str]:
+    """(kimlik, nereden bulundu). Kimlik ciktiya YAZILMAZ, yol yazilir.
+
+    Once veritabani adlari (veritabani acilmadan), sonra `replychains`
+    icinde `isSentByCurrentUser` isaretli bir mesajin `creator` alani.
+    (`call-history.userParticipantId` KULLANILMAZ: sahada hicbir katilimci
+    listesinde bulunamadi -- o alan arama basina katilimci kimligi.)
     """
     for db_id in wrapper.database_ids:
-        if database_segment(db_id.name).casefold() != CALL_ROLE:
+        marker = mri_from_database_name(db_id.name)
+        if marker:
+            return marker, "veritabani adi"
+
+    for db_id in wrapper.database_ids:
+        if database_segment(db_id.name).casefold() != REPLYCHAIN_ROLE:
             continue
         try:
             database = wrapper[db_id.dbid_no]
         except Exception:  # pragma: no cover - bozuk ust veri
             continue
         for store in database:
-            if str(store.name) != "call-history":
+            if str(store.name) != REPLYCHAIN_STORE:
                 continue
             try:
                 for record in store.iterate_records():
                     value = getattr(record, "value", None)
                     if not isinstance(value, dict):
                         continue
-                    marker = str(value.get("userParticipantId") or "").strip()
-                    if marker:
-                        return marker if ":" in marker else f"8:orgid:{marker}"
+                    messages = value.get("messageMap")
+                    if not isinstance(messages, dict):
+                        continue
+                    for message in messages.values():
+                        if isinstance(message, dict) and message.get("isSentByCurrentUser"):
+                            marker = str(message.get("creator") or "").strip()
+                            if marker:
+                                return marker, "isSentByCurrentUser"
             except Exception:  # pragma: no cover
-                return ""
-    return ""
+                return "", "okunamadi"
+    return "", "bulunamadi"
 
 
-def scan_meetings(wrapper: Any) -> tuple[ChainReport, ChainReport, str]:
+# --- icerik iskeleti (deger yok, yalnizca yapi) --------------------------
+
+
+def skeleton_of(text: str, limit: int = 40) -> list[str]:
+    """Icerigin etiket agaci: etiket adi + oznitelik ADLARI + metin uzunlugu.
+
+    Ciktiya hicbir deger girmez; `name(len 23)` der, adin kendisini yazmaz.
+    """
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        try:
+            root = ET.fromstring(f"<holocron>{text}</holocron>")
+        except ET.ParseError:
+            return ["(cozulemedi)"]
+
+    lines: list[str] = []
+
+    def walk(node: Any, depth: int) -> None:
+        if len(lines) >= limit:
+            return
+        tag = str(node.tag).rsplit("}", 1)[-1]
+        names = ",".join(sorted(str(key) for key in (node.attrib or {})))
+        body = (node.text or "").strip()
+        parts = [tag]
+        if names:
+            parts.append(f"({names})")
+        if body:
+            parts.append(f"(len {len(body)})")
+        lines.append("  " * depth + "".join(parts))
+        for child in list(node):
+            walk(child, depth + 1)
+
+    walk(root, 0)
+    return lines
+
+
+def skeleton_key(lines: Iterable[str]) -> str:
+    return "\n".join(lines)
+
+
+def scan_meetings(wrapper: Any) -> tuple[ChainReport, ChainReport, str, str]:
     """`replychains` store'unu tarar: toplanti sohbetleri ve grup sohbetleri."""
     meetings = ChainReport("toplanti sohbetleri (19:meeting_)")
     groups = ChainReport("diger 19: sohbetleri")
-    my_mri = find_my_mri(wrapper)
+    my_mri, how = find_my_mri(wrapper)
 
     for db_id in wrapper.database_ids:
         if database_segment(db_id.name).casefold() != REPLYCHAIN_ROLE:
@@ -756,11 +846,11 @@ def scan_meetings(wrapper: Any) -> tuple[ChainReport, ChainReport, str]:
                 report.threads += 1
                 for message in messages.values():
                     scan_message(report, message, my_mri)
-    return meetings, groups, my_mri
+    return meetings, groups, my_mri, how
 
 
 def render_meetings(
-    leveldb: Path, reports: Iterable[ChainReport], my_known: bool, seconds: float
+    leveldb: Path, reports: Iterable[ChainReport], how: str, seconds: float
 ) -> str:
     """Katilim sondasinin ciktisi. Ad, metin ve sure DEGERI icermez."""
     lines: list[str] = []
@@ -772,7 +862,7 @@ def render_meetings(
     add("Hicbir ad, mesaj metni ya da sure degeri yazilmaz.")
     add("")
     add(f"Kaynak klasor     : {leveldb.name}")
-    add(f"Kendi kimligim    : {'bulundu' if my_known else 'bulunamadi'}")
+    add(f"Kendi kimligim    : {how}")
     add(f"Sure              : {seconds:.1f} sn")
     add("")
 
@@ -795,9 +885,27 @@ def render_meetings(
         add(f"  kendim gecen      : {report.mine}")
         if report.oldest is not None:
             add(f"  tarih araligi     : {format_moment(report.oldest)} .. {format_moment(report.newest)}")
+        if report.event_types:
+            add(
+                "  calleventtype     : "
+                + ", ".join(f"{name} x{count}" for name, count in report.event_types.most_common())
+            )
+        if report.meeting_types:
+            add(
+                "  meetingtype       : "
+                + ", ".join(f"{name} x{count}" for name, count in report.meeting_types.most_common())
+            )
         add("  mesaj turleri     :")
         for name, count in report.message_types.most_common(15):
             add(f"    {name}: {count}")
+        if report.skeletons:
+            add("  icerik iskeleti (ilk 3 farkli yapi; deger yok):")
+            # Degisken adi bilerek `lines` degil: disaridaki cikti listesini
+            # golgelerse rapor tek bir iskelete iner.
+            for index, shape in enumerate(report.skeletons.values(), start=1):
+                add(f"    --- {index} ---")
+                for line in shape:
+                    add("    " + line)
         add("")
 
     add("Son.")
@@ -827,7 +935,7 @@ def run_meetings(
     reader = load_reader()
     wrapper = reader.WrappedIndexDB(str(source), str(blob_source) if blob_source else None)
     try:
-        meetings, groups, my_mri = scan_meetings(wrapper)
+        meetings, groups, my_mri, how = scan_meetings(wrapper)
     finally:
         try:
             wrapper.close()
@@ -835,7 +943,7 @@ def run_meetings(
             pass
 
     seconds = time.monotonic() - started
-    text = render_meetings(leveldb, (meetings, groups), bool(my_mri), seconds)
+    text = render_meetings(leveldb, (meetings, groups), how, seconds)
     destination = Path(output) if output else Path.cwd() / MEETINGS_OUTPUT_NAME
     destination.write_text(text, encoding="utf-8")
     print(f"Toplanti sohbeti : {meetings.threads}")

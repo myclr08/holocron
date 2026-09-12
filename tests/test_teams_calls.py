@@ -1006,6 +1006,7 @@ def test_the_badge_ignores_group_chat_calls(api_client, fake_calls):
 
 MY_GUID = "0f8fad5b-d9cb-469f-a165-70867728950e"
 MY_MRI = "8:orgid:" + MY_GUID
+TENANT_GUID = "11111111-1111-1111-1111-111111111111"
 
 ENDED_XML = (
     '<partlist alt="" type="ended" callId="cagri-1">'
@@ -1055,10 +1056,10 @@ def test_a_started_partlist_is_ignored():
 
 def test_a_broken_partlist_falls_back_to_the_regex():
     broken = ENDED_XML.replace("<name>Ben</name>", "<name>A & B</name>")
-    kind, call_id, parts = attendance.parse_partlist(broken)
-    assert kind == "ended"
-    assert call_id == "cagri-1"
-    assert [part.seconds for part in parts] == [1863, 1800]
+    block = attendance.parse_partlist(broken)
+    assert block.kind == "ended"
+    assert block.call_id == "cagri-1"
+    assert [part.seconds for part in block.parts] == [1863, 1800]
 
 
 def test_a_message_without_a_partlist_is_not_attendance():
@@ -1082,22 +1083,46 @@ def test_the_name_inside_the_xml_is_never_kept():
 # --- kendi kimligim -------------------------------------------------------
 
 
-def test_my_mri_comes_from_the_call_history():
-    calls = [call("a", moment(1)), call("b", moment(2))]
-    calls[0].user_participant_id = MY_MRI
-    calls[1].user_participant_id = MY_MRI
-    assert intake.my_mri(calls) == MY_MRI
+DB_WITH_USER = f"Teams:calendar:react-web-client:{TENANT_GUID}:{MY_GUID}:tr-tr"
+DB_WITH_MRI = f"Teams:anonymoususersmanager:react-web-client:{TENANT_GUID}:{MY_MRI}:tr-tr"
 
 
-def test_a_guid_is_turned_into_an_mri():
+def test_my_mri_comes_from_the_database_name():
+    """Ad `Teams:<rol>:react-web-client:<kiraci>:<kullanici>:<dil>` bicimindedir."""
+    assert source_module.mri_from_database_name(DB_WITH_USER) == MY_MRI
+
+
+def test_some_database_names_carry_the_mri_outright():
+    assert source_module.mri_from_database_name(DB_WITH_MRI) == MY_MRI
+
+
+def test_a_database_name_without_an_identity_gives_nothing():
+    assert source_module.mri_from_database_name("Teams:messages:react-web-client:a:b:tr") == ""
+
+
+def test_my_mri_comes_from_my_own_message():
+    """`isSentByCurrentUser` isaretli mesajin `creator` alani benim."""
+    record = {
+        "conversationId": "19:meeting_x@thread.v2",
+        "messageMap": {
+            "a": {"creator": PERSON_ONE, "isSentByCurrentUser": False},
+            "b": {"creator": MY_MRI, "isSentByCurrentUser": True},
+        },
+    }
+    assert attendance.sender_mri(record) == MY_MRI
+    assert attendance.sender_mri({"messageMap": {}}) == ""
+
+
+def test_the_setting_wins_over_the_discovered_identity():
+    assert intake.my_mri(setting=MY_GUID, discovered=PERSON_ONE) == MY_MRI
+    assert intake.my_mri(discovered=MY_MRI) == MY_MRI
+    assert intake.my_mri() == ""
+
+
+def test_the_call_history_participant_id_is_not_used_any_more():
+    """Sahada hicbir katilimci listesinde bulunamadi: yanlis kaynakti."""
     record = teams_cache.call_from_value({"callId": "a", "userParticipantId": MY_GUID})
-    assert record.user_participant_id == MY_MRI
-
-
-def test_the_setting_wins_over_the_history():
-    calls = [call("a", moment(1))]
-    calls[0].user_participant_id = PERSON_ONE
-    assert intake.my_mri(calls, setting=MY_GUID) == MY_MRI
+    assert not hasattr(record, "user_participant_id")
 
 
 def test_without_an_identity_no_attendance_row_is_made():
@@ -1185,8 +1210,8 @@ def test_the_scan_merges_both_sources(conn):
     source = FakeCallSource(
         calls=[call("gecmis", moment(2))],
         attendance=[fake_attended()],
+        my_mri=MY_MRI,
     )
-    source.calls[0].user_participant_id = MY_MRI
     result = intake.scan(conn, source)
     assert result["from_chat"] == 1
     assert result["my_mri_known"] is True
@@ -1197,9 +1222,9 @@ def test_the_scan_merges_both_sources(conn):
 def test_a_history_call_beats_the_chat_record(conn):
     """Ayni `callId` gecmiste varsa sohbet kaydi eklenmez."""
     history = call("cagri-1", moment(1), call_type=TYPE_MULTI_PARTY)
-    history.user_participant_id = MY_MRI
     result = intake.scan(
-        conn, FakeCallSource(calls=[history], attendance=[fake_attended()])
+        conn,
+        FakeCallSource(calls=[history], attendance=[fake_attended()], my_mri=MY_MRI),
     )
     assert result["from_chat"] == 0
     assert repo.get_call(conn, "cagri-1")["source"] == "history"
@@ -1250,6 +1275,129 @@ def test_attendance_older_than_the_window_is_dropped():
     )
     kept = attendance.within([old], intake.since_of(90, NOW))
     assert kept == []
+
+
+# --- yeni partlist bicimi (gercek onbellek) ------------------------------
+#
+# Sahadaki 9.035 `Event/Call` mesajinin HICBIRINDE `type` ozniteligi yok:
+# olay turu `<calleventtype>`, toplanti bilgisi `<meetingdetails>` altinda.
+
+NEW_XML = (
+    '<partlist alt="Toplantı sona erdi">'
+    "<calleventtype>ended</calleventtype>"
+    "<callid>cagri-yeni</callid>"
+    "<ended>2026-09-11T09:31:03Z</ended>"
+    "<meetingdetails>"
+    "<icaluid>ICAL-42</icaluid>"
+    "<starttime>2026-09-11T09:00:00Z</starttime>"
+    "<endtime>2026-09-11T09:31:03Z</endtime>"
+    "<meetingtype>Scheduled</meetingtype>"
+    "<organizerupn>ornek@example.com</organizerupn>"
+    "</meetingdetails>"
+    '<part identity="{me}"><name>Ben</name><duration>1863</duration></part>'
+    "<part><identity>{other}</identity><displayname>Örnek Kişi</displayname>"
+    "<duration>1800</duration></part>"
+    "</partlist>"
+).format(me=MY_MRI, other=PERSON_ONE)
+
+NEW_STARTED_XML = (
+    '<partlist alt="Toplantı başladı">'
+    "<calleventtype>started</calleventtype>"
+    f'<part identity="{MY_MRI}"><name>Ben</name></part>'
+    "</partlist>"
+)
+
+
+def test_the_new_format_is_read_without_a_type_attribute():
+    block = attendance.parse_partlist(NEW_XML)
+    assert block.kind == "ended"
+    assert block.call_id == "cagri-yeni"
+    assert block.ical_uid == "ICAL-42"
+    assert block.meeting_type == "Scheduled"
+    assert [(part.mri, part.seconds) for part in block.parts] == [
+        (MY_MRI, 1863),
+        (PERSON_ONE, 1800),
+    ]
+
+
+def test_the_identity_can_be_a_child_element():
+    assert attendance.parse_partlist(NEW_XML).parts[1].mri == PERSON_ONE
+
+
+def test_the_new_started_message_is_ignored():
+    assert attendance.attendance_of({"messageType": "Event/Call", "content": NEW_STARTED_XML}) is None
+
+
+def test_a_block_without_a_type_but_with_durations_counts_as_ended():
+    """Turu yazmayan bloklarda sure varsa toplanti bitmistir."""
+    bare = NEW_XML.replace("<calleventtype>ended</calleventtype>", "").replace(
+        "<ended>2026-09-11T09:31:03Z</ended>", ""
+    )
+    record = attendance.attendance_of({"messageType": "Event/Call", "content": bare})
+    assert record is not None
+    assert record.part_for(MY_MRI).seconds == 1863
+
+
+def test_a_block_without_a_type_and_without_durations_is_skipped():
+    bare = (
+        '<partlist alt="x"><callid>c</callid>'
+        f'<part identity="{MY_MRI}"><name>Ben</name></part></partlist>'
+    )
+    assert attendance.attendance_of({"messageType": "Event/Call", "content": bare}) is None
+
+
+def test_the_old_format_still_works():
+    block = attendance.parse_partlist(ENDED_XML)
+    assert block.kind == "ended"
+    assert block.call_id == "cagri-1"
+    assert len(block.parts) == 2
+
+
+def test_the_meeting_time_comes_from_the_details():
+    record = attendance.attendance_of(
+        {"messageType": "Event/Call", "content": NEW_XML}, "19:meeting_x@thread.v2"
+    )
+    assert record.ended_at == "2026-09-11T09:31:03Z"
+    assert record.start_time == "2026-09-11T09:00:00Z"
+
+
+def test_the_names_inside_the_new_format_are_not_kept():
+    record = attendance.attendance_of({"messageType": "Event/Call", "content": NEW_XML})
+    dumped = json.dumps([part.__dict__ for part in record.parts], ensure_ascii=False)
+    for secret in ("Ben", "Örnek Kişi", "ornek@example.com"):
+        assert secret not in dumped, secret
+
+
+# --- icaluid ile takvim eslemesi -----------------------------------------
+
+
+def test_the_calendar_is_matched_by_ical_uid():
+    """En kesin yol: `meetingdetails.icaluid` <-> takvim `iCalUid`."""
+    meeting = event("Bütçe toplantısı", local_text(moment(9)))
+    meeting.ical_uid = "ICAL-42"
+    record = attendance.attendance_of(
+        {"messageType": "Event/Call", "content": NEW_XML}, "19:meeting_bilinmeyen@thread.v2"
+    )
+    rows = intake.normalize_attendance([record], MY_MRI, events=[meeting])
+    assert rows[0]["meeting_subject"] == "Bütçe toplantısı"
+
+
+def test_the_ical_uid_beats_the_thread_id():
+    by_thread = event("Yanlış toplantı", local_text(moment(1)), cid="19:meeting_x@thread.v2")
+    by_ical = event("Doğru toplantı", local_text(moment(9)))
+    by_ical.ical_uid = "ICAL-42"
+    record = attendance.attendance_of(
+        {"messageType": "Event/Call", "content": NEW_XML}, "19:meeting_x@thread.v2"
+    )
+    rows = intake.normalize_attendance([record], MY_MRI, events=[by_thread, by_ical])
+    assert rows[0]["meeting_subject"] == "Doğru toplantı"
+
+
+def test_the_calendar_record_carries_its_ical_uid():
+    record = teams_cache.calendar_from_value(
+        {"startTime": datetime(2026, 9, 11, 7, 0), "iCalUid": "ICAL-42", "subject": "Toplantı"}
+    )
+    assert record.ical_uid == "ICAL-42"
 
 
 # --- tekillestirme --------------------------------------------------------

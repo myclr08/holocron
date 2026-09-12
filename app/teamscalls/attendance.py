@@ -47,6 +47,11 @@ _PART_BLOCK = re.compile(
     r'<part\b[^>]*\bidentity\s*=\s*"([^"]*)"[^>]*>(.*?)</part\s*>', re.IGNORECASE | re.DOTALL
 )
 _DURATION = re.compile(r"<duration\b[^>]*>\s*(\d+)\s*</duration\s*>", re.IGNORECASE)
+_ELEMENT_EVENT_TYPE = re.compile(
+    r"<calleventtype\b[^>]*>\s*([^<]*)\s*</calleventtype\s*>", re.IGNORECASE
+)
+_ELEMENT_ENDED = re.compile(r"<ended\b", re.IGNORECASE)
+_ELEMENT_ICAL = re.compile(r"<icaluid\b[^>]*>\s*([^<]*)\s*</icaluid\s*>", re.IGNORECASE)
 
 
 @dataclass
@@ -65,6 +70,11 @@ class MeetingAttendance:
     call_id: str = ""
     ended_at: Any = ""
     parts: list[MeetingPart] = field(default_factory=list)
+    # `meetingdetails` altindan: takvim eslemesinin en kesin yolu.
+    ical_uid: str = ""
+    start_time: Any = ""
+    end_time: Any = ""
+    meeting_type: str = ""
 
     def part_for(self, mri: Any) -> MeetingPart | None:
         marker = clean_text(mri)
@@ -96,35 +106,137 @@ def has_partlist(content: Any) -> bool:
 
 
 # --- XML cozumu ----------------------------------------------------------
+#
+# Iki bicim var. Eskisi turu OZNITELIKTE tasiyor:
+#
+#     <partlist alt="" type="ended" callId="..."><part identity="..."> ...
+#
+# Gercek onbellekte gorulen yenisi ise oznitelik yerine ELEMAN kullaniyor:
+#
+#     <partlist alt="..."><calleventtype>ended</calleventtype>
+#       <callid>...</callid><ended>...</ended>
+#       <meetingdetails><icaluid>...</icaluid><starttime>...</starttime>...</meetingdetails>
+#       <part identity="..."><name>...</name><duration>1863</duration></part>
+#
+# Ikisi de okunur. `name` / `displayname` / `organizerupn` degerleri hicbir
+# yolda saklanmaz: adlar `profiles` store'undan cozulur.
+
+ENDED_MARKERS: tuple[str, ...] = ("ended", "endedcall", "callended")
+STARTED_MARKERS: tuple[str, ...] = ("started", "startedcall", "callstarted")
 
 
-def parse_partlist(content: Any) -> tuple[str, str, list[MeetingPart]]:
-    """`<partlist>` -> (tur, callId, katilimcilar).
+@dataclass
+class Partlist:
+    """`<partlist>` blokunun cozumlenmis hali."""
 
-    Once gercek XML denenir; kirik icerik (kacirilmamis `&`, yarim etiket)
-    icin duzenli ifade yedegi devreye girer. `<name>` degeri hicbir yolda
-    okunmaz: ad `profiles` store'undan cozulur.
+    kind: str = ""
+    call_id: str = ""
+    parts: list[MeetingPart] = field(default_factory=list)
+    ical_uid: str = ""
+    start_time: str = ""
+    end_time: str = ""
+    meeting_type: str = ""
+    ended_at: str = ""
+
+    @property
+    def has_duration(self) -> bool:
+        return any(part.seconds > 0 for part in self.parts)
+
+
+def _tag(element: Any) -> str:
+    return str(getattr(element, "tag", "")).rsplit("}", 1)[-1].casefold()
+
+
+def _child(element: Any, name: str) -> Any:
+    """Etiket adiyla ilk cocuk (buyuk/kucuk harf ve ad alani gozetilmez)."""
+    for node in element.iter():
+        if node is not element and _tag(node) == name:
+            return node
+    return None
+
+
+def _child_text(element: Any, name: str) -> str:
+    node = _child(element, name)
+    return clean_text(node.text) if node is not None else ""
+
+
+def _attr(element: Any, name: str) -> str:
+    for key, value in (getattr(element, "attrib", {}) or {}).items():
+        if str(key).casefold() == name:
+            return clean_text(value)
+    return ""
+
+
+def _event_kind(element: Any, attribute_type: str) -> str:
+    """Bitis mi baslangic mi? Sirayla `calleventtype`, oznitelik, eleman.
+
+    `calleventtype` varsa o soyler; yoksa eski `type` ozniteligi; o da yoksa
+    `<ended>` / `<started>` elemaninin varligina bakilir.
     """
+    marker = _child_text(element, "calleventtype").casefold()
+    if marker:
+        if any(hint in marker for hint in ENDED_MARKERS):
+            return PARTLIST_ENDED
+        if any(hint in marker for hint in STARTED_MARKERS):
+            return PARTLIST_STARTED
+    if attribute_type:
+        return attribute_type
+    if _child(element, "started") is not None and _child(element, "ended") is None:
+        return PARTLIST_STARTED
+    if _child(element, "ended") is not None:
+        return PARTLIST_ENDED
+    return ""
+
+
+def _parts_of(element: Any) -> list[MeetingPart]:
+    """`<part>` elemanlari: kimlik oznitelikte ya da alt elemanda."""
+    parts: list[MeetingPart] = []
+    for node in element.iter():
+        if _tag(node) != "part":
+            continue
+        identity = _attr(node, "identity") or _child_text(node, "identity")
+        if not identity:
+            continue
+        parts.append(
+            MeetingPart(mri=identity, seconds=max(0, as_int(_child_text(node, "duration")) or 0))
+        )
+    return parts
+
+
+def _details_of(element: Any) -> tuple[str, str, str, str]:
+    """`<meetingdetails>`: (icaluid, starttime, endtime, meetingtype)."""
+    details = _child(element, "meetingdetails")
+    if details is None:
+        details = element
+    return (
+        _child_text(details, "icaluid"),
+        _child_text(details, "starttime"),
+        _child_text(details, "endtime"),
+        _child_text(details, "meetingtype"),
+    )
+
+
+def parse_partlist(content: Any) -> Partlist:
+    """`<partlist>` -> cozumlenmis blok (iki bicim de okunur)."""
     text = clean_text(content)
     if not has_partlist(text):
-        return "", "", []
+        return Partlist()
 
     element = _parse_xml(text)
-    if element is not None:
-        parts = [
-            MeetingPart(
-                mri=clean_text(node.get("identity")),
-                seconds=max(0, as_int(node.findtext("duration")) or 0),
-            )
-            for node in element.iter("part")
-            if clean_text(node.get("identity"))
-        ]
-        return (
-            clean_text(element.get("type")).casefold(),
-            clean_text(element.get("callId") or element.get("callid")),
-            parts,
-        )
-    return _parse_with_regex(text)
+    if element is None:
+        return _parse_with_regex(text)
+
+    ical_uid, start_time, end_time, meeting_type = _details_of(element)
+    return Partlist(
+        kind=_event_kind(element, _attr(element, "type").casefold()),
+        call_id=_attr(element, "callid") or _child_text(element, "callid"),
+        parts=_parts_of(element),
+        ical_uid=ical_uid,
+        start_time=start_time,
+        end_time=end_time,
+        meeting_type=meeting_type,
+        ended_at=_child_text(element, "ended"),
+    )
 
 
 def _parse_xml(text: str) -> ElementTree.Element | None:
@@ -134,22 +246,30 @@ def _parse_xml(text: str) -> ElementTree.Element | None:
             root = ElementTree.fromstring(candidate)
         except ElementTree.ParseError:
             continue
-        if root.tag.casefold() == "partlist":
+        if _tag(root) == "partlist":
             return root
-        found = root.find(".//partlist")
-        if found is not None:
-            return found
+        for node in root.iter():
+            if _tag(node) == "partlist":
+                return node
     return None
 
 
-def _parse_with_regex(text: str) -> tuple[str, str, list[MeetingPart]]:
+def _parse_with_regex(text: str) -> Partlist:
     """Bozuk XML yedegi: etiketleri metin olarak okur."""
     head = _PARTLIST_TAG.search(text)
     if head is None:
-        return "", "", []
+        return Partlist()
     opening = head.group(0)
-    kind = (_ATTR_TYPE.search(opening).group(1) if _ATTR_TYPE.search(opening) else "").casefold()
-    call_id = _ATTR_CALL_ID.search(opening).group(1) if _ATTR_CALL_ID.search(opening) else ""
+    found_type = _ATTR_TYPE.search(opening)
+    found_call = _ATTR_CALL_ID.search(opening)
+    kind = clean_text(found_type.group(1)).casefold() if found_type else ""
+    if not kind:
+        marker = _ELEMENT_EVENT_TYPE.search(text)
+        if marker:
+            kind = clean_text(marker.group(1)).casefold()
+        elif _ELEMENT_ENDED.search(text):
+            kind = PARTLIST_ENDED
+
     parts: list[MeetingPart] = []
     for identity, body in _PART_BLOCK.findall(text):
         marker = clean_text(identity)
@@ -157,7 +277,14 @@ def _parse_with_regex(text: str) -> tuple[str, str, list[MeetingPart]]:
             continue
         found = _DURATION.search(body)
         parts.append(MeetingPart(mri=marker, seconds=int(found.group(1)) if found else 0))
-    return clean_text(kind), clean_text(call_id), parts
+
+    ical = _ELEMENT_ICAL.search(text)
+    return Partlist(
+        kind=kind,
+        call_id=clean_text(found_call.group(1)) if found_call else "",
+        parts=parts,
+        ical_uid=clean_text(ical.group(1)) if ical else "",
+    )
 
 
 # --- mesaj -> katilim kaydi ----------------------------------------------
@@ -174,21 +301,33 @@ def attendance_of(message: Any, thread_id: Any = "") -> MeetingAttendance | None
     if not (is_call_event(message.get("messageType")) or has_partlist(content)):
         return None
 
-    kind, call_id, parts = parse_partlist(content)
-    if kind != PARTLIST_ENDED or not parts:
+    block = parse_partlist(content)
+    if not block.parts:
+        return None
+    if block.kind == PARTLIST_STARTED:
+        return None
+    if block.kind != PARTLIST_ENDED and not block.has_duration:
+        # Turu yazmayan bloklarda sure varsa toplanti bitmistir; yoksa bu
+        # yalnizca "basladi" mesajidir ve katilim bilgisi tasimaz.
         return None
 
     ended = (
-        message.get("originalArrivalTime")
+        block.end_time
+        or block.ended_at
+        or message.get("originalArrivalTime")
         or message.get("clientArrivalTime")
         or message.get("composetime")
         or ""
     )
     return MeetingAttendance(
         thread_id=clean_text(thread_id) or clean_text(message.get("conversationId")),
-        call_id=clean_text(call_id) or clean_text(message.get("callId")),
+        call_id=block.call_id or clean_text(message.get("callId")),
         ended_at=ended,
-        parts=parts,
+        parts=block.parts,
+        ical_uid=block.ical_uid,
+        start_time=block.start_time,
+        end_time=block.end_time,
+        meeting_type=block.meeting_type,
     )
 
 
@@ -213,6 +352,27 @@ def attendance_from_record(value: Any) -> list[MeetingAttendance]:
         if record is not None:
             found.append(record)
     return found
+
+
+def sender_mri(value: Any) -> str:
+    """`replychains` kaydindan kullanicinin KENDI kimligi.
+
+    `isSentByCurrentUser` isaretli bir mesajin `creator` alani kullanicinin
+    MRI'idir. (`call-history.userParticipantId` bu is icin yanlisti: o,
+    arama basina katilimci kimligi.)
+    """
+    if not isinstance(value, dict):
+        return ""
+    messages = value.get("messageMap")
+    if not isinstance(messages, dict):
+        return ""
+    for message in messages.values():
+        if not isinstance(message, dict) or not message.get("isSentByCurrentUser"):
+            continue
+        marker = clean_text(message.get("creator") or message.get("from"))
+        if marker:
+            return marker
+    return ""
 
 
 def within(records: Iterable[MeetingAttendance], since: Any) -> list[MeetingAttendance]:

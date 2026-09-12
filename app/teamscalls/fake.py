@@ -159,6 +159,7 @@ class FakeCallSource:
         names: dict[str, str] | None = None,
         threads: Iterable[ThreadRecord] = (),
         attendance: Iterable[MeetingAttendance] = (),
+        my_mri: str = "",
         error: CallsError | None = None,
         report: dict[str, Any] | None = None,
     ) -> None:
@@ -167,6 +168,8 @@ class FakeCallSource:
         self.names: dict[str, str] = dict(DEFAULT_NAMES if names is None else names)
         self.threads: list[ThreadRecord] = list(threads)
         self.attendance: list[MeetingAttendance] = list(attendance)
+        # Gercek kaynak bunu veritabani adindan ya da kendi mesajindan bulur.
+        self.my_mri = my_mri
         self.error = error
         self.reads = 0
         # Teshis: gercek kaynakta kopyalama sonucunu tasir, burada testlerin
@@ -188,6 +191,7 @@ class FakeCallSource:
             raise self.error
         # Teshis alani gercek kaynaktaki gibi okunan katilim sayisini tasir.
         self.report["attendance"] = len(self.attendance)
+        self.report["my_mri"] = self.my_mri
         return (
             list(self.calls),
             list(self.calendar),

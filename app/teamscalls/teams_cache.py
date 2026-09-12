@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .. import vendor
-from .attendance import MeetingAttendance, attendance_from_record
+from .attendance import MeetingAttendance, attendance_from_record, sender_mri
 from .source import (
     SOURCE_COPY,
     SOURCE_LIVE,
@@ -43,7 +43,6 @@ from .source import (
     CallRecord,
     CallsError,
     ThreadRecord,
-    as_mri,
     blob_dir_for,
     canonical_direction,
     canonical_state,
@@ -51,6 +50,7 @@ from .source import (
     clean_text,
     default_cache_path,
     empty_diagnostics,
+    mri_from_database_name,
     jsonable,
     temp_root,
 )
@@ -190,7 +190,6 @@ def call_from_value(value: Any) -> CallRecord | None:
         forwarded=clean_text(value.get("forwardedTargetType")),
         thread_id=clean_text(value.get("threadId")),
         group_thread_id=clean_text(value.get("groupChatThreadId")),
-        user_participant_id=as_mri(value.get("userParticipantId")),
         subject=clean_text(value.get("subject")),
         participants=participants_of(value.get("participantList") or value.get("participants")),
         raw=jsonable(value),
@@ -232,6 +231,7 @@ def calendar_from_value(value: Any) -> CalendarRecord | None:
     organizer_id, organizer_name = person_of(value.get("organizer"))
     return CalendarRecord(
         event_id=clean_text(value.get("id") or value.get("iCalUid") or value.get("objectId")),
+        ical_uid=clean_text(value.get("iCalUid") or value.get("icalUid") or value.get("iCalUId")),
         start_time=start,
         end_time=value.get("endTime") or "",
         subject=clean_text(value.get("subject")),
@@ -463,6 +463,14 @@ class CacheBundle:
     read_ms: int = 0
     # Toplanti sohbetlerinde `19:meeting_` onekiyle taranan kayit sayisi.
     chains_seen: int = 0
+    # Kullanicinin kendi kimligi: veritabani adindan ve/veya kendi gonderdigi
+    # bir mesajin `creator` alanindan.
+    mri_from_name: str = ""
+    mri_from_chat: str = ""
+
+    @property
+    def user_mri(self) -> str:
+        return self.mri_from_name or self.mri_from_chat
 
     def as_tuple(self) -> tuple[
         list[CallRecord],
@@ -559,6 +567,7 @@ class TeamsCacheSource:
         self.report["databases"] = getattr(bundle, "databases", 0)
         self.report["read_ms"] = getattr(bundle, "read_ms", 0)
         self.report["attendance"] = len(getattr(bundle, "attendance", ()))
+        self.report["my_mri"] = getattr(bundle, "user_mri", "")
         return bundle.as_tuple() if hasattr(bundle, "as_tuple") else tuple(bundle)
 
     # --- ic islem -----------------------------------------------------
@@ -599,6 +608,10 @@ class TeamsCacheSource:
             for db_id in wrapper.database_ids:
                 name = clean_text(getattr(db_id, "name", ""))
                 role = database_role(name)
+                # Kullanicinin kimligi veritabani ADINDA duruyor; bunun icin
+                # veritabanini acmaya bile gerek yok.
+                if not bundle.mri_from_name:
+                    bundle.mri_from_name = mri_from_database_name(name)
                 if not role:
                     continue
                 try:
@@ -638,6 +651,8 @@ class TeamsCacheSource:
                     if found:
                         bundle.chains_seen += 1
                         bundle.attendance.extend(found)
+                    if not bundle.mri_from_chat:
+                        bundle.mri_from_chat = sender_mri(value)
                 elif role == ROLE_THREADS:
                     thread = thread_from_value(value, getattr(record, "key", None))
                     if thread is not None:

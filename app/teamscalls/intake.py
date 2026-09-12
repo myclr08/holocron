@@ -1104,30 +1104,22 @@ SOURCE_LABELS: dict[str, str] = {SOURCE_HISTORY: "Arama geçmişi", SOURCE_CHAT:
 ATTENDANCE_DAYS = 90
 
 
-def my_mri(
-    calls: Iterable[CallRecord] = (),
-    setting: Any = "",
-    names: dict[str, str] | None = None,
-) -> str:
+def my_mri(setting: Any = "", discovered: Any = "") -> str:
     """Kullanicinin kendi kimligi (MRI).
 
-    Sirayla: ayardan elle verilen deger, `call-history` kayitlarindaki
-    `userParticipantId` (GUID -> `8:orgid:<guid>`). Profil eslemesi icin
-    elimizde kullanicinin e-postasi olmadigindan o yol kullanilmaz; kimlik
-    bulunamazsa katilim kaydi uretilmez (yanlis kayit uretmektense hic
-    uretmemek yeglenir).
+    Sirayla: ayardan elle verilen deger, sonra kaynagin bulduğu deger
+    (veritabani adindaki kullanici GUID'i ya da kendi gonderdigi bir mesajin
+    `creator` alani). Bulunamazsa bos doner ve katilim kaydi URETILMEZ:
+    yanlis kayit uretmektense hic uretmemek yeglenir.
+
+    (`call-history.userParticipantId` bu is icin kullanilmaz: o alan
+    kullanicinin kimligi degil, arama basina katilimci kimligidir -- sahada
+    hicbir katilimci listesinde bulunamadi.)
     """
     manual = as_mri(clean_text(setting))
     if manual:
         return manual
-    counts: dict[str, int] = {}
-    for call in calls or ():
-        marker = as_mri(getattr(call, "user_participant_id", ""))
-        if marker:
-            counts[marker] = counts.get(marker, 0) + 1
-    if not counts:
-        return ""
-    return max(counts.items(), key=lambda item: item[1])[0]
+    return as_mri(clean_text(discovered))
 
 
 def attendance_call_id(record: MeetingAttendance) -> str:
@@ -1137,6 +1129,26 @@ def attendance_call_id(record: MeetingAttendance) -> str:
         return marker
     ended = iso_text(parse_utc(record.ended_at)) or clean_text(record.ended_at)
     return f"{clean_text(record.thread_id)}:{ended}"
+
+
+def match_attendance(record: MeetingAttendance, pools: Any) -> CalendarRecord | None:
+    """Katilim kaydinin takvim karsiligi.
+
+    Once `icaluid`: toplanti mesajindaki `meetingdetails.icaluid` takvim
+    kaydinin `iCalUid` alanina birebir esittir -- thread kimliginden bile
+    kesin bir yol. Yoksa thread kimligiyle denenir.
+    """
+    marker = clean_text(record.ical_uid)
+    if marker:
+        for event in pools.identity:
+            if clean_text(getattr(event, "ical_uid", "")) == marker:
+                return event
+        for event in pools.time:
+            if clean_text(getattr(event, "ical_uid", "")) == marker:
+                return event
+    return match_by_thread(
+        CallRecord(call_id=record.call_id, thread_id=record.thread_id), pools.identity
+    )
 
 
 def normalize_attendance(
@@ -1175,9 +1187,7 @@ def normalize_attendance(
         ended = parse_utc(record.ended_at)
         seconds = mine.seconds or record.longest
         started = ended - timedelta(seconds=seconds) if ended is not None else None
-        event = match_by_thread(
-            CallRecord(call_id=call_id, thread_id=record.thread_id), pools.identity
-        )
+        event = match_attendance(record, pools)
         participants = [
             {
                 "id": part.mri,
@@ -1260,7 +1270,8 @@ def scan(
     # Toplanti sohbetlerinden gelen katilim kayitlari: `call-history`de zaten
     # gecen bir arama varsa (ayni `callId`) chat kaydi EKLENMEZ.
     history_ids = {row["call_id"] for row in rows} | repository.history_call_ids(conn)
-    marker = my_mri(calls, setting=my_mri_setting)
+    found = source_diagnostics(source)
+    marker = my_mri(setting=my_mri_setting, discovered=found.get("my_mri"))
     chat_rows = normalize_attendance(
         within(attended, since_of(ATTENDANCE_DAYS)),
         marker,
@@ -1285,5 +1296,6 @@ def scan(
     report["latest_call_at"] = max(
         (row["started_at"] for row in rows if row["started_at"]), default=""
     )
-    report.update(source_diagnostics(source))
+    report.update(found)
+    report["my_mri_known"] = bool(marker)
     return report
