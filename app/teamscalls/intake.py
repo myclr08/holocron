@@ -35,10 +35,15 @@ from .source import (
     CalendarRecord,
     CallRecord,
     CallSource,
+    ThreadRecord,
     as_int,
+    canonical_direction,
+    canonical_state,
+    canonical_type,
     clean_text,
     empty_diagnostics,
     iso_text,
+    jsonable,
     parse_local,
     parse_utc,
     utc_now,
@@ -68,7 +73,10 @@ STATE_LABELS: dict[str, str] = {
 }
 
 # Toplanti eslemesi: aramanin baslangici takvim kaydina bu kadar yakinsa tutar.
+# (Thread kimligi tutuyorsa saat hic bakilmaz; bu yalnizca YEDEK yoldur.)
 MEETING_TOLERANCE_MINUTES = 10
+# Bu kadar kisa bir "thread kimligi" ile alt dizge eslemesi yapilmaz.
+MIN_THREAD_LENGTH = 10
 
 DEFAULT_DAYS = 30
 WINDOW_DAYS: tuple[int, ...] = (7, 30, 90)
@@ -196,12 +204,15 @@ def counterpart_of(call: CallRecord, names: dict[str, str] | None) -> tuple[str,
 
 
 def usable_events(calendar: Iterable[CalendarRecord]) -> list[CalendarRecord]:
-    """Yineleyen serinin sablonu ve 'ofiste degilim' kaydi eslesmeye girmez."""
+    """Yineleyen serinin sablonu, iptal edilmis kayit ve 'ofiste degilim'
+    eslesmeye girmez."""
     picked: list[CalendarRecord] = []
     for event in calendar or ():
         if clean_text(event.event_type) == EVENT_RECURRING_MASTER:
             continue
         if clean_text(event.show_as) == SHOW_AS_OOF:
+            continue
+        if getattr(event, "is_cancelled", False):
             continue
         if parse_local(event.start_time) is None:
             continue
@@ -209,12 +220,53 @@ def usable_events(calendar: Iterable[CalendarRecord]) -> list[CalendarRecord]:
     return picked
 
 
+def thread_core(thread_id: Any) -> str:
+    """`19:meeting_ABC123@thread.v2` -> `ABC123`.
+
+    Toplanti baglantisinda thread kimligi URL kodlanmis gecer (`%3a`, `%40`),
+    duz alt dizge aramasi tutmaz; govdesi ise oldugu gibi durur.
+    """
+    text = clean_text(thread_id)
+    if ":" in text:
+        text = text.split(":", 1)[1]
+    if "@" in text:
+        text = text.split("@", 1)[0]
+    if text.startswith("meeting_"):
+        text = text[len("meeting_"):]
+    return text
+
+
+def thread_matches(thread_id: Any, event: CalendarRecord) -> bool:
+    """Arama ile takvim kaydi ayni toplantiya mi ait? (kesin eslesme)"""
+    marker = clean_text(thread_id)
+    if len(marker) < MIN_THREAD_LENGTH:
+        return False
+    cid = clean_text(getattr(event, "cid", ""))
+    if cid and (cid == marker or marker in cid or cid in marker):
+        return True
+    core = thread_core(marker)
+    if not core or len(core) < MIN_THREAD_LENGTH:
+        return False
+    url = clean_text(getattr(event, "meeting_url", ""))
+    return bool(url and core in url)
+
+
 def match_event(
     call: CallRecord,
     events: Sequence[CalendarRecord],
     tolerance_minutes: int = MEETING_TOLERANCE_MINUTES,
 ) -> CalendarRecord | None:
-    """Aramanin baslangicina en yakin takvim kaydi (pencere disi eslesmez)."""
+    """Aramanin takvim kaydi.
+
+    Once **kesin** yol denenir: aramanin `threadId` degeri takvim kaydinin
+    `skypeTeamsDataObj.cid` alanina (ya da toplanti baglantisina) denk
+    geliyorsa saat hic hesaba katilmaz. Yoksa baslangic saatine en yakin
+    kayit alinir; pencere disi eslesmez.
+    """
+    exact = next((event for event in events if thread_matches(call.thread_id, event)), None)
+    if exact is not None:
+        return exact
+
     started = parse_utc(call.start_time)
     if started is None:
         return None
@@ -233,6 +285,25 @@ def match_event(
     return best
 
 
+def thread_index(threads: Iterable[ThreadRecord]) -> dict[str, ThreadRecord]:
+    """Sohbet kimligi -> sohbet kaydi."""
+    known: dict[str, ThreadRecord] = {}
+    for thread in threads or ():
+        marker = clean_text(thread.thread_id)
+        if marker:
+            known.setdefault(marker, thread)
+    return known
+
+
+def thread_of(call: CallRecord, threads: dict[str, ThreadRecord]) -> ThreadRecord | None:
+    """Aramanin bagli oldugu sohbet (once grup sohbeti, sonra toplanti)."""
+    for marker in (call.group_thread_id, call.thread_id):
+        thread = threads.get(clean_text(marker))
+        if thread is not None:
+            return thread
+    return None
+
+
 # --- normalize -----------------------------------------------------------
 
 
@@ -241,13 +312,14 @@ def normalize_call(
     events: Sequence[CalendarRecord] = (),
     names: dict[str, str] | None = None,
     seen_at: str | None = None,
+    threads: dict[str, ThreadRecord] | None = None,
 ) -> dict[str, Any] | None:
     """Tek arama -> veritabani satiri. Kimliksiz kayit atlanir."""
     call_id = clean_text(call.call_id)
     if not call_id:
         return None
 
-    call_type = clean_text(call.call_type)
+    call_type = canonical_type(call.call_type)
     event = match_event(call, events) if call_type != TYPE_TWO_PARTY else None
     if call_type == TYPE_TWO_PARTY:
         kind = KIND_ONE_TO_ONE
@@ -256,9 +328,25 @@ def normalize_call(
     else:
         kind = KIND_GROUP
 
+    thread = thread_of(call, threads or {})
     counterpart_id, counterpart_name = counterpart_of(call, names)
-    participants = [clean_text(item) for item in (call.participants or []) if clean_text(item)]
+
+    # Katilimcilar: aramanin kendi `participantList` alani; bos kalirsa
+    # sohbetin uyeleri yedege gecer. Adlar profil sozlugunden cozulur ve
+    # ad SATIRDA saklanir; boylece ekranda ham kimlik hic gorunmez.
+    people = [clean_text(item) for item in (call.participants or []) if clean_text(item)]
+    if not people and thread is not None:
+        people = [clean_text(item) for item in thread.members if clean_text(item)]
+    participants = [
+        {"id": person, "name": resolve_name(person, "", names)} for person in people
+    ]
+
     subject = clean_text(event.subject) if event is not None else clean_text(call.subject)
+    topic = clean_text(thread.topic) if thread is not None else ""
+    if not topic and thread is not None and thread.member_names:
+        # Basligi olmayan grup sohbetinde Teams de avatar adlarini yaziyor.
+        topic = ", ".join(thread.member_names[:MAX_PARTY_NAMES])
+    attendees = list(event.attendees) if event is not None else []
 
     return {
         "call_id": call_id,
@@ -266,8 +354,8 @@ def normalize_call(
         "ended_at": iso_text(parse_utc(call.end_time)),
         "connected_at": iso_text(parse_utc(call.connect_time)),
         "duration_ms": duration_of(call),
-        "direction": clean_text(call.direction),
-        "state": clean_text(call.state),
+        "direction": canonical_direction(call.direction),
+        "state": canonical_state(call.state),
         "kind": kind,
         "counterpart_id": counterpart_id,
         "counterpart_name": counterpart_name,
@@ -275,8 +363,12 @@ def normalize_call(
         "meeting_subject": subject,
         "meeting_organizer": clean_text(event.organizer_name) if event is not None else "",
         "my_response": clean_text(event.my_response) if event is not None else "",
+        "thread_id": clean_text(call.thread_id),
+        "group_thread_id": clean_text(call.group_thread_id),
+        "topic": topic,
         "participants_json": json.dumps(participants, ensure_ascii=False),
-        "raw_json": json.dumps(call.raw or {}, ensure_ascii=False, default=str),
+        "attendees_json": json.dumps(attendees, ensure_ascii=False),
+        "raw_json": json.dumps(jsonable(call.raw or {}), ensure_ascii=False, default=str),
         "seen_at": seen_at or repository.now_iso(),
     }
 
@@ -286,13 +378,15 @@ def normalize(
     calendar: Iterable[CalendarRecord] = (),
     names: dict[str, str] | None = None,
     seen_at: str | None = None,
+    threads: Iterable[ThreadRecord] = (),
 ) -> list[dict[str, Any]]:
     """Ham kayitlar -> veritabani satirlari (eskiden yeniye)."""
     events = usable_events(calendar)
+    known_threads = thread_index(threads)
     stamp = seen_at or repository.now_iso()
     rows: list[dict[str, Any]] = []
     for call in calls or ():
-        row = normalize_call(call, events, names, stamp)
+        row = normalize_call(call, events, names, stamp, known_threads)
         if row is not None:
             rows.append(row)
     rows.sort(key=lambda item: (item["started_at"], item["call_id"]))
@@ -302,21 +396,51 @@ def normalize(
 # --- ekran gorunumu ------------------------------------------------------
 
 
-def participants_of(row: dict[str, Any]) -> list[str]:
-    """`participants_json` -> liste; bozuk deger bos listeye duser."""
-    raw = row.get("participants_json")
-    if isinstance(raw, list):
-        return [clean_text(item) for item in raw if clean_text(item)]
+def _load_list(value: Any) -> list[Any]:
+    """JSON metni ya da hazir liste -> liste; bozuk deger bos listeye duser."""
+    if isinstance(value, list):
+        return value
     try:
-        parsed = json.loads(str(raw or "[]"))
+        parsed = json.loads(str(value or "[]"))
     except (TypeError, ValueError):
         return []
-    return [clean_text(item) for item in parsed if clean_text(item)] if isinstance(parsed, list) else []
+    return parsed if isinstance(parsed, list) else []
+
+
+def participant_pairs(row: dict[str, Any]) -> list[dict[str, str]]:
+    """Katilimcilar: `{"id", "name"}` ciftleri.
+
+    Eski satirlar duz kimlik listesi tasiyordu; ikisi de okunur.
+    """
+    pairs: list[dict[str, str]] = []
+    for item in _load_list(row.get("participants_json")):
+        if isinstance(item, dict):
+            person = clean_text(item.get("id"))
+            name = clean_text(item.get("name"))
+        else:
+            person, name = clean_text(item), ""
+        if person or name:
+            pairs.append({"id": person, "name": name})
+    return pairs
+
+
+def participants_of(row: dict[str, Any]) -> list[str]:
+    """Katilimci kimlikleri (kisi eslemesi bunun uzerinden yapilir)."""
+    return [pair["id"] for pair in participant_pairs(row) if pair["id"]]
+
+
+def attendees_of(row: dict[str, Any]) -> list[str]:
+    """Takvim davetlileri (katilanlar degil: davet edilenler)."""
+    return [clean_text(item) for item in _load_list(row.get("attendees_json")) if clean_text(item)]
 
 
 def participant_labels(record: dict[str, Any], names: dict[str, str] | None = None) -> list[str]:
-    """Katilimci kimlikleri -> gorunen adlar (ham kimlik cikmaz)."""
-    return [person_label(person, "", names) for person in participants_of(record)]
+    """Katilimcilarin gorunen adlari (ham kimlik cikmaz).
+
+    Once tarama aninda profillerden cozulup satira yazilan ad, sonra ekran
+    anindaki ad sozlugu, en sonunda "Bilinmeyen kişi (son alti hane)".
+    """
+    return [person_label(pair["id"], pair["name"], names) for pair in participant_pairs(record)]
 
 
 def display_party(record: dict[str, Any], names: dict[str, str] | None = None) -> str:
@@ -336,6 +460,11 @@ def display_party(record: dict[str, Any], names: dict[str, str] | None = None) -
         if subject:
             return subject
 
+    # Grup sohbetinin kendi adi varsa katilimci dokumunden daha anlamlidir.
+    topic = clean_text(record.get("topic"))
+    if topic:
+        return topic
+
     people = participant_labels(record, names)
     if people:
         shown = ", ".join(people[:MAX_PARTY_NAMES])
@@ -349,7 +478,10 @@ def view(row: dict[str, Any], names: dict[str, str] | None = None) -> dict[str, 
     card = dict(row)
     card["participants"] = participants_of(row)
     card["participant_names"] = participant_labels(row, names)
+    # Katilanlar (arama kaydi) ile davetliler (takvim) ayri sutunlardir.
+    card["attendees"] = attendees_of(row)
     card.pop("participants_json", None)
+    card.pop("attendees_json", None)
     card.pop("raw_json", None)
     card["kind_label"] = KIND_LABELS.get(row.get("kind", ""), "")
     card["direction_label"] = DIRECTION_LABELS.get(row.get("direction", ""), "")
@@ -384,6 +516,8 @@ def matches(row: dict[str, Any], needle: str, names: dict[str, str] | None = Non
         for part in (
             display_party(row, names),
             *participant_labels(row, names),
+            *attendees_of(row),
+            row.get("topic"),
             row.get("counterpart_name"),
             row.get("counterpart_id"),
             row.get("meeting_subject"),
@@ -712,8 +846,10 @@ def scan(conn: Any, source: CallSource, seen_at: str | None = None) -> dict[str,
     Ozet yalnizca sayilari degil, verinin NEREDEN geldigini de tasir: en yeni
     aramalar eksikse kullanicinin bunu balonda gormesi gerekir.
     """
-    calls, calendar, names = source.read()
-    rows = normalize(calls, calendar, names, seen_at)
+    bundle = source.read()
+    # Eski uc'lu donus de kabul edilir: sohbetler bos gecer.
+    calls, calendar, names, threads = (*bundle, [])[:4] if len(bundle) == 3 else bundle
+    rows = normalize(calls, calendar, names, seen_at, threads)
     report = repository.import_calls(conn, rows)
     report["meetings_matched"] = sum(1 for row in rows if row["kind"] == KIND_MEETING)
     report["latest_call_at"] = max(

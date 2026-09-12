@@ -530,12 +530,30 @@ Nasıl çalışır:
   okunur (okuyucu salt okuma yapar, Teams'in verisine dokunmaz); o da
   başarısız olursa kopyadan okunan sonuç bir uyarıyla birlikte gelir.
   Özet balonu kaç kayıt okunduğunu, **en yeni aramanın tarihini**, kaçının yeni
-  olduğunu ve kaç toplantının eşleştiğini söyler. Aynı önbelleği ikinci kez
-  taramak kopya oluşturmaz: tekilleştirme `callId` üzerindendir.
-- **Tür.** `TwoParty` **birebir** görüşmedir. `MultiParty` ise takvimde aynı
-  saate (± 10 dakika) denk gelen bir kayıt varsa **toplantı** (konusu ve
-  organizatörü de oradan gelir), yoksa **grup araması** sayılır. Yineleyen
-  serinin şablonu ve "ofiste değilim" kayıtları eşleşmeye girmez.
+  olduğunu, kaç toplantının eşleştiğini ve okumanın kaç saniye sürdüğünü
+  söyler. Aynı önbelleği ikinci kez taramak kopya oluşturmaz: tekilleştirme
+  `callId` üzerindendir; silinmiş (`isDeleted`) kayıtlar hiç alınmaz.
+- **Ne okunur.** Önbellekte yüzden fazla veritabanı var; Holocron yalnızca
+  **dördünü** açar — `call-history-manager` (aramalar), `calendar`
+  (toplantılar), `profiles` (kimlik → ad) ve `conversation-manager` (grup
+  sohbetlerinin adı). Seçim veritabanı adının ikinci segmentiyle **tam**
+  eşleşir, böylece `call-history-sync-state-manager` gibi kardeşler hiç
+  açılmaz. Alan değerleri büyük/küçük harfe duyarsız okunur (`twoParty` /
+  `TwoParty`) ve `bytes` olarak gelen adlar (Teams bazı dizgeleri öyle yazar)
+  çözülür.
+- **Tür.** `twoParty` **birebir** görüşmedir. `multiParty` ise takvimle
+  eşleşiyorsa **toplantı** (konu ve organizatör oradan gelir), eşleşmiyorsa
+  **grup araması** sayılır. Eşleşme iki yoldan denenir: önce **kesin** yol —
+  aramanın `threadId` değeri takvim kaydının `skypeTeamsDataObj.cid` alanına
+  (ya da toplantı bağlantısına) denk geliyorsa saat hiç hesaba katılmaz —
+  sonra ± 10 dakikalık zaman yakınlığı. Yineleyen serinin şablonu, iptal
+  edilmiş kayıtlar ve "ofiste değilim" eşleşmeye girmez.
+- **Grup sohbetleri.** Aramanın `groupChatThreadId` değeri bir sohbete
+  denk geliyorsa başlık o sohbetin **kendi adı** olur ("Grup araması" yerine
+  "Proje ekibi"); katılımcı listesi boşsa sohbetin üyeleri yedeğe geçer.
+- **Katılanlar ve davetliler ayrıdır.** Aramaya gerçekten katılanlar arama
+  kaydının `participantList` alanından, davetliler ise takvim kaydının
+  `attendees` alanından gelir; çekmecede ve Excel'de iki ayrı başlıktır.
 - **Süre.** Kayıtta `durationInMs` varsa o, yoksa *bitiş − bağlanma*, o da
   yoksa *bitiş − başlangıç*. Kaçırılan ve reddedilen aramanın süresi yoktur;
   bunlar **temas süresine girmez**, ayrı sayılır.

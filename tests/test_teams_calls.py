@@ -44,6 +44,7 @@ from app.teamscalls.source import (
     TYPE_TWO_PARTY,
     CalendarRecord,
     CallRecord,
+    ThreadRecord,
 )
 
 # Cuma 12:00 UTC: pencere hesabi makinenin gunune bagli kalmasin.
@@ -357,6 +358,153 @@ def test_the_person_drawer_titles_shared_meetings_the_same_way():
     data = intake.person_view(rows, PERSON_ONE, days=30, now=NOW)
     assert data["group_calls"][0]["title"] == "Örnek Kişi, İkinci Örnek"
     assert "8:orgid:" not in data["group_calls"][0]["title"]
+
+
+# --- yalnizca gereken dort veritabani acilir ------------------------------
+#
+# Sonda 112 veritabanini dolasmak 596 saniye surdu. Tarama ad suzgecini
+# `database_ids` uzerinde uygular: digerleri hic ACILMAZ.
+
+
+class FakeRecord:
+    def __init__(self, value, key=None):
+        self.value = value
+        self.key = key
+
+
+class FakeStore:
+    def __init__(self, name, records=()):
+        self.name = name
+        self.records = list(records)
+        self.reads = 0
+
+    def iterate_records(self):
+        self.reads += 1
+        return iter(self.records)
+
+
+class FakeDatabase:
+    def __init__(self, stores):
+        self.stores = list(stores)
+
+    def __iter__(self):
+        return iter(self.stores)
+
+
+class FakeId:
+    def __init__(self, name, number):
+        self.name = name
+        self.dbid_no = number
+
+
+class FakeWrapper:
+    """ccl `WrappedIndexDB` yerine gecen en kucuk taklit."""
+
+    made: list["FakeWrapper"] = []
+
+    def __init__(self, leveldb, blob=None):
+        self.leveldb = leveldb
+        self.opened: list[str] = []
+        self.closed = False
+        FakeWrapper.made.append(self)
+        self.databases = {
+            1: (CALL_DB, FakeDatabase([
+                FakeStore("call-history", [FakeRecord({
+                    "callId": "a",
+                    "startTime": "2026-09-11T08:30:00Z",
+                    "endTime": "2026-09-11T08:40:00Z",
+                    "callDirection": "outgoing",
+                    "callState": "accepted",
+                    "callType": "multiParty",
+                    "participantList": [{"id": PERSON_ONE}],
+                    "groupChatThreadId": GROUP_THREAD,
+                })]),
+                FakeStore("call-history-settings", [FakeRecord({"x": 1})]),
+            ])),
+            2: (CALENDAR_DB, FakeDatabase([
+                FakeStore("calendar", [FakeRecord({
+                    "startTime": datetime(2026, 9, 11, 11, 30),
+                    "subject": "Toplantı",
+                })]),
+            ])),
+            3: (PROFILE_DB, FakeDatabase([
+                FakeStore("profiles", [FakeRecord({"mri": PERSON_ONE, "displayName": "Örnek Kişi"})]),
+            ])),
+            4: (THREAD_DB, FakeDatabase([
+                FakeStore("conversations", [FakeRecord(
+                    {"id": GROUP_THREAD, "threadProperties": {"topic": "Proje ekibi"}}
+                )]),
+            ])),
+            5: ("Teams:call-history-sync-state-manager:react-web-client:k:u:tr-tr",
+                FakeDatabase([FakeStore("call-history", [FakeRecord({"callId": "olmaz"})])])),
+            6: ("Teams:messages:react-web-client:k:u:tr-tr",
+                FakeDatabase([FakeStore("messages", [FakeRecord({"x": 1})])])),
+        }
+
+    @property
+    def database_ids(self):
+        return [FakeId(name, number) for number, (name, _) in self.databases.items()]
+
+    def __getitem__(self, number):
+        name, database = self.databases[number]
+        self.opened.append(name)
+        return database
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.fixture
+def fake_reader(monkeypatch):
+    FakeWrapper.made = []
+    module = type("FakeCcl", (), {"WrappedIndexDB": FakeWrapper})
+    monkeypatch.setattr(teams_cache, "load_reader", lambda: module)
+    return FakeWrapper
+
+
+def test_only_the_four_needed_databases_are_opened(fake_reader, tmp_path):
+    source = teams_cache.TeamsCacheSource(cache_path=str(tmp_path), copy_first=False)
+    bundle = source._read_all(tmp_path, None)
+    opened = fake_reader.made[0].opened
+    assert opened == [CALL_DB, CALENDAR_DB, PROFILE_DB, THREAD_DB]
+    assert bundle.databases == 4
+    assert fake_reader.made[0].closed is True
+
+
+def test_the_read_collects_all_four_kinds(fake_reader, tmp_path):
+    source = teams_cache.TeamsCacheSource(cache_path=str(tmp_path), copy_first=False)
+    bundle = source._read_all(tmp_path, None)
+    assert [item.call_id for item in bundle.calls] == ["a"]
+    assert [item.subject for item in bundle.calendar] == ["Toplantı"]
+    assert bundle.names == {PERSON_ONE: "Örnek Kişi"}
+    assert [item.topic for item in bundle.threads] == ["Proje ekibi"]
+
+
+def test_the_scan_reports_how_long_the_read_took(fake_reader, tmp_path, conn):
+    cache = tmp_path / "leveldb"
+    cache.mkdir()
+    source = teams_cache.TeamsCacheSource(cache_path=str(cache), copy_first=False)
+    result = intake.scan(conn, source)
+    assert result["databases"] == 4
+    assert result["read_ms"] >= 0
+    assert result["source"] == "live"
+    # Grup sohbetinin adi sohbet kaydindan geldi.
+    assert repo.list_calls(conn)[0]["topic"] == "Proje ekibi"
+
+
+def test_a_sibling_store_with_the_same_name_is_never_read(fake_reader, tmp_path):
+    source = teams_cache.TeamsCacheSource(cache_path=str(tmp_path), copy_first=False)
+    bundle = source._read_all(tmp_path, None)
+    # `call-history-sync-state-manager` icinde de "call-history" store'u var.
+    assert [item.call_id for item in bundle.calls] == ["a"]
+
+
+def test_the_other_stores_of_a_wanted_database_are_left_alone(fake_reader, tmp_path):
+    source = teams_cache.TeamsCacheSource(cache_path=str(tmp_path), copy_first=False)
+    source._read_all(tmp_path, None)
+    stores = {store.name: store for store in fake_reader.made[0].databases[1][1].stores}
+    assert stores["call-history"].reads == 1
+    assert stores["call-history-settings"].reads == 0
 
 
 # --- kopyalama: kilitli dosya, eksik kopya, canli yedek -------------------
@@ -724,23 +872,58 @@ def test_an_unknown_person_gets_an_empty_but_valid_view():
     assert data["summary"]["total_ms"] == 0
 
 
-# --- ham kayit cozumu (IndexedDB yapisi) ----------------------------------
+# --- ham kayit cozumu (gercek IndexedDB yapisi) ---------------------------
+#
+# Asagidaki adlar ve alanlar gercek bir onbellek sondasindan alindi:
+# veritabani adlari `Teams:<ad>:react-web-client:<kiraci>:<kullanici>:<dil>`,
+# takvim saatleri `datetime`, bazi dizgeler `bytes`, katilimcilar
+# `participantList` altinda ve `displayName` hep `null`.
+
+CALL_DB = "Teams:call-history-manager:react-web-client:kiraci:kullanici:tr-tr"
+CALENDAR_DB = "Teams:calendar:react-web-client:kiraci:kullanici:tr-tr"
+PROFILE_DB = "Teams:profiles:react-web-client:kiraci:kullanici:tr-tr"
+THREAD_DB = "Teams:conversation-manager:react-web-client:kiraci:kullanici:tr-tr"
+
+MEETING_THREAD = "19:meeting_NGY3ZjkwZDAtMTIzNC00@thread.v2"
+GROUP_THREAD = "19:abcdef0123456789abcdef0123456789@thread.v2"
 
 
-def test_the_call_database_is_recognised_by_name():
-    assert teams_cache.is_call_database("call-history-manager-db") is True
-    assert teams_cache.is_call_database("replychain-calendar") is False
+def test_the_four_databases_we_need_are_recognised():
+    assert teams_cache.database_role(CALL_DB) == "call-history-manager"
+    assert teams_cache.database_role(CALENDAR_DB) == "calendar"
+    assert teams_cache.database_role(PROFILE_DB) == "profiles"
+    assert teams_cache.database_role(THREAD_DB) == "conversation-manager"
 
 
-def test_the_calendar_database_skips_the_reply_chain():
-    assert teams_cache.is_calendar_database("calendar-db") is True
-    assert teams_cache.is_calendar_database("replychain-calendar-db") is False
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Teams:call-history-sync-state-manager:react-web-client:k:u:tr-tr",
+        "Teams:call-history-voicemail-manager:react-web-client:k:u:tr-tr",
+        "Teams:replychain-calendar:react-web-client:k:u:tr-tr",
+        "Teams:conversation-manager-extra:react-web-client:k:u:tr-tr",
+        "Teams:messages:react-web-client:k:u:tr-tr",
+    ],
+)
+def test_sibling_databases_are_excluded(name):
+    """Alt dizge aramasi kardes veritabanlarini da aciyordu; tam segment sart."""
+    assert teams_cache.database_role(name) == ""
 
 
-def test_name_stores_are_recognised():
-    for name in ("profiles", "internal-data", "capiv3-contacts"):
-        assert teams_cache.is_name_store(name) is True
-    assert teams_cache.is_name_store("call-history") is False
+def test_the_call_database_is_recognised_by_its_segment():
+    assert teams_cache.is_call_database(CALL_DB) is True
+    assert teams_cache.is_call_database(CALENDAR_DB) is False
+    # Eski alt dizge eslemesi bunu da yakaliyordu; artik yakalamiyor.
+    assert teams_cache.is_call_database("call-history-manager-db") is False
+
+
+def test_every_wanted_database_has_exactly_one_store():
+    assert teams_cache.ROLE_STORES == {
+        "call-history-manager": "call-history",
+        "calendar": "calendar",
+        "profiles": "profiles",
+        "conversation-manager": "conversations",
+    }
 
 
 def test_a_raw_call_record_becomes_a_call():
@@ -751,13 +934,19 @@ def test_a_raw_call_record_becomes_a_call():
             "endTime": "2026-09-11T08:42:00Z",
             "connectTime": "2026-09-11T08:30:10Z",
             "durationInMs": 710000,
-            "callDirection": "Outgoing",
-            "callState": "Accepted",
-            "callType": "TwoParty",
+            "callDirection": "outgoing",
+            "callState": "accepted",
+            "callType": "twoParty",
+            "isDeleted": False,
+            "isCurrentUserPartOfCall": True,
             "originatorParticipant": {"displayName": "Ben", "id": ME},
-            "targetParticipant": {"id": PERSON_ONE},
-            "forwardedTargetType": "",
-            "participants": [{"id": PERSON_ONE}, PERSON_TWO],
+            "targetParticipant": {"displayName": None, "id": PERSON_ONE},
+            "participantList": [
+                {"id": PERSON_ONE, "type": "user", "tenantId": "k", "displayName": None},
+                {"id": PERSON_TWO, "type": "user", "tenantId": "k", "displayName": None},
+            ],
+            "threadId": MEETING_THREAD,
+            "groupChatThreadId": "",
         }
     )
     assert record.call_id == "17:abc"
@@ -765,6 +954,51 @@ def test_a_raw_call_record_becomes_a_call():
     assert record.target_id == PERSON_ONE
     assert record.originator_name == "Ben"
     assert record.participants == [PERSON_ONE, PERSON_TWO]
+    assert record.thread_id == MEETING_THREAD
+
+
+def test_the_case_of_the_enum_fields_does_not_matter():
+    """Gercek kayitlarda "incoming"/"Incoming" ve "twoParty" karisik geliyor."""
+    lower = teams_cache.call_from_value(
+        {"callId": "a", "callDirection": "incoming", "callState": "missed", "callType": "multiParty"}
+    )
+    assert lower.direction == "Incoming"
+    assert lower.state == "Missed"
+    assert lower.call_type == "MultiParty"
+
+    upper = teams_cache.call_from_value(
+        {"callId": "b", "callDirection": "OUTGOING", "callType": "TWOPARTY"}
+    )
+    assert upper.direction == "Outgoing"
+    assert upper.call_type == "TwoParty"
+
+
+def test_a_deleted_call_is_skipped():
+    assert teams_cache.call_from_value({"callId": "a", "isDeleted": True}) is None
+    assert teams_cache.call_from_value({"callId": "a", "isDeleted": False}) is not None
+
+
+def test_a_bytes_display_name_is_decoded():
+    """Teams bazi dizgeleri bytes yaziyor; ham `b'...'` ekrana cikmamali."""
+    record = teams_cache.call_from_value(
+        {
+            "callId": "a",
+            "originatorParticipant": {"id": ME, "displayName": "Örnek Kişi".encode("utf-8")},
+        }
+    )
+    assert record.originator_name == "Örnek Kişi"
+
+    latin = teams_cache.call_from_value(
+        {"callId": "b", "originatorParticipant": {"id": ME, "displayName": b"\xdcmit"}}
+    )
+    assert latin.originator_name == "Ümit"
+
+
+def test_the_arrival_time_stands_in_for_a_missing_start():
+    record = teams_cache.call_from_value(
+        {"callId": "a", "originalArrivalTime": 1789000000000}
+    )
+    assert intake.normalize([record])[0]["started_at"].startswith("2026-09-10")
 
 
 def test_a_raw_record_without_an_id_is_dropped():
@@ -772,36 +1006,178 @@ def test_a_raw_record_without_an_id_is_dropped():
     assert teams_cache.call_from_value("metin") is None
 
 
-def test_a_raw_calendar_record_becomes_an_event():
+def test_a_raw_calendar_record_keeps_its_datetime():
+    """Takvim saatleri `datetime` gelir; metne cevirmek eslemeyi bozuyordu."""
+    started = datetime(2026, 9, 11, 11, 30)
     record = teams_cache.calendar_from_value(
         {
             "id": "event-1",
-            "startTime": "2026-09-11 11:30:00",
-            "endTime": "2026-09-11 12:00:00",
-            "subject": "Bütçe toplantısı",
+            "startTime": started,
+            "endTime": datetime(2026, 9, 11, 12, 0),
+            "subject": "Bütçe toplantısı".encode("utf-8"),
             "organizerName": "Örnek Kişi",
+            "organizerAddress": "ornek@example.com",
             "myResponseType": "Accepted",
             "isOnlineMeeting": True,
-            "eventType": "SingleInstance",
+            "isCancelled": False,
             "showAs": "Busy",
-            "attendees": [{"displayName": "İkinci Örnek"}],
+            "attendees": [
+                {"name": "İkinci Örnek", "address": "ikinci@example.com",
+                 "role": "Required", "status": {"response": "Accepted"}},
+            ],
+            "skypeTeamsDataObj": {"cid": MEETING_THREAD},
+            "skypeTeamsMeetingUrl": "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x",
         }
     )
+    assert record.start_time == started
     assert record.subject == "Bütçe toplantısı"
-    assert record.organizer_name == "Örnek Kişi"
     assert record.attendees == ["İkinci Örnek"]
+    assert record.cid == MEETING_THREAD
     assert teams_cache.calendar_from_value({"subject": "saatsiz"}) is None
 
 
+def test_a_cancelled_meeting_never_matches():
+    started = moment(1)
+    cancelled = event("İptal", local_text(started))
+    cancelled.is_cancelled = True
+    rows = intake.normalize([call("a", started, call_type=TYPE_MULTI_PARTY)], [cancelled])
+    assert rows[0]["kind"] == intake.KIND_GROUP
+
+
 def test_profile_records_feed_the_name_map():
-    assert teams_cache.names_from_value({"mri": PERSON_ONE, "displayName": "Örnek Kişi"}) == {
-        PERSON_ONE: "Örnek Kişi"
-    }
+    assert teams_cache.names_from_value(
+        {"mri": PERSON_ONE, "displayName": "Örnek Kişi", "email": "ornek@example.com"}
+    ) == {PERSON_ONE: "Örnek Kişi"}
     # Kabuk icindeki kayit da cozulur.
     assert teams_cache.names_from_value(
         {"value": {"id": PERSON_TWO, "imDisplayName": "İkinci Örnek"}}
     ) == {PERSON_TWO: "İkinci Örnek"}
     assert teams_cache.names_from_value({"displayName": "adsız"}) == {}
+
+
+def test_a_conversation_record_becomes_a_thread():
+    thread = teams_cache.thread_from_value(
+        {
+            "id": GROUP_THREAD,
+            "threadProperties": {"topic": "Proje ekibi".encode("utf-8")},
+            "members": [{"id": PERSON_ONE}, {"id": PERSON_TWO}],
+            "chatTitle": {"avatarUsersInfo": [{"displayName": "Örnek Kişi"}]},
+        }
+    )
+    assert thread.thread_id == GROUP_THREAD
+    assert thread.topic == "Proje ekibi"
+    assert thread.members == [PERSON_ONE, PERSON_TWO]
+    assert thread.member_names == ["Örnek Kişi"]
+    # Kayit anahtari da kimlik olarak kabul edilir.
+    assert teams_cache.thread_from_value({"threadProperties": {}}, GROUP_THREAD).thread_id == (
+        GROUP_THREAD
+    )
+
+
+# --- toplanti eslemesi: once thread kimligi -------------------------------
+
+
+def test_a_thread_id_matches_the_calendar_without_looking_at_the_clock():
+    """Saatler tutmasa da `threadId` == `cid` ise eslesme kesindir."""
+    rows = intake.normalize(
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)],
+        [event("Bütçe toplantısı", local_text(moment(9)), cid=MEETING_THREAD)],
+    )
+    assert rows[0]["kind"] == intake.KIND_MEETING
+    assert rows[0]["meeting_subject"] == "Bütçe toplantısı"
+
+
+def test_the_thread_id_beats_a_closer_meeting_in_time():
+    started = moment(1)
+    rows = intake.normalize(
+        [call("a", started, call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)],
+        [
+            event("Yakın ama başka", local_text(started)),
+            event("Doğru toplantı", local_text(moment(20)), cid=MEETING_THREAD),
+        ],
+    )
+    assert rows[0]["meeting_subject"] == "Doğru toplantı"
+
+
+def test_the_meeting_url_also_carries_the_thread():
+    """Baglantida kimlik URL kodlanmis gecer; govdesi aranir."""
+    core = intake.thread_core(MEETING_THREAD)
+    url = f"https://teams.microsoft.com/l/meetup-join/19%3ameeting_{core}%40thread.v2/0"
+    rows = intake.normalize(
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)],
+        [event("Bağlantıdan eşleşen", local_text(moment(30)), meeting_url=url)],
+    )
+    assert rows[0]["kind"] == intake.KIND_MEETING
+
+
+def test_a_short_thread_id_never_matches_by_substring():
+    assert intake.thread_matches("19:x", event("A", local_text(moment(1)), cid="19:xyz")) is False
+
+
+def test_a_group_chat_call_is_titled_from_the_conversation():
+    rows = intake.normalize(
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, group_thread_id=GROUP_THREAD)],
+        threads=[ThreadRecord(thread_id=GROUP_THREAD, topic="Proje ekibi")],
+    )
+    assert rows[0]["kind"] == intake.KIND_GROUP
+    assert rows[0]["topic"] == "Proje ekibi"
+    assert intake.display_party(rows[0]) == "Proje ekibi"
+
+
+def test_the_conversation_members_stand_in_for_a_missing_participant_list():
+    rows = intake.normalize(
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, group_thread_id=GROUP_THREAD)],
+        names={PERSON_ONE: "Örnek Kişi"},
+        threads=[ThreadRecord(thread_id=GROUP_THREAD, members=[PERSON_ONE, PERSON_TWO])],
+    )
+    assert intake.participants_of(rows[0]) == [PERSON_ONE, PERSON_TWO]
+    assert intake.participant_labels(rows[0])[0] == "Örnek Kişi"
+
+
+def test_participant_names_are_resolved_once_and_stored():
+    """Ad tarama aninda profillerden cozulur; ekran sozluge muhtac kalmaz."""
+    rows = intake.normalize(
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, participants=[PERSON_ONE])],
+        names={PERSON_ONE: "Örnek Kişi"},
+    )
+    assert intake.participant_pairs(rows[0]) == [{"id": PERSON_ONE, "name": "Örnek Kişi"}]
+    # Sozluk verilmese bile ad ekranda durur.
+    assert intake.display_party(rows[0]) == "Örnek Kişi"
+
+
+def test_the_invitees_are_kept_apart_from_the_participants():
+    started = moment(1)
+    rows = intake.normalize(
+        [
+            call(
+                "a",
+                started,
+                call_type=TYPE_MULTI_PARTY,
+                participants=[PERSON_ONE],
+                thread_id=MEETING_THREAD,
+            )
+        ],
+        [
+            event(
+                "Bütçe toplantısı",
+                local_text(started),
+                cid=MEETING_THREAD,
+                attendees=["Örnek Kişi", "İkinci Örnek", "Üçüncü Kişi"],
+            )
+        ],
+        names={PERSON_ONE: "Örnek Kişi"},
+    )
+    card = intake.view(rows[0])
+    # Katilanlar arama kaydindan, davetliler takvimden gelir.
+    assert card["participant_names"] == ["Örnek Kişi"]
+    assert card["attendees"] == ["Örnek Kişi", "İkinci Örnek", "Üçüncü Kişi"]
+
+
+def test_an_old_row_with_plain_participant_ids_still_reads():
+    """0008 doneminde katilimcilar duz kimlik listesiydi."""
+    row = {"kind": intake.KIND_GROUP, "participants_json": json.dumps([PERSON_ONE])}
+    assert intake.participants_of(row) == [PERSON_ONE]
+    assert intake.display_party(row, {PERSON_ONE: "Örnek Kişi"}) == "Örnek Kişi"
 
 
 def test_the_reader_copies_before_it_reads(tmp_path):
@@ -920,14 +1296,10 @@ def test_the_export_can_be_read_back(api_client, fake_calls):
     assert book.sheetnames == ["Aramalar", "Kişiler", "İstatistik"]
 
     sheet = book["Aramalar"]
-    assert [cell.value for cell in sheet[1]][:6] == [
-        "Tarih",
-        "Yön",
-        "Karşı taraf",
-        "Tür",
-        "Durum",
-        "Süre",
-    ]
+    headers = [cell.value for cell in sheet[1]]
+    assert headers[:6] == ["Tarih", "Yön", "Karşı taraf", "Tür", "Durum", "Süre"]
+    # Katilanlar (arama kaydi) ve davetliler (takvim) ayri sutunlar.
+    assert headers[-2:] == ["Katılanlar", "Davetliler"]
     assert sheet.max_row == 5
     kinds = {sheet.cell(row=line, column=4).value for line in range(2, 6)}
     assert "Toplantı" in kinds

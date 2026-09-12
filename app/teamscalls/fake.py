@@ -22,6 +22,7 @@ from .source import (
     CalendarRecord,
     CallRecord,
     CallsError,
+    ThreadRecord,
     empty_diagnostics,
 )
 
@@ -56,6 +57,8 @@ def call(
     participants: Iterable[str] = (),
     subject: str = "",
     forwarded: str = "",
+    thread_id: str = "",
+    group_thread_id: str = "",
 ) -> CallRecord:
     """Test verisi uretmeyi kisaltan yardimci."""
     started = start if isinstance(start, datetime) else datetime.fromisoformat(str(start))
@@ -77,6 +80,8 @@ def call(
         target_id=other if outgoing else ME,
         target_name=other_name if outgoing else "",
         forwarded=forwarded,
+        thread_id=thread_id,
+        group_thread_id=group_thread_id,
         subject=subject,
         participants=list(participants),
         raw={"callId": call_id},
@@ -92,15 +97,24 @@ def event(
     event_type: str = "SingleInstance",
     show_as: str = "Busy",
     attendees: Iterable[str] = (),
+    cid: str = "",
+    meeting_url: str = "",
+    as_text: bool = False,
 ) -> CalendarRecord:
-    """Takvim kaydi; saat metni Teams'teki gibi YEREL bicimde yazilir."""
+    """Takvim kaydi.
+
+    Gercek onbellekte saat alanlari `datetime` nesnesidir; `as_text=True`
+    eski metin bicimini ("YYYY-MM-DD HH:MM:SS", yerel saat) uretir.
+    """
     started = datetime.fromisoformat(start)
     ended = started + timedelta(minutes=minutes)
     stamp = "%Y-%m-%d %H:%M:%S"
     return CalendarRecord(
         event_id=f"event-{subject}",
-        start_time=started.strftime(stamp),
-        end_time=ended.strftime(stamp),
+        start_time=started.strftime(stamp) if as_text else started,
+        end_time=ended.strftime(stamp) if as_text else ended,
+        cid=cid,
+        meeting_url=meeting_url,
         subject=subject,
         organizer_name=organizer,
         my_response=response,
@@ -120,12 +134,14 @@ class FakeCallSource:
         calls: Iterable[CallRecord] = (),
         calendar: Iterable[CalendarRecord] = (),
         names: dict[str, str] | None = None,
+        threads: Iterable[ThreadRecord] = (),
         error: CallsError | None = None,
         report: dict[str, Any] | None = None,
     ) -> None:
         self.calls: list[CallRecord] = list(calls)
         self.calendar: list[CalendarRecord] = list(calendar)
         self.names: dict[str, str] = dict(DEFAULT_NAMES if names is None else names)
+        self.threads: list[ThreadRecord] = list(threads)
         self.error = error
         self.reads = 0
         # Teshis: gercek kaynakta kopyalama sonucunu tasir, burada testlerin
@@ -135,11 +151,13 @@ class FakeCallSource:
     def diagnostics(self) -> dict[str, Any]:
         return dict(self.report)
 
-    def read(self) -> tuple[list[CallRecord], list[CalendarRecord], dict[str, str]]:
+    def read(self) -> tuple[
+        list[CallRecord], list[CalendarRecord], dict[str, str], list[ThreadRecord]
+    ]:
         self.reads += 1
         if self.error is not None:
             raise self.error
-        return list(self.calls), list(self.calendar), dict(self.names)
+        return list(self.calls), list(self.calendar), dict(self.names), list(self.threads)
 
     # --- kolaylik -----------------------------------------------------
 
@@ -149,6 +167,10 @@ class FakeCallSource:
 
     def add_event(self, record: CalendarRecord) -> CalendarRecord:
         self.calendar.append(record)
+        return record
+
+    def add_thread(self, record: ThreadRecord) -> ThreadRecord:
+        self.threads.append(record)
         return record
 
 

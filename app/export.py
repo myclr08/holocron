@@ -471,6 +471,9 @@ CALL_HEADERS = (
     "Toplantı",
     "Organizatör",
     "Yanıtım",
+    # Katilanlar arama kaydindan, davetliler takvimden gelir: ayni sey degil.
+    "Katılanlar",
+    "Davetliler",
 )
 
 CALL_PEOPLE_HEADERS = ("Kişi", "Görüşme", "Süre", "Süre (dk)", "Giden", "Gelen", "Kaçırılan")
@@ -537,9 +540,11 @@ def _write_call_rows(
             card["state_label"],
             card["duration_text"],
             round((card["duration_ms"] or 0) / 60000, 1),
-            card["meeting_subject"],
+            card["meeting_subject"] or card["topic"],
             card["meeting_organizer"],
             card["my_response"],
+            ", ".join(card["participant_names"]),
+            ", ".join(card["attendees"]),
         ]
         for index, value in enumerate(values):
             target = sheet.cell(row=line, column=index + 1)

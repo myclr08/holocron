@@ -2097,7 +2097,11 @@ CALL_COLUMNS: tuple[str, ...] = (
     "meeting_subject",
     "meeting_organizer",
     "my_response",
+    "thread_id",
+    "group_thread_id",
+    "topic",
     "participants_json",
+    "attendees_json",
     "raw_json",
     "seen_at",
 )

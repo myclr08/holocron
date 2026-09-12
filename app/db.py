@@ -365,6 +365,31 @@ def _migration_0008_teams_calls(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0009_call_threads(conn: sqlite3.Connection) -> None:
+    """Teams arama gecmisi: sohbet bagi, grup sohbeti adi, davetliler.
+
+    Gercek onbellekte grup/toplanti aramalarinin kimligi `threadId` ve
+    `groupChatThreadId` alanlarinda duruyor: toplanti eslemesi saat
+    yakinligindan cok bu bagla yapiliyor. `topic` grup sohbetinin kendi adi
+    (`conversation-manager`), `attendees_json` ise takvimdeki DAVETLILER --
+    aramaya gercekten katilanlar `participants_json` icinde.
+
+    Tablo yerel bir onbellek dokumu oldugu icin yeni sutunlar bos baslar ve
+    ilk taramada dolar; veri kaybi yok.
+    """
+    _add_column(conn, "teams_calls", "thread_id", "TEXT")
+    _add_column(conn, "teams_calls", "group_thread_id", "TEXT")
+    _add_column(conn, "teams_calls", "topic", "TEXT")
+    _add_column(conn, "teams_calls", "attendees_json", "TEXT")
+    conn.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_teams_calls_thread ON teams_calls(thread_id);
+        CREATE INDEX IF NOT EXISTS idx_teams_calls_group_thread
+            ON teams_calls(group_thread_id);
+        """
+    )
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
@@ -375,6 +400,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (6, "teams messages", _migration_0006_teams),
     (7, "address book source", _migration_0007_address_book),
     (8, "teams calls", _migration_0008_teams_calls),
+    (9, "teams call threads", _migration_0009_call_threads),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

@@ -108,6 +108,14 @@ async function scanCalls() {
         })
       );
     }
+    if (result.read_ms) {
+      notes.push(
+        h("div", {
+          class: "toast-sub",
+          text: `${result.databases || 0} veritabanı okundu · ${(result.read_ms / 1000).toFixed(1)} sn`,
+        })
+      );
+    }
     toast(
       "Aramalar çekildi",
       `${result.scanned} kayıt, en yeni: ${newest}` +
@@ -510,6 +518,7 @@ function openCallDetail(call) {
   if (call.kind === "one_to_one" && call.counterpart_label) {
     lines.push(["Karşı taraf", call.counterpart_label]);
   }
+  if (call.topic && call.topic !== call.title) lines.push(["Sohbet", call.topic]);
   if (call.meeting_organizer) lines.push(["Organizatör", call.meeting_organizer]);
   if (call.my_response) lines.push(["Yanıtım", call.my_response]);
   if (call.forwarded) lines.push(["Yönlendirme", call.forwarded]);
@@ -523,7 +532,8 @@ function openCallDetail(call) {
   );
 
   if ((call.participants || []).length) {
-    body.appendChild(h("h3", { text: "Katılımcılar" }));
+    // Katilanlar: aramanin kendi katilimci listesi.
+    body.appendChild(h("h3", { text: "Katılanlar" }));
     const list = h("div", { class: "call-list" }, []);
     const labels = call.participant_names || [];
     call.participants.forEach((person, index) => {
@@ -538,6 +548,18 @@ function openCallDetail(call) {
     body.appendChild(list);
   } else if (call.kind !== "one_to_one") {
     body.appendChild(h("p", { class: "hint", text: "Katılımcı listesi kayıtta yok." }));
+  }
+
+  if ((call.attendees || []).length) {
+    // Davetliler: takvim kaydindan. Katilanlarla ayni sey DEGIL.
+    body.appendChild(h("h3", { text: "Davetliler" }));
+    const guests = h("div", { class: "call-list" }, []);
+    call.attendees.forEach((name) =>
+      guests.appendChild(
+        h("div", { class: "call-line" }, [h("span", { class: "what", text: name })])
+      )
+    );
+    body.appendChild(guests);
   }
 
   if (call.counterpart_id && call.kind === "one_to_one") {
