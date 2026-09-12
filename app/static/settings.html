@@ -368,6 +368,26 @@
         <div class="status" id="mailsend-status" hidden></div>
       </div>
 
+      <div class="card" id="campaign-card">
+        <h2>Sefer</h2>
+        <p class="hint">
+          Sefer, bitiş tarihi olan bir XP hedefidir. Buradaki puanlar ne yaptığınızda kaç XP
+          kazandığınızı belirler; kapatılan kural hiç puan vermez. Değişiklik geçmişe dokunmaz,
+          bundan sonraki olaylara uygulanır.
+        </p>
+        <div class="teams-list" id="campaign-rules"></div>
+        <div class="row">
+          <label for="campaign-focus">Günlük odak bütçesi (saat)
+            <input type="number" id="campaign-focus" min="1" max="24" step="1" />
+          </label>
+          <p class="hint" id="campaign-grace"></p>
+        </div>
+        <div class="actions">
+          <button class="primary" id="campaign-rules-save">Kaydet</button>
+        </div>
+        <div class="status" id="campaign-status" hidden></div>
+      </div>
+
       <div class="card" id="appearance">
         <h2>Görünüm</h2>
         <p class="hint">
@@ -394,5 +414,6 @@
   <script src="/static/js/addressbox.js"></script>
   <script src="/static/js/settings.js"></script>
   <script src="/static/js/mailsend-settings.js"></script>
+  <script src="/static/js/campaign-settings.js"></script>
 </body>
 </html>

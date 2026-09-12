@@ -58,6 +58,10 @@ class UpsertReport:
     updated: list[str] = dataclass_field(default_factory=list)
     unchanged: list[str] = dataclass_field(default_factory=list)
     changed: dict[str, list[str]] = dataclass_field(default_factory=dict)
+    # Durum KATEGORISI degisen kayitlar: {"DEMO-1": {"from": "new", "to": "done"}}.
+    # `changed` yalnizca "status alani degisti" der; oyunlastirma hangi yone
+    # gidildigini bilmek zorunda, o yuzden eski kategori burada saklanir.
+    status_moves: dict[str, dict[str, str]] = dataclass_field(default_factory=dict)
 
     @property
     def fetched(self) -> int:
@@ -68,6 +72,7 @@ class UpsertReport:
         self.updated.extend(other.updated)
         self.unchanged.extend(other.unchanged)
         self.changed.update(other.changed)
+        self.status_moves.update(other.status_moves)
 
 
 def now_iso() -> str:
@@ -327,10 +332,27 @@ def upsert_issues(conn: sqlite3.Connection, issues: Iterable[dict[str, Any]]) ->
         if changed:
             report.updated.append(key)
             report.changed[key] = changed
+            if "status" in changed:
+                before = status_category(previous)
+                after = status_category(issue)
+                if before != after:
+                    report.status_moves[key] = {"from": before, "to": after}
         else:
             report.unchanged.append(key)
     conn.commit()
     return report
+
+
+def status_category(raw: Any) -> str:
+    """Kaydin `statusCategory.key` degeri ("new" / "indeterminate" / "done")."""
+    values = (raw or {}).get("fields") if isinstance(raw, dict) else None
+    status = (values or {}).get("status")
+    if not isinstance(status, dict):
+        return ""
+    category = status.get("statusCategory")
+    if not isinstance(category, dict):
+        return ""
+    return str(category.get("key") or "")
 
 
 def get_issue(conn: sqlite3.Connection, key: str) -> dict[str, Any] | None:

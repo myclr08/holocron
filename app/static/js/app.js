@@ -227,7 +227,7 @@ async function move(index, delta) {
 }
 
 function showPlaceholder() {
-  if (state.view === "tasks" || state.view === "calls") return;
+  if (state.view === "tasks" || state.view === "calls" || state.view === "campaign") return;
   state.activeId = null;
   state.group = null;
   el("placeholder").hidden = false;
@@ -240,6 +240,7 @@ async function selectGroup(groupId, keepView) {
   if (!keepView) {
     leaveTasks();
     if (typeof leaveCalls === "function") leaveCalls();
+    if (typeof leaveCampaign === "function") leaveCampaign();
   }
   state.activeId = groupId;
   if (changing || !keepView) {
@@ -249,7 +250,9 @@ async function selectGroup(groupId, keepView) {
     clearSelection();
   }
   el("placeholder").hidden = true;
-  if (state.view !== "tasks" && state.view !== "calls") el("group-view").hidden = false;
+  if (state.view !== "tasks" && state.view !== "calls" && state.view !== "campaign") {
+    el("group-view").hidden = false;
+  }
   renderGroups();
   await loadIssues();
 }
@@ -1861,8 +1864,9 @@ function dateText(iso) {
 }
 
 function showTasks() {
-  // Teams Aramalar ekrani aciksa once o kapanir: iki gorunum ayni alanda.
+  // Teams Aramalar / Sefer ekrani aciksa once o kapanir: hepsi ayni alanda.
   if (typeof leaveCalls === "function") leaveCalls();
+  if (typeof leaveCampaign === "function") leaveCampaign();
   state.view = "tasks";
   el("placeholder").hidden = true;
   el("group-view").hidden = true;
@@ -2148,6 +2152,8 @@ async function moveTask(taskId, status, position) {
     if (position !== null && position !== undefined) payload.position = position;
     await api(`/api/tasks/${taskId}/move`, { method: "POST", body: JSON.stringify(payload) });
     await loadTasks();
+    // Gorev kapatmak XP verir: Sefer rozeti aninda dogru sayiyi gostersin.
+    if (typeof refreshCampaignBadge === "function") refreshCampaignBadge();
   } catch (err) {
     fail(err);
   }
@@ -2464,6 +2470,8 @@ function finishRefresh(status) {
   loadGroups(state.activeId).catch(fail);
   if (state.view === "tasks") loadTasks();
   else refreshTaskBadge();
+  // Guncelle puan uretmis olabilir (filodan dusen kayit, durum gecisi).
+  if (typeof refreshCampaignBadge === "function") refreshCampaignBadge();
 }
 
 function refreshToast(status) {

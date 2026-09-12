@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import __version__, paths
+from . import __version__, gamify, paths
 from .api import router
+from .api_gamify import router as gamify_router
 from .api_mailsend import router as mailsend_router
 from .context import AppContext
 from .jira_client import JiraError
 from .mail import MailError
 from .repository import RepositoryError
 from .teamscalls import CallsError
+
+log = logging.getLogger("holocron.server")
 
 
 def create_app(context: AppContext) -> FastAPI:
@@ -66,6 +71,17 @@ def create_app(context: AppContext) -> FastAPI:
     app.include_router(router)
     # Asama 10 ayri modulde durur: e-posta sablonlari, onizleme, gonderim.
     app.include_router(mailsend_router)
+    # Asama 11: Sefer paneli (XP, rutbe, rozet, haftalik emirler).
+    app.include_router(gamify_router)
+
+    # Acilista suresi dolmus sefer kapatilir: kullanici uygulamayi gunlerce
+    # acmasa da sefer dogru gunde bitmis gorunur. Puan ikincil, uygulama
+    # birincil: buradaki hata acilisi engellemez.
+    try:
+        gamify.ensure_rules(context)
+        gamify.ensure_campaign(context)
+    except Exception:  # pragma: no cover - bozuk veritabaninda bile acilmali
+        log.warning("Sefer kontrolu yapilamadi", exc_info=True)
 
     static_dir = paths.static_dir()
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")

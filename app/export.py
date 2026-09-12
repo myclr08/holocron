@@ -460,6 +460,75 @@ def _write_task_cell(target: Any, value: Any, kind: str, tz: tzinfo | None) -> i
     return _display_width(text)
 
 
+# --- Sefer: XP defteri --------------------------------------------------
+
+LEDGER_SHEET = "XP defteri"
+LEDGER_NAME = "Sefer-XP-defteri"
+
+LEDGER_HEADERS = (
+    "Tarih",
+    "Kaynak",
+    "Tür",
+    "Puan",
+    "Açıklama",
+    "Referans",
+)
+
+# Puan gercek sayi hucresi olur ki Excel'de toplanabilsin.
+LEDGER_KINDS = {0: KIND_DATETIME, 3: KIND_NUMBER}
+
+
+def build_ledger_workbook(
+    context: Any,
+    source: str = "",
+    tz: tzinfo | None = None,
+) -> bytes:
+    """Seferin XP defterini tek sayfalik .xlsx olarak uretir.
+
+    Ekrandaki liste son 50 satiri gosterir; dokum defterin TAMAMINI yazar:
+    "ne icin puan aldim" sorusunun tam cevabi burada durur.
+    """
+    from . import gamify
+    from . import gamify_repo as gamify_store
+
+    events = gamify.ledger(context, source, limit=gamify_store.LEDGER_MAX)
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = sheet_title(LEDGER_SHEET)
+    sheet.append(list(LEDGER_HEADERS))
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+
+    widths = [len(text) for text in LEDGER_HEADERS]
+    for line, event in enumerate(events, start=2):
+        values = [
+            event["at"],
+            event.get("source_label") or event["source"],
+            gamify.RULE_LABELS.get(event["kind"], event["kind"]),
+            event["points"],
+            event["title"],
+            event["ref"],
+        ]
+        for index, value in enumerate(values):
+            target = sheet.cell(row=line, column=index + 1)
+            width = _write_task_cell(target, value, LEDGER_KINDS.get(index, KIND_TEXT), tz)
+            if width > widths[index]:
+                widths[index] = width
+
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:{get_column_letter(len(LEDGER_HEADERS))}{len(events) + 1}"
+    for index, width in enumerate(widths):
+        letter = get_column_letter(index + 1)
+        sheet.column_dimensions[letter].width = min(
+            max(width + 2, COLUMN_WIDTH_MIN), COLUMN_WIDTH_LIMIT
+        )
+
+    buffer = io.BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
+
+
 # --- Teams aramalari: uc sayfa (Aramalar, Kisiler, Istatistik) -----------
 
 CALLS_SHEET = "Aramalar"

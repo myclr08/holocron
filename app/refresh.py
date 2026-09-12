@@ -7,6 +7,7 @@ surmez). Arayuz durumu yoklayarak ilerleme cubugu cizer.
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Sequence
@@ -21,6 +22,8 @@ from .settings_store import MODE_CLOUD
 
 if TYPE_CHECKING:  # dairesel ice aktarimi onlemek icin yalnizca tip zamaninda
     from .context import AppContext
+
+log = logging.getLogger("holocron.refresh")
 
 STATE_IDLE = "idle"
 STATE_RUNNING = "running"
@@ -52,6 +55,11 @@ class RefreshState:
     group_id: int | None = None
     summary: dict[str, Any] = field(default_factory=dict)
     changed: dict[str, list[str]] = field(default_factory=dict)
+    # Durum kategorisi gecisleri; oyunlastirma kancasi bunu okur.
+    status_moves: dict[str, dict[str, str]] = field(default_factory=dict)
+    # Filtre grubundan DUSEN kayitlarin anahtarlari (ozetteki sayinin ayrintisi).
+    # Ozet bicimi arayuzun sozlesmesi oldugu icin liste ayri alanda durur.
+    filter_drops: dict[str, dict[str, Any]] = field(default_factory=dict)
     errors: list[dict[str, Any]] = field(default_factory=list)
     error: dict[str, str] | None = None
 
@@ -66,6 +74,11 @@ class RefreshState:
             "group_id": self.group_id,
             "summary": dict(self.summary),
             "changed": {key: list(value) for key, value in self.changed.items()},
+            "status_moves": {key: dict(value) for key, value in self.status_moves.items()},
+            "filter_drops": {
+                key: {"name": value.get("name", ""), "keys": list(value.get("keys", []))}
+                for key, value in self.filter_drops.items()
+            },
             "errors": [dict(item) for item in self.errors],
             "error": dict(self.error) if self.error else None,
             "running": self.state == STATE_RUNNING,
@@ -186,7 +199,32 @@ class RefreshManager:
         if state != STATE_CANCELLED:
             self._scan_mail(context, summary)
             self._scan_calls(context, summary)
+        # Puan is BITMEDEN once yazilir: arayuz "tamamlandi" gorup rozeti
+        # tazeledeginde defter zaten dolu olsun.
+        self._score(context, report)
         self._finish(state, summary, report, error=error)
+
+    def _score(self, context: "AppContext", report: repository.UpsertReport) -> None:
+        """Guncelle sonu: filodan dusen kayitlar ve durum gecisleri puana doner.
+
+        Oyunlastirma isin SONUCUNU okur, icine karismaz: buradaki bir hata
+        cekilen kayitlari bozmamali, o yuzden sessizce yutulur.
+        """
+        from . import gamify
+
+        with self._lock:
+            drops = {
+                key: {"name": value.get("name", ""), "keys": list(value.get("keys", []))}
+                for key, value in self._state.filter_drops.items()
+            }
+        try:
+            with context.db_lock:
+                gamify.on_refresh(
+                    context, {"filter_drops": drops, "status_moves": report.status_moves}
+                )
+        except Exception:  # pragma: no cover - puan ikincil, is birincil
+            # Sessiz yutma teshisi imkansiz kilar: is bozulmaz ama iz kalir.
+            log.warning("Guncelle puani yazilamadi", exc_info=True)
 
     def _run_jira(
         self,
@@ -226,13 +264,20 @@ class RefreshManager:
                 keys = [str(item.get("key") or "").upper() for item in issues if item.get("key")]
                 with context.db_lock:
                     report.merge(repository.upsert_issues(conn, issues))
+                    # Uyelik degismeden ONCEKI liste: hangi kaydin filodan
+                    # dustugunu (yalnizca sayisini degil) "Sefer" puani sorar.
+                    before = set(repository.list_item_keys(conn, group["id"]))
                     membership = repository.replace_filter_members(conn, group["id"], keys)
+                    dropped = sorted(before - set(repository.list_item_keys(conn, group["id"])))
                 fetched.update(keys)
                 summary["filter_groups"][str(group["id"])] = {
                     "name": group["name"],
                     "added": membership["added"],
                     "removed": membership["removed"],
                 }
+                if dropped:
+                    # Hangi kayitlarin dustugu: "Sefer" puanini bu liste besler.
+                    self._add_drops(group, dropped)
 
             self._touch(done=len(filter_groups))
             if self._cancel.is_set():
@@ -349,6 +394,13 @@ class RefreshManager:
                     ordered.append(upper)
         return ordered
 
+    def _add_drops(self, group: dict[str, Any], keys: Sequence[str]) -> None:
+        with self._lock:
+            entry = self._state.filter_drops.setdefault(
+                str(group["id"]), {"name": group["name"], "keys": []}
+            )
+            entry["keys"].extend(keys)
+
     def _touch(self, **changes: Any) -> None:
         with self._lock:
             for name, value in changes.items():
@@ -381,6 +433,7 @@ class RefreshManager:
             self._state.state = state
             self._state.summary = summary
             self._state.changed = report.changed
+            self._state.status_moves = report.status_moves
             self._state.error = error
             self._state.finished_at = self._now()
             if state == STATE_DONE:

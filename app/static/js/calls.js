@@ -29,6 +29,7 @@ const callsState = {
 
 function showCalls() {
   if (typeof leaveTasks === "function") leaveTasks();
+  if (typeof leaveCampaign === "function") leaveCampaign();
   state.view = "calls";
   el("placeholder").hidden = true;
   el("group-view").hidden = true;

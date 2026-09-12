@@ -1941,3 +1941,302 @@ html.no-motion *::after {
 
 .mail-sent-line .when { font-family: var(--mono); white-space: nowrap; }
 .mail-sent-line .subject { flex: 1; color: var(--text); }
+
+/* --- Sefer: oyunlastirma paneli ---------------------------------------- */
+/* Renkler yine degiskenlerden gelir; hologram parlamalari saber golgeleri.  */
+
+/* Panelin kendi ipuclari ve dugme siralari: kart disinda da dogru gorunsun
+   (.hint ve .actions yalnizca .card / .modal-body icinde tanimli). */
+#campaign-view .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; line-height: 1.55; }
+#campaign-view .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+
+#campaign-view .campaign-head {
+  font-family: var(--display);
+  font-size: 17px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 22px 0 10px;
+}
+
+.campaign-empty {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 18px;
+  max-width: 720px;
+}
+
+.campaign-empty h3 {
+  font-family: var(--display);
+  letter-spacing: .1em;
+  margin: 0 0 6px;
+}
+
+.campaign-empty .row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.campaign-empty label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+
+/* Kahraman seridi: rutbe | sefer bilgisi | seri alevi. */
+.hero-strip {
+  display: grid;
+  grid-template-columns: 128px 1fr 150px;
+  gap: 18px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--saber-yellow);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  padding: 16px 18px;
+}
+
+.hero-rank { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+
+.rank-art {
+  width: 96px;
+  height: 96px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 45%, rgba(46, 155, 255, .18), transparent 70%);
+  box-shadow: var(--saber-blue-glow);
+}
+
+.rank-art img { width: 92px; height: 92px; object-fit: contain; }
+.rank-art .holo { width: 82px; height: 82px; }
+
+.holo .holo-frame { fill: none; stroke: var(--saber-blue); stroke-width: 2; opacity: .85; }
+.holo .holo-frame-in { fill: none; stroke: var(--saber-blue); stroke-width: 1; opacity: .45; }
+.holo .holo-pip { fill: var(--saber-blue); stroke: var(--saber-blue); stroke-width: 2; }
+
+.hero-rank-label {
+  font-family: var(--display);
+  font-size: 16px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.hero-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+.hero-name {
+  font-family: var(--display);
+  font-size: 24px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.hero-line { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.hero-xp { font-family: var(--mono); color: var(--accent); }
+.hero-left { color: var(--muted); font-size: 12px; }
+.hero-next { font-size: 12px; color: var(--muted); }
+
+.xp-bar {
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .06);
+  overflow: hidden;
+}
+
+.xp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--saber-yellow), var(--accent-2));
+  box-shadow: var(--saber-yellow-glow);
+  transition: width var(--speed) var(--ease);
+}
+
+.hero-streak {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border-left: 1px solid var(--line);
+  padding-left: 14px;
+}
+
+.hero-streak .icon { width: 22px; height: 22px; color: var(--muted); }
+.hero-streak.burning .icon { color: var(--saber-red); filter: drop-shadow(0 0 6px #ff3b3b88); }
+.streak-days { font-family: var(--display); font-size: 30px; line-height: 1; }
+.streak-label { font-size: 11px; color: var(--muted); }
+.streak-grace { font-size: 11px; color: var(--saber-green); text-align: center; }
+.streak-grace.used { color: var(--muted); }
+
+/* Haftalik emirler. */
+.quest-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+
+.quest-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quest-card.is-done { border-color: var(--saber-green); }
+.quest-top { display: flex; gap: 8px; align-items: center; }
+.quest-top .icon { color: var(--muted); flex: none; }
+.quest-title { flex: 1; }
+.quest-tick { color: var(--saber-green); font-weight: 700; }
+
+.quest-bar { height: 6px; border-radius: 4px; background: rgba(255, 255, 255, .06); overflow: hidden; }
+.quest-fill { height: 100%; background: var(--saber-green); transition: width var(--speed) var(--ease); }
+.quest-foot { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.quest-points { font-family: var(--mono); color: var(--accent); }
+
+/* Guc dengesi. */
+.force-row { display: grid; grid-template-columns: 1fr 320px; gap: 14px; align-items: start; }
+
+.force-gauge {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 12px;
+}
+
+.force-line { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.force-percent { font-family: var(--mono); }
+.force-bar { height: 8px; border-radius: 5px; background: rgba(255, 255, 255, .06); margin: 8px 0 6px; overflow: hidden; }
+.force-fill { height: 100%; transition: width var(--speed) var(--ease); }
+.force-fill.force-green { background: var(--saber-green); }
+.force-fill.force-yellow { background: var(--saber-yellow); }
+.force-fill.force-red { background: var(--saber-red); }
+.force-percent.force-green { color: var(--saber-green); }
+.force-percent.force-yellow { color: var(--saber-yellow); }
+.force-percent.force-red { color: var(--saber-red); }
+
+.week-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+
+.week-count {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 10px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.week-count strong { font-family: var(--display); font-size: 24px; }
+.week-count span { font-size: 11px; color: var(--muted); }
+
+/* Rozet duvari. */
+.badge-wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+
+.badge-tile {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 10px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: help;
+}
+
+.badge-art { width: 58px; height: 58px; display: grid; place-items: center; }
+.badge-art img { width: 56px; height: 56px; object-fit: contain; }
+.badge-art .holo { width: 54px; height: 54px; }
+.badge-name { font-size: 12px; text-align: center; }
+
+.badge-tile.locked { opacity: .45; }
+.badge-tile.locked .badge-art { filter: grayscale(1); }
+.badge-tile.earned { border-color: var(--line-strong); }
+.badge-tile.earned .badge-art { box-shadow: var(--saber-yellow-glow); border-radius: 50%; }
+
+/* XP defteri. */
+.ledger-bar { margin-bottom: 8px; }
+.ledger { display: flex; flex-direction: column; gap: 2px; }
+
+.ledger-line {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 5px 2px;
+  font-size: 13px;
+}
+
+.ledger-line .when { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
+.ledger-line .icon { color: var(--muted); flex: none; }
+.ledger-line .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ledger-line .points { font-family: var(--mono); color: var(--accent); }
+
+/* Gecmis seferler. */
+.history-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+
+.history-card {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--saber-purple);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.history-name { font-family: var(--display); font-size: 17px; letter-spacing: .06em; }
+.history-when, .history-foot { font-size: 11px; color: var(--muted); }
+.history-xp { font-family: var(--mono); color: var(--accent); }
+.history-rank { font-size: 12px; }
+
+/* Pazartesi ozeti: "Holocron kaydi". */
+.holocron-record {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  box-shadow: var(--saber-blue-glow);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.record-head { display: flex; justify-content: space-between; align-items: center; }
+.record-head strong { font-family: var(--display); letter-spacing: .12em; text-transform: uppercase; }
+
+.record-head button {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.record-body { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; color: var(--muted); font-size: 13px; }
+
+/* Rutbe atlama kutlamasi: serit bir kez parlar. */
+#campaign-view.rank-up .hero-strip { animation: rank-up 2.4s var(--ease); }
+
+@keyframes rank-up {
+  0% { box-shadow: none; }
+  25% { box-shadow: 0 0 40px #ffe81f55, inset 0 0 30px #ffe81f22; }
+  100% { box-shadow: none; }
+}
+
+.no-motion #campaign-view.rank-up .hero-strip { animation: none; }
+
+@media (max-width: 1100px) {
+  .force-row { grid-template-columns: 1fr; }
+  .quest-row { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 860px) {
+  .hero-strip { grid-template-columns: 1fr; }
+  .hero-streak { border-left: none; padding-left: 0; border-top: 1px solid var(--line); padding-top: 10px; }
+}
+
+/* Ayarlar -> Sefer karti: kural satirlari. */
+.rule-line {
+  display: grid;
+  grid-template-columns: 1fr auto 84px;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 4px 0;
+}
+
+.rule-line .rule-source { font-size: 11px; color: var(--muted); }
+.rule-line .rule-points { width: 84px; font-family: var(--mono); }

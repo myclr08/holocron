@@ -50,6 +50,13 @@
         <h2>Hangar</h2>
         <button class="ghost-accent small" id="new-group" title="Yeni grup oluştur">+ Yeni Filo</button>
       </div>
+      <!-- Sefer sabit filo: XP, rutbe ve haftalik emirler. Serit sari. -->
+      <div class="tasks-entry" id="campaign-entry" role="button" tabindex="0"
+           title="Sefer paneli: XP, rütbe, rozetler">
+        <span class="color-strip color-yellow"></span>
+        <span class="name">Sefer</span>
+        <span class="count" id="campaign-badge">0</span>
+      </div>
       <!-- Gorevlerim gruplarin ustunde sabit durur: kendi listesi, filo degil. -->
       <div class="tasks-entry" id="tasks-entry" role="button" tabindex="0"
            title="Kendi görev panonuz">
@@ -202,6 +209,74 @@
           </div>
         </div>
       </section>
+      <section id="campaign-view" hidden>
+        <div class="group-head">
+          <div class="group-title">
+            <span class="color-strip color-yellow"></span>
+            <h2>SEFER</h2>
+            <span class="badge" id="campaign-count"></span>
+          </div>
+          <div class="group-actions">
+            <button id="campaign-end" hidden title="Seferi şimdi kapat ve özetini yaz">
+              Seferi bitir
+            </button>
+          </div>
+        </div>
+
+        <!-- Pazartesi açılışında on saniye duran özet; kapatılabilir. -->
+        <div class="holocron-record" id="campaign-digest" hidden></div>
+
+        <!-- Sefer yokken: başlatma formu. -->
+        <div class="campaign-empty" id="campaign-empty" hidden>
+          <h3>Sefer yok</h3>
+          <p class="hint">
+            Sefer, bitiş tarihi olan bir hedeftir: o tarihe kadar topladığınız XP rütbenizi
+            belirler, tarih geçince sefer kapanır ve yenisi sıfırdan başlar.
+          </p>
+          <div class="row">
+            <label>Sefer adı
+              <input type="text" id="campaign-name" placeholder="Sonbahar Seferi" maxlength="60" />
+            </label>
+            <label>Bitiş tarihi
+              <input type="date" id="campaign-ends" />
+            </label>
+            <label>Hedef XP
+              <input type="number" id="campaign-target" min="50" max="1000000" step="50" value="1000" />
+            </label>
+          </div>
+          <div class="actions">
+            <button class="primary" id="campaign-start">Sefer başlat</button>
+          </div>
+        </div>
+
+        <div class="campaign-body" id="campaign-body" hidden>
+          <div class="hero-strip" id="campaign-hero"></div>
+
+          <h3 class="campaign-head">Haftalık görev emirleri</h3>
+          <div class="quest-row" id="campaign-quests"></div>
+
+          <h3 class="campaign-head">Güç dengesi</h3>
+          <div class="force-row" id="campaign-force"></div>
+
+          <h3 class="campaign-head">Rozet duvarı</h3>
+          <div class="badge-wall" id="campaign-badges"></div>
+
+          <h3 class="campaign-head">XP defteri</h3>
+          <div class="toolbar ledger-bar">
+            <div class="window-picker" id="ledger-sources" role="group" aria-label="Kaynak süzgeci"></div>
+            <button id="ledger-export" title="Defterin tamamını Excel dosyası olarak indir">
+              Tümünü Excel'e
+            </button>
+          </div>
+          <div class="ledger" id="campaign-ledger"></div>
+        </div>
+
+        <!-- Geçmiş seferler sefer varken de yokken de görünür. -->
+        <div id="campaign-history-box">
+          <h3 class="campaign-head">Geçmiş seferler</h3>
+          <div class="history-row" id="campaign-history"></div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -286,6 +361,7 @@
   <script src="/static/js/common.js"></script>
   <script src="/static/js/app.js"></script>
   <script src="/static/js/calls.js"></script>
+  <script src="/static/js/campaign.js"></script>
   <script src="/static/js/addressbox.js"></script>
   <script src="/static/js/mailsend.js"></script>
 </body>

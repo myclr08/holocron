@@ -75,6 +75,13 @@ DEFAULTS: dict[str, str] = {
     "calls.scanned_at": "",
     # Kurum rehberi en son ne zaman cekildi (bos = hic).
     "teams.gal_synced_at": "",
+    # Sefer (oyunlastirma): gunluk odak butcesi (saat), seri korumasinin
+    # harcandigi ay, "gecikmis gorev yok" sayacinin basladigi gun, pazartesi
+    # ozet kartinin gosterildigi hafta.
+    "gamify.focus_hours": "8",
+    "gamify.streak_grace_used_month": "",
+    "gamify.clean_since": "",
+    "gamify.digest_seen_week": "",
 }
 
 # "1"/"0" olarak saklanan anahtarlar: arayuz bazen gercek boolean gonderir.

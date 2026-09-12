@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -14,6 +15,7 @@ from . import (
     desktop,
     export,
     fields as field_utils,
+    gamify,
     grid,
     repository,
     tasks as task_utils,
@@ -29,6 +31,8 @@ from .teamscalls import intake as calls_intake
 from .lifecycle import BEAT_INTERVAL_SECONDS
 from .repository import RepositoryError
 from .settings_store import MODE_CLOUD, MODE_SERVER, PROXY_MODES
+
+log = logging.getLogger("holocron.api")
 
 router = APIRouter(prefix="/api")
 
@@ -455,7 +459,12 @@ def reorder_tasks(request: Request, payload: dict[str, Any] = Body(default_facto
 def write_task(request: Request, task_id: int, payload: dict[str, Any] = Body(default_factory=dict)):
     context = get_context(request)
     with context.db_lock:
-        task = repository.update_task(context.connection(), task_id, payload)
+        conn = context.connection()
+        # Onceki hal puan icin sart: "Yapildi'ya YENI gecti mi" sorusunun
+        # cevabi yalnizca iki hali karsilastirarak verilebilir.
+        before = repository.get_task(conn, task_id)
+        task = repository.update_task(conn, task_id, payload)
+        _score_task(context, before, task)
     return {"task": _task_payload(context, task)}
 
 
@@ -471,13 +480,28 @@ def drop_task(request: Request, task_id: int) -> dict[str, Any]:
 def move_task(request: Request, task_id: int, payload: dict[str, Any] = Body(default_factory=dict)):
     context = get_context(request)
     with context.db_lock:
+        conn = context.connection()
+        before = repository.get_task(conn, task_id)
         task = repository.move_task(
-            context.connection(),
+            conn,
             task_id,
             status=payload.get("status"),
             position=payload.get("position"),
         )
+        _score_task(context, before, task)
     return {"task": _task_payload(context, task)}
+
+
+def _score_task(context: AppContext, before: dict[str, Any] | None, after: dict[str, Any]) -> None:
+    """Gorev hareketini "Sefer" motoruna bildirir.
+
+    Puan ikincildir: motorda bir hata cikarsa gorev yine tasinmis olmali, o
+    yuzden istisna yutulur (defterde eksik satir, bozuk pano'dan iyidir).
+    """
+    try:
+        gamify.on_task_done(context, before, after)
+    except Exception:  # pragma: no cover - puan ikincil, pano birincil
+        log.warning("Görev puanı yazılamadı", exc_info=True)
 
 
 def _board_payload(board: task_utils.Board) -> dict[str, Any]:
@@ -778,7 +802,12 @@ def _prepare_teams_message(
 
 
 def _record_open(context: AppContext, prepared: dict[str, Any]) -> None:
-    """Kayit notu tam metni tutar, kirpilmis halini degil."""
+    """Kayit notu tam metni tutar, kirpilmis halini degil.
+
+    "Sefer" puani da burada verilir (`teams-open` ve tarayici yedegi
+    `teams-link` ayni yerden gecer): ayni kayit icin ayni gun ikinci kez
+    sorulursa referans ayni kalir, puan tekrarlanmaz.
+    """
     with context.db_lock:
         repository.record_sent_message(
             context.connection(),
@@ -787,6 +816,10 @@ def _record_open(context: AppContext, prepared: dict[str, Any]) -> None:
             prepared["target"],
             prepared["message"],
         )
+        try:
+            gamify.on_status_asked(context, prepared["key"])
+        except Exception:  # pragma: no cover - puan ikincil, mesaj birincil
+            log.warning("Teams puanı yazılamadı", exc_info=True)
 
 
 def _link_payload(prepared: dict[str, Any], link: dict[str, Any]) -> dict[str, Any]:

@@ -485,6 +485,128 @@ def _migration_0011_call_source(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_teams_calls_source ON teams_calls(source)")
 
 
+# XP kural tohumunun bir kez atildigini soyleyen ic isaret.
+RULES_SEED_KEY = "gamify.rules_seeded"
+
+
+def _migration_0012_gamify(conn: sqlite3.Connection) -> None:
+    """Asama 11: oyunlastirma -- "Sefer" (kampanya), XP defteri, rozetler.
+
+    Tek aktif sefer kurali kismi tekil indeksle SEMADA durur: uygulama
+    katmani unutsa bile ikinci bir aktif sefer acilamaz. Bitis tarihi gecen
+    sefer `ended` olur, ozeti `ended_summary_json` icinde kalir; defter (XP
+    olaylari) sefere baglidir, silinmez -- "sifirlanir" demek yeni seferin
+    sifirdan baslamasi demektir, gecmisin silinmesi degil.
+
+    `xp_events` uzerindeki tekil indeks cift XP'yi burada keser: ayni
+    (sefer, tur, referans) ucluu bir kez yazilir. Referanssiz olay (elle
+    duzeltme gibi) kisitin disinda kalir.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS campaigns (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            name               TEXT NOT NULL,
+            starts_at          TEXT,
+            ends_at            TEXT,
+            target_xp          INTEGER NOT NULL DEFAULT 1000,
+            status             TEXT NOT NULL DEFAULT 'active'
+                               CHECK (status IN ('active', 'ended')),
+            created_at         TEXT,
+            ended_summary_json TEXT
+        );
+
+        -- Ayni anda tek aktif sefer: kisitin sahibi sema.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_campaigns_single_active
+            ON campaigns(status) WHERE status = 'active';
+
+        CREATE TABLE IF NOT EXISTS xp_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id INTEGER NOT NULL,
+            at          TEXT NOT NULL,
+            source      TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            points      INTEGER NOT NULL DEFAULT 0,
+            ref         TEXT,
+            title       TEXT,
+            note        TEXT,
+            FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_xp_events_once
+            ON xp_events(campaign_id, kind, ref) WHERE ref IS NOT NULL AND ref <> '';
+        CREATE INDEX IF NOT EXISTS idx_xp_events_when ON xp_events(campaign_id, at, id);
+        CREATE INDEX IF NOT EXISTS idx_xp_events_source ON xp_events(campaign_id, source);
+
+        CREATE TABLE IF NOT EXISTS xp_rules (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            source      TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            points      INTEGER NOT NULL DEFAULT 0,
+            enabled     INTEGER NOT NULL DEFAULT 1,
+            params_json TEXT
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_xp_rules_kind ON xp_rules(source, kind);
+
+        CREATE TABLE IF NOT EXISTS badges (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            code        TEXT NOT NULL,
+            earned_at   TEXT,
+            campaign_id INTEGER NOT NULL,
+            FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_badges_once ON badges(campaign_id, code);
+
+        CREATE TABLE IF NOT EXISTS quests (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id INTEGER NOT NULL,
+            week_start  TEXT NOT NULL,
+            code        TEXT NOT NULL,
+            title       TEXT,
+            target      INTEGER NOT NULL DEFAULT 1,
+            progress    INTEGER NOT NULL DEFAULT 0,
+            done_at     TEXT,
+            points      INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_quests_once
+            ON quests(campaign_id, week_start, code);
+
+        CREATE TABLE IF NOT EXISTS streaks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id INTEGER NOT NULL,
+            day         TEXT NOT NULL,
+            kind        TEXT NOT NULL DEFAULT 'active',
+            FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_streaks_day ON streaks(campaign_id, day);
+        """
+    )
+
+    # Kural tohumu bir kez atilir: kullanici puani sifirladiysa yarim kalmis
+    # bir yukseltme onu geri getirmemeli.
+    from .gamify import SEED_RULES
+
+    seeded = conn.execute("SELECT value FROM settings WHERE key = ?", (RULES_SEED_KEY,)).fetchone()
+    if seeded is None:
+        conn.executemany(
+            "INSERT OR IGNORE INTO xp_rules (source, kind, points, enabled, params_json) "
+            "VALUES (?, ?, ?, 1, ?)",
+            [
+                (rule["source"], rule["kind"], rule["points"], rule.get("params_json"))
+                for rule in SEED_RULES
+            ],
+        )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, '1') ON CONFLICT(key) DO NOTHING",
+            (RULES_SEED_KEY,),
+        )
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
@@ -498,6 +620,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (9, "teams call threads", _migration_0009_call_threads),
     (10, "mail send templates", _migration_0010_mail_send),
     (11, "teams call source", _migration_0011_call_source),
+    (12, "gamify campaigns", _migration_0012_gamify),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]
