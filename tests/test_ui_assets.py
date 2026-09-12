@@ -511,6 +511,9 @@ def test_calls_script_covers_the_strip_the_tabs_and_the_drawer(api_client):
                    "only_time_gap:", "no_thread_id", "matches_now", "recurring_matched",
                    "group_chat_thread", 'thread_kind !== "group_chat"'):
         assert marker in script, marker
+    # Toplanti sohbetinden gelen kayitlar rozetle isaretlenir.
+    for marker in ('"sohbetten"', 'call.source === "chat"', "call-source"):
+        assert marker in script, marker
     css_markers = (".unmatched", ".unmatched-why", ".unmatched-candidate")
     css = api_client.get("/static/css/app.css").text
     for marker in css_markers:

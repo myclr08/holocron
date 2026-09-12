@@ -13,6 +13,7 @@ hicbir sey disari gitmez.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -52,6 +53,9 @@ def empty_diagnostics() -> dict[str, Any]:
         # Kac veritabani acildi ve okuma kac milisaniye surdu.
         "databases": 0,
         "read_ms": 0,
+        # Toplanti sohbetlerinden okunan katilim kaydi sayisi ve kendi kimligimiz.
+        "attendance": 0,
+        "my_mri": "",
     }
 
 # `callDirection`
@@ -125,6 +129,8 @@ class CallRecord:
     forwarded: str = ""
     thread_id: str = ""
     group_thread_id: str = ""
+    # Kullanicinin kendi kimligi (GUID); katilim kaydinda MRI olarak gecer.
+    user_participant_id: str = ""
     subject: str = ""
     participants: list[str] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
@@ -371,6 +377,22 @@ def canonical_state(value: Any) -> str:
 
 def canonical_type(value: Any) -> str:
     return _canonical(value, _TYPE_MAP)
+
+
+# Kullanicinin kendi kimligi: `call-history` kayitlarinda GUID olarak durur,
+# katilimci listelerinde ise MRI olarak (`8:orgid:<guid>`).
+MRI_PREFIX = "8:orgid:"
+_GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def as_mri(value: Any) -> str:
+    """GUID -> `8:orgid:<guid>`; zaten MRI olan deger oldugu gibi doner."""
+    text = clean_text(value)
+    if not text:
+        return ""
+    if ":" in text:
+        return text
+    return f"{MRI_PREFIX}{text}" if _GUID.match(text) else text
 
 
 def iso_text(moment: datetime | None) -> str:

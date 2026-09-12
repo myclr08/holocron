@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .. import vendor
+from .attendance import MeetingAttendance, attendance_from_record
 from .source import (
     SOURCE_COPY,
     SOURCE_LIVE,
@@ -42,6 +43,7 @@ from .source import (
     CallRecord,
     CallsError,
     ThreadRecord,
+    as_mri,
     blob_dir_for,
     canonical_direction,
     canonical_state,
@@ -62,6 +64,8 @@ ROLE_CALLS = "call-history-manager"
 ROLE_CALENDAR = "calendar"
 ROLE_PROFILES = "profiles"
 ROLE_THREADS = "conversation-manager"
+# Toplanti sohbetleri: katilim ("kim kac dakika kaldi") burada.
+ROLE_REPLYCHAINS = "replychain-manager"
 
 # Rol -> okunacak object store. Baska hicbir veritabani ACILMAZ.
 ROLE_STORES: dict[str, str] = {
@@ -69,6 +73,7 @@ ROLE_STORES: dict[str, str] = {
     ROLE_CALENDAR: "calendar",
     ROLE_PROFILES: "profiles",
     ROLE_THREADS: "conversations",
+    ROLE_REPLYCHAINS: "replychains",
 }
 
 # Kayitta kimligi tasiyabilecek alan adlari (sirayla denenir).
@@ -107,6 +112,10 @@ def is_profile_database(name: Any) -> bool:
 
 def is_thread_database(name: Any) -> bool:
     return database_role(name) == ROLE_THREADS
+
+
+def is_replychain_database(name: Any) -> bool:
+    return database_role(name) == ROLE_REPLYCHAINS
 
 
 def _pick(value: dict[str, Any], keys: Iterable[str]) -> str:
@@ -181,6 +190,7 @@ def call_from_value(value: Any) -> CallRecord | None:
         forwarded=clean_text(value.get("forwardedTargetType")),
         thread_id=clean_text(value.get("threadId")),
         group_thread_id=clean_text(value.get("groupChatThreadId")),
+        user_participant_id=as_mri(value.get("userParticipantId")),
         subject=clean_text(value.get("subject")),
         participants=participants_of(value.get("participantList") or value.get("participants")),
         raw=jsonable(value),
@@ -448,13 +458,20 @@ class CacheBundle:
     calendar: list[CalendarRecord] = field(default_factory=list)
     names: dict[str, str] = field(default_factory=dict)
     threads: list[ThreadRecord] = field(default_factory=list)
+    attendance: list[MeetingAttendance] = field(default_factory=list)
     databases: int = 0
     read_ms: int = 0
+    # Toplanti sohbetlerinde `19:meeting_` onekiyle taranan kayit sayisi.
+    chains_seen: int = 0
 
     def as_tuple(self) -> tuple[
-        list[CallRecord], list[CalendarRecord], dict[str, str], list[ThreadRecord]
+        list[CallRecord],
+        list[CalendarRecord],
+        dict[str, str],
+        list[ThreadRecord],
+        list[MeetingAttendance],
     ]:
-        return self.calls, self.calendar, self.names, self.threads
+        return self.calls, self.calendar, self.names, self.threads, self.attendance
 
 
 def load_reader() -> Any:
@@ -541,6 +558,7 @@ class TeamsCacheSource:
         self.report["source"] = origin
         self.report["databases"] = getattr(bundle, "databases", 0)
         self.report["read_ms"] = getattr(bundle, "read_ms", 0)
+        self.report["attendance"] = len(getattr(bundle, "attendance", ()))
         return bundle.as_tuple() if hasattr(bundle, "as_tuple") else tuple(bundle)
 
     # --- ic islem -----------------------------------------------------
@@ -613,6 +631,13 @@ class TeamsCacheSource:
                     event = calendar_from_value(value)
                     if event is not None:
                         bundle.calendar.append(event)
+                elif role == ROLE_REPLYCHAINS:
+                    # 270 bin kayit var: toplanti sohbeti olmayanlar mesaj
+                    # haritasi HIC acilmadan elenir.
+                    found = attendance_from_record(value)
+                    if found:
+                        bundle.chains_seen += 1
+                        bundle.attendance.extend(found)
                 elif role == ROLE_THREADS:
                     thread = thread_from_value(value, getattr(record, "key", None))
                     if thread is not None:

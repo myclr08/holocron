@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
+from .attendance import MeetingAttendance, MeetingPart
 from .source import (
     DIRECTION_IN,
     DIRECTION_OUT,
@@ -88,6 +89,22 @@ def call(
     )
 
 
+def attended(
+    thread_id: str,
+    ended: datetime,
+    parts: Iterable[tuple[str, int]] = (),
+    call_id: str = "",
+) -> MeetingAttendance:
+    """Toplanti sohbetindeki `<partlist type="ended">` kaydinin karsiligi."""
+    moment = ended if ended.tzinfo else ended.replace(tzinfo=timezone.utc)
+    return MeetingAttendance(
+        thread_id=thread_id,
+        call_id=call_id,
+        ended_at=moment.isoformat().replace("+00:00", "Z"),
+        parts=[MeetingPart(mri=mri, seconds=seconds) for mri, seconds in parts],
+    )
+
+
 def event(
     subject: str,
     start: str,
@@ -141,6 +158,7 @@ class FakeCallSource:
         calendar: Iterable[CalendarRecord] = (),
         names: dict[str, str] | None = None,
         threads: Iterable[ThreadRecord] = (),
+        attendance: Iterable[MeetingAttendance] = (),
         error: CallsError | None = None,
         report: dict[str, Any] | None = None,
     ) -> None:
@@ -148,6 +166,7 @@ class FakeCallSource:
         self.calendar: list[CalendarRecord] = list(calendar)
         self.names: dict[str, str] = dict(DEFAULT_NAMES if names is None else names)
         self.threads: list[ThreadRecord] = list(threads)
+        self.attendance: list[MeetingAttendance] = list(attendance)
         self.error = error
         self.reads = 0
         # Teshis: gercek kaynakta kopyalama sonucunu tasir, burada testlerin
@@ -158,12 +177,24 @@ class FakeCallSource:
         return dict(self.report)
 
     def read(self) -> tuple[
-        list[CallRecord], list[CalendarRecord], dict[str, str], list[ThreadRecord]
+        list[CallRecord],
+        list[CalendarRecord],
+        dict[str, str],
+        list[ThreadRecord],
+        list[MeetingAttendance],
     ]:
         self.reads += 1
         if self.error is not None:
             raise self.error
-        return list(self.calls), list(self.calendar), dict(self.names), list(self.threads)
+        # Teshis alani gercek kaynaktaki gibi okunan katilim sayisini tasir.
+        self.report["attendance"] = len(self.attendance)
+        return (
+            list(self.calls),
+            list(self.calendar),
+            dict(self.names),
+            list(self.threads),
+            list(self.attendance),
+        )
 
     # --- kolaylik -----------------------------------------------------
 
@@ -177,6 +208,10 @@ class FakeCallSource:
 
     def add_thread(self, record: ThreadRecord) -> ThreadRecord:
         self.threads.append(record)
+        return record
+
+    def add_attendance(self, record: MeetingAttendance) -> MeetingAttendance:
+        self.attendance.append(record)
         return record
 
 

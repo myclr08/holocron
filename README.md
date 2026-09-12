@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.6.3** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.7.0** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -562,10 +562,24 @@ Nasıl çalışır:
   olduğunu, kaç toplantının eşleştiğini ve okumanın kaç saniye sürdüğünü
   söyler. Aynı önbelleği ikinci kez taramak kopya oluşturmaz: tekilleştirme
   `callId` üzerindendir; silinmiş (`isDeleted`) kayıtlar hiç alınmaz.
+- **Takvimden katıldığınız toplantılar.** `call-history` yalnızca
+  *başlattığınız ya da size gelen* aramaları tutar; takvimden katıldığınız
+  planlı toplantılar orada hiç geçmez. Onlar **toplantı sohbetinden** gelir:
+  Teams her toplantı bitiminde sohbete `<partlist type="ended">` bloklu bir
+  sistem mesajı yazar ve içinde **kişi başına saniye** vardır. Holocron o
+  bloktan kendi katılımınızı çıkarır — süreniz *sizin* `duration`'ınızdır,
+  listede **sohbetten** rozetiyle görünür. **Katılmadığınız toplantı kayıt
+  üretmez**: kabul edip gitmediğiniz toplantıda katılımcı listesinde yoksunuz.
+  Aynı arama zaten arama geçmişinde varsa ikinci kayıt oluşmaz. Kendi
+  kimliğiniz arama geçmişindeki `userParticipantId` alanından türetilir;
+  bulunamazsa **Ayarlar → Teams → Kendi Teams kimliğim** alanına elle
+  yazabilirsiniz (bu alan boşken sohbet kaydı hiç üretilmez). Pencere son
+  90 gündür.
 - **Ne okunur.** Önbellekte yüzden fazla veritabanı var; Holocron yalnızca
-  **dördünü** açar — `call-history-manager` (aramalar), `calendar`
-  (toplantılar), `profiles` (kimlik → ad) ve `conversation-manager` (grup
-  sohbetlerinin adı). Seçim veritabanı adının ikinci segmentiyle **tam**
+  **beşini** açar — `call-history-manager` (aramalar), `calendar`
+  (toplantılar), `profiles` (kimlik → ad), `conversation-manager` (grup
+  sohbetlerinin adı) ve `replychain-manager` (toplantı katılımı; 270 bin
+  kaydın içinden yalnız `19:meeting_` ile başlayan sohbetler açılır). Seçim veritabanı adının ikinci segmentiyle **tam**
   eşleşir, böylece `call-history-sync-state-manager` gibi kardeşler hiç
   açılmaz. Alan değerleri büyük/küçük harfe duyarsız okunur (`twoParty` /
   `TwoParty`) ve `bytes` olarak gelen adlar (Teams bazı dizgeleri öyle yazar)
@@ -902,7 +916,7 @@ kilitler. Üçüncüsü etikettir: `v<sürüm>` biçiminde itilir ve release iş
 yanlış numaralı bir release çıkmaz.
 
 ```bash
-git tag v0.6.3 && git push origin v0.6.3
+git tag v0.7.0 && git push origin v0.7.0
 ```
 
 ### Teams sondası
@@ -959,6 +973,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.7.0** | 12 Eylül 2026 | Teams Aramalar: toplantı sohbetlerindeki katılım kayıtlarından (partlist) gerçek katılım süresiyle toplantılar; "sohbetten" rozeti; Kendi Teams kimliğim ayarı; sonda `--meetings` |
 | **v0.6.3** | 12 Eylül 2026 | Teams Aramalar: takvim saatleri UTC olarak okunur (3 saatlik kayma düzeltildi); grup sohbeti aramaları teşhiste ayrı sayılır, rozet yalnız şüphelileri gösterir |
 | **v0.6.2** | 12 Eylül 2026 | Teams Aramalar: tekrarlayan toplantı serileri (RecurringMaster) kimlikle eşleşir, iptal edilmiş seriler dahil; "Eşleşmeyenler" teşhis çekmecesi; taramada tekrarlayan sayısı |
 | **v0.6.1** | 12 Eylül 2026 | Kime/CC adres kutusu: rehberden seçim tek çip, boşlukta bölme yok, `Ad Soyad <adres>` ayrıştırma, geçersiz adres uyarısı |

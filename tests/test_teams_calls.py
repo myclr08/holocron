@@ -27,11 +27,13 @@ from openpyxl import load_workbook
 from app import db, repository as repo
 from app.teamscalls import CallsError, default_source, intake, teams_cache
 from app.teamscalls import source as source_module
+from app.teamscalls import attendance
 from app.teamscalls.fake import (
     ME,
     PERSON_ONE,
     PERSON_TWO,
     FakeCallSource,
+    attended,
     call,
     event,
 )
@@ -996,6 +998,260 @@ def test_the_badge_ignores_group_chat_calls(api_client, fake_calls):
     assert summary["suspicious"] == 1
 
 
+# --- toplanti sohbetinden katilim ----------------------------------------
+#
+# Saha: takvimden katilinan planli toplantilar `call-history`de HIC yok.
+# Katilimin kendisi toplanti sohbetindeki `<partlist type="ended">`
+# mesajinda: kim, kac saniye kaldi.
+
+MY_GUID = "0f8fad5b-d9cb-469f-a165-70867728950e"
+MY_MRI = "8:orgid:" + MY_GUID
+
+ENDED_XML = (
+    '<partlist alt="" type="ended" callId="cagri-1">'
+    '<part identity="{me}"><name>Ben</name><duration>1863</duration></part>'
+    '<part identity="{other}"><name>Örnek Kişi</name><duration>1800</duration></part>'
+    "</partlist>"
+).format(me=MY_MRI, other=PERSON_ONE)
+
+STARTED_XML = (
+    '<partlist alt="" type="started" callId="cagri-1">'
+    f'<part identity="{MY_MRI}"><name>Ben</name></part>'
+    "</partlist>"
+)
+
+
+def chain(content: str, thread: str = "19:meeting_ABC123456789@thread.v2") -> dict:
+    """`replychains` kaydinin gercekteki bicimi."""
+    return {
+        "conversationId": thread,
+        "messageMap": {
+            f"{MY_MRI}_1": {
+                "messageType": "Event/Call",
+                "content": content,
+                "originalArrivalTime": 1789000000000,
+                "isSentByCurrentUser": False,
+            }
+        },
+    }
+
+
+def test_an_ended_partlist_becomes_attendance():
+    record = attendance.attendance_of(
+        {"messageType": "Event/Call", "content": ENDED_XML, "originalArrivalTime": 1789000000000},
+        "19:meeting_ABC123456789@thread.v2",
+    )
+    assert record.call_id == "cagri-1"
+    assert [(part.mri, part.seconds) for part in record.parts] == [
+        (MY_MRI, 1863),
+        (PERSON_ONE, 1800),
+    ]
+
+
+def test_a_started_partlist_is_ignored():
+    """`started` sure tasimaz; islenirse her toplanti iki kez sayilirdi."""
+    assert attendance.attendance_of({"messageType": "Event/Call", "content": STARTED_XML}) is None
+
+
+def test_a_broken_partlist_falls_back_to_the_regex():
+    broken = ENDED_XML.replace("<name>Ben</name>", "<name>A & B</name>")
+    kind, call_id, parts = attendance.parse_partlist(broken)
+    assert kind == "ended"
+    assert call_id == "cagri-1"
+    assert [part.seconds for part in parts] == [1863, 1800]
+
+
+def test_a_message_without_a_partlist_is_not_attendance():
+    assert attendance.attendance_of({"messageType": "Text", "content": "merhaba"}) is None
+    assert attendance.attendance_of({"messageType": "Event/Call", "content": ""}) is None
+
+
+def test_only_meeting_threads_are_opened():
+    """270 bin kayit var: toplanti olmayan sohbetin mesaj haritasi acilmaz."""
+    assert attendance.attendance_from_record(chain(ENDED_XML))
+    assert attendance.attendance_from_record(chain(ENDED_XML, thread=CHAT_THREAD)) == []
+    assert attendance.is_meeting_thread("19:meeting_x@thread.v2") is True
+    assert attendance.is_meeting_thread(CHAT_THREAD) is False
+
+
+def test_the_name_inside_the_xml_is_never_kept():
+    record = attendance.attendance_from_record(chain(ENDED_XML))[0]
+    assert "Ben" not in json.dumps([part.__dict__ for part in record.parts], ensure_ascii=False)
+
+
+# --- kendi kimligim -------------------------------------------------------
+
+
+def test_my_mri_comes_from_the_call_history():
+    calls = [call("a", moment(1)), call("b", moment(2))]
+    calls[0].user_participant_id = MY_MRI
+    calls[1].user_participant_id = MY_MRI
+    assert intake.my_mri(calls) == MY_MRI
+
+
+def test_a_guid_is_turned_into_an_mri():
+    record = teams_cache.call_from_value({"callId": "a", "userParticipantId": MY_GUID})
+    assert record.user_participant_id == MY_MRI
+
+
+def test_the_setting_wins_over_the_history():
+    calls = [call("a", moment(1))]
+    calls[0].user_participant_id = PERSON_ONE
+    assert intake.my_mri(calls, setting=MY_GUID) == MY_MRI
+
+
+def test_without_an_identity_no_attendance_row_is_made():
+    record = fake_attended()
+    assert intake.normalize_attendance([record], "") == []
+
+
+# --- katilim -> satir -----------------------------------------------------
+
+
+def fake_attended(seconds: int = 1863, mine: bool = True, call_id: str = "cagri-1"):
+    parts = [(PERSON_ONE, 1800)]
+    if mine:
+        parts.insert(0, (MY_MRI, seconds))
+    return attended(
+        "19:meeting_ABC123456789@thread.v2",
+        NOW - timedelta(days=1),
+        parts=parts,
+        call_id=call_id,
+    )
+
+
+def test_attendance_becomes_a_meeting_row():
+    rows = intake.normalize_attendance(
+        [fake_attended()], MY_MRI, names={PERSON_ONE: "Örnek Kişi"}
+    )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["kind"] == intake.KIND_MEETING
+    assert row["source"] == "chat"
+    assert row["duration_ms"] == 1863 * 1000
+    assert row["call_id"] == "cagri-1"
+    assert intake.duration_text(row["duration_ms"]) == "31 dk"
+    # Baslangic, bitisten kendi surem kadar oncesi.
+    from app.teamscalls.source import parse_utc
+
+    span = parse_utc(row["ended_at"]) - parse_utc(row["started_at"])
+    assert span == timedelta(seconds=1863)
+
+
+def test_the_duration_is_my_own_not_the_meetings():
+    rows = intake.normalize_attendance([fake_attended(seconds=600)], MY_MRI)
+    assert rows[0]["duration_ms"] == 600 * 1000
+
+
+def test_the_longest_part_stands_in_when_my_duration_is_missing():
+    rows = intake.normalize_attendance([fake_attended(seconds=0)], MY_MRI)
+    assert rows[0]["duration_ms"] == 1800 * 1000
+
+
+def test_a_meeting_i_did_not_attend_makes_no_row():
+    """"Kabul edip gitmedigim" toplanti: katilimci listesinde yokum."""
+    assert intake.normalize_attendance([fake_attended(mine=False)], MY_MRI) == []
+
+
+def test_the_participants_carry_their_seconds():
+    rows = intake.normalize_attendance([fake_attended()], MY_MRI, names={PERSON_ONE: "Örnek Kişi"})
+    people = json.loads(rows[0]["participants_json"])
+    assert people[1] == {"id": PERSON_ONE, "name": "Örnek Kişi", "seconds": 1800}
+
+
+def test_the_calendar_subject_is_attached_by_thread():
+    rows = intake.normalize_attendance(
+        [fake_attended()],
+        MY_MRI,
+        events=[event("Sabah daily", local_text(moment(5)),
+                      event_type="RecurringMaster", cid="19:meeting_ABC123456789@thread.v2")],
+    )
+    assert rows[0]["meeting_subject"] == "Sabah daily"
+
+
+def test_a_call_without_an_id_gets_one_from_the_thread_and_time():
+    rows = intake.normalize_attendance([fake_attended(call_id="")], MY_MRI)
+    assert rows[0]["call_id"].startswith("19:meeting_ABC123456789@thread.v2:")
+
+
+def test_a_call_already_in_the_history_is_not_added_twice():
+    rows = intake.normalize_attendance(
+        [fake_attended()], MY_MRI, known_ids={"cagri-1"}
+    )
+    assert rows == []
+
+
+def test_the_scan_merges_both_sources(conn):
+    source = FakeCallSource(
+        calls=[call("gecmis", moment(2))],
+        attendance=[fake_attended()],
+    )
+    source.calls[0].user_participant_id = MY_MRI
+    result = intake.scan(conn, source)
+    assert result["from_chat"] == 1
+    assert result["my_mri_known"] is True
+    sources = {row["call_id"]: row["source"] for row in repo.list_calls(conn)}
+    assert sources == {"gecmis": "history", "cagri-1": "chat"}
+
+
+def test_a_history_call_beats_the_chat_record(conn):
+    """Ayni `callId` gecmiste varsa sohbet kaydi eklenmez."""
+    history = call("cagri-1", moment(1), call_type=TYPE_MULTI_PARTY)
+    history.user_participant_id = MY_MRI
+    result = intake.scan(
+        conn, FakeCallSource(calls=[history], attendance=[fake_attended()])
+    )
+    assert result["from_chat"] == 0
+    assert repo.get_call(conn, "cagri-1")["source"] == "history"
+
+
+def test_a_chat_record_survives_a_second_scan(conn):
+    source = FakeCallSource(attendance=[fake_attended()])
+    intake.scan(conn, source, my_mri_setting=MY_MRI)
+    intake.scan(conn, source, my_mri_setting=MY_MRI)
+    assert repo.call_count(conn) == 1
+
+
+def test_chat_meetings_count_in_the_statistics():
+    rows = intake.normalize_attendance([fake_attended()], MY_MRI)
+    stats = intake.build_stats(rows, days=30, now=NOW)
+    assert stats["total_ms"] == 1863 * 1000
+    slices = {item["kind"]: item for item in stats["split"]}
+    assert slices[intake.KIND_MEETING]["count"] == 1
+    # Yon kavrami yok: aradim/arandim sayimina girmez.
+    assert stats["direction"]["outgoing"]["count"] == 0
+    assert stats["direction"]["incoming"]["count"] == 0
+
+
+def test_the_row_says_where_it_came_from():
+    rows = intake.normalize_attendance([fake_attended()], MY_MRI)
+    card = intake.view(rows[0])
+    assert card["source"] == "chat"
+    assert card["source_label"] == "Sohbetten"
+
+
+def test_the_api_shows_chat_meetings(api_client, fake_calls):
+    fake_calls.calls = []
+    fake_calls.attendance = [fake_attended()]
+    api_client.put("/api/settings", json={"calls.my_mri": MY_MRI})
+    result = api_client.post("/api/calls/scan").json()
+    assert result["from_chat"] == 1
+
+    data = api_client.get("/api/calls?days=90").json()
+    assert data["calls"][0]["source"] == "chat"
+    assert data["calls"][0]["source_label"] == "Sohbetten"
+
+
+def test_attendance_older_than_the_window_is_dropped():
+    old = attended(
+        "19:meeting_ABC123456789@thread.v2",
+        NOW - timedelta(days=200),
+        parts=[(MY_MRI, 600)],
+    )
+    kept = attendance.within([old], intake.since_of(90, NOW))
+    assert kept == []
+
+
 # --- tekillestirme --------------------------------------------------------
 
 
@@ -1229,6 +1485,8 @@ def test_every_wanted_database_has_exactly_one_store():
         "calendar": "calendar",
         "profiles": "profiles",
         "conversation-manager": "conversations",
+        # Toplanti sohbetleri: katilim ("kim kac dakika kaldi") burada.
+        "replychain-manager": "replychains",
     }
 
 

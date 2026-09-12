@@ -2103,6 +2103,7 @@ CALL_COLUMNS: tuple[str, ...] = (
     "participants_json",
     "attendees_json",
     "raw_json",
+    "source",
     "seen_at",
 )
 
@@ -2110,6 +2111,7 @@ CALL_COLUMNS: tuple[str, ...] = (
 def _call_dict(row: sqlite3.Row) -> dict[str, Any]:
     data = {name: row[name] for name in CALL_COLUMNS}
     data["duration_ms"] = int(data["duration_ms"] or 0)
+    data["source"] = str(data["source"] or "history")
     for name in CALL_COLUMNS:
         if name != "duration_ms" and data[name] is None:
             data[name] = ""
@@ -2186,6 +2188,18 @@ def get_call(conn: sqlite3.Connection, call_id: str) -> dict[str, Any] | None:
         "SELECT * FROM teams_calls WHERE call_id = ?", (str(call_id or ""),)
     ).fetchone()
     return _call_dict(row) if row is not None else None
+
+
+def history_call_ids(conn: sqlite3.Connection) -> set[str]:
+    """`call-history`ten gelmis kayitlarin kimlikleri (tekillestirme icin).
+
+    Toplanti sohbetinden gelen kayit, ayni arama zaten gecmiste varsa
+    eklenmez; gecmis kaydi daha zengindir (yon, durum, karsi taraf).
+    """
+    rows = conn.execute(
+        "SELECT call_id FROM teams_calls WHERE source = 'history'"
+    ).fetchall()
+    return {str(row["call_id"]) for row in rows}
 
 
 def call_count(conn: sqlite3.Connection) -> int:

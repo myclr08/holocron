@@ -23,6 +23,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Sequence
 
 from .. import fields as field_utils, repository
+from .attendance import MeetingAttendance, within
 from .source import (
     DIRECTION_IN,
     DIRECTION_OUT,
@@ -38,6 +39,7 @@ from .source import (
     CallSource,
     ThreadRecord,
     as_int,
+    as_mri,
     canonical_direction,
     canonical_state,
     canonical_type,
@@ -475,6 +477,7 @@ def normalize_call(
         "participants_json": json.dumps(participants, ensure_ascii=False),
         "attendees_json": json.dumps(attendees, ensure_ascii=False),
         "raw_json": json.dumps(jsonable(call.raw or {}), ensure_ascii=False, default=str),
+        "source": SOURCE_HISTORY,
         "seen_at": seen_at or repository.now_iso(),
         # Saklanmaz (tabloda sutunu yok): yalnizca tarama ozetindeki
         # "kac tekrarlayan toplanti eslesti" sayimi icin tasinir.
@@ -607,6 +610,8 @@ def view(row: dict[str, Any], names: dict[str, str] | None = None) -> dict[str, 
     # Grup sohbetinden baslatilan aramanin takvimde karsiligi beklenmez;
     # arayuz "eslesmeyen" rozetine bunlari saymaz.
     card["thread_kind"] = thread_kind(row)
+    card["source"] = clean_text(row.get("source")) or SOURCE_HISTORY
+    card["source_label"] = SOURCE_LABELS.get(card["source"], "")
     return card
 
 
@@ -1081,6 +1086,143 @@ def diagnose_unmatched(
     }
 
 
+# --- toplanti sohbetinden katilim ----------------------------------------
+#
+# `call-history` yalnizca baslattigin ya da sana gelen aramalari tutuyor;
+# takvimden katildigin planli toplantilar orada HIC gecmiyor. Katilimin
+# kendisi toplanti sohbetindeki `<partlist type="ended">` mesajinda duruyor:
+# kim, kac saniye kaldi. "Kabul edip gitmedigim toplanti" sorunu da boyle
+# cozuluyor -- katilmayan kisi listede hic yok.
+
+SOURCE_HISTORY = "history"
+SOURCE_CHAT = "chat"
+CALL_SOURCES: tuple[str, ...] = (SOURCE_HISTORY, SOURCE_CHAT)
+
+SOURCE_LABELS: dict[str, str] = {SOURCE_HISTORY: "Arama geçmişi", SOURCE_CHAT: "Sohbetten"}
+
+# Katilim kayitlari icin pencere: daha eskisi kullaniciyi ilgilendirmiyor.
+ATTENDANCE_DAYS = 90
+
+
+def my_mri(
+    calls: Iterable[CallRecord] = (),
+    setting: Any = "",
+    names: dict[str, str] | None = None,
+) -> str:
+    """Kullanicinin kendi kimligi (MRI).
+
+    Sirayla: ayardan elle verilen deger, `call-history` kayitlarindaki
+    `userParticipantId` (GUID -> `8:orgid:<guid>`). Profil eslemesi icin
+    elimizde kullanicinin e-postasi olmadigindan o yol kullanilmaz; kimlik
+    bulunamazsa katilim kaydi uretilmez (yanlis kayit uretmektense hic
+    uretmemek yeglenir).
+    """
+    manual = as_mri(clean_text(setting))
+    if manual:
+        return manual
+    counts: dict[str, int] = {}
+    for call in calls or ():
+        marker = as_mri(getattr(call, "user_participant_id", ""))
+        if marker:
+            counts[marker] = counts.get(marker, 0) + 1
+    if not counts:
+        return ""
+    return max(counts.items(), key=lambda item: item[1])[0]
+
+
+def attendance_call_id(record: MeetingAttendance) -> str:
+    """Katilim kaydinin kimligi: `callId`, yoksa thread + bitis damgasi."""
+    marker = clean_text(record.call_id)
+    if marker:
+        return marker
+    ended = iso_text(parse_utc(record.ended_at)) or clean_text(record.ended_at)
+    return f"{clean_text(record.thread_id)}:{ended}"
+
+
+def normalize_attendance(
+    records: Iterable[MeetingAttendance],
+    mri: Any,
+    events: Any = (),
+    names: dict[str, str] | None = None,
+    seen_at: str | None = None,
+    known_ids: Iterable[str] = (),
+) -> list[dict[str, Any]]:
+    """Katilim kayitlari -> veritabani satirlari (`source='chat'`).
+
+    Kullanici katilimci listesinde YOKSA satir uretilmez: o toplantiya
+    katilmamistir. Sure kullanicinin KENDI `duration` degeridir; kayitta
+    yoksa toplantinin en uzun katilimi yedege gecer.
+    """
+    marker = as_mri(clean_text(mri))
+    if not marker:
+        return []
+
+    pools = event_pools(events)
+    stamp = seen_at or repository.now_iso()
+    skip = {clean_text(item) for item in known_ids}
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for record in records or ():
+        mine = record.part_for(marker)
+        if mine is None:
+            continue
+        call_id = attendance_call_id(record)
+        if not call_id or call_id in skip or call_id in seen:
+            continue
+        seen.add(call_id)
+
+        ended = parse_utc(record.ended_at)
+        seconds = mine.seconds or record.longest
+        started = ended - timedelta(seconds=seconds) if ended is not None else None
+        event = match_by_thread(
+            CallRecord(call_id=call_id, thread_id=record.thread_id), pools.identity
+        )
+        participants = [
+            {
+                "id": part.mri,
+                "name": resolve_name(part.mri, "", names),
+                "seconds": int(part.seconds),
+            }
+            for part in record.parts
+        ]
+        rows.append(
+            {
+                "call_id": call_id,
+                "started_at": iso_text(started),
+                "ended_at": iso_text(ended),
+                "connected_at": iso_text(started),
+                "duration_ms": int(seconds) * 1000,
+                # Toplantiya katildim: yon kavrami yok, durum "kabul".
+                "direction": "",
+                "state": STATE_ACCEPTED,
+                "kind": KIND_MEETING,
+                "counterpart_id": "",
+                "counterpart_name": "",
+                "forwarded": "",
+                "meeting_subject": clean_text(event.subject) if event is not None else "",
+                "meeting_organizer": clean_text(event.organizer_name) if event is not None else "",
+                "my_response": clean_text(event.my_response) if event is not None else "",
+                "thread_id": clean_text(record.thread_id),
+                "group_thread_id": "",
+                "topic": "",
+                "participants_json": json.dumps(participants, ensure_ascii=False),
+                "attendees_json": json.dumps(
+                    list(event.attendees) if event is not None else [], ensure_ascii=False
+                ),
+                "raw_json": json.dumps(
+                    {"thread_id": record.thread_id, "parts": len(record.parts)},
+                    ensure_ascii=False,
+                ),
+                "source": SOURCE_CHAT,
+                "seen_at": stamp,
+                "matched_event_type": clean_text(event.event_type) if event is not None else "",
+            }
+        )
+    rows.sort(key=lambda item: (item["started_at"], item["call_id"]))
+    return rows
+
+
 # --- tarama --------------------------------------------------------------
 
 
@@ -1099,17 +1241,38 @@ def source_diagnostics(source: Any) -> dict[str, Any]:
     return base
 
 
-def scan(conn: Any, source: CallSource, seen_at: str | None = None) -> dict[str, Any]:
+def scan(
+    conn: Any,
+    source: CallSource,
+    seen_at: str | None = None,
+    my_mri_setting: str = "",
+) -> dict[str, Any]:
     """Kaynagi okur, normalize eder, `call_id` ile tekillestirerek yazar.
 
     Ozet yalnizca sayilari degil, verinin NEREDEN geldigini de tasir: en yeni
     aramalar eksikse kullanicinin bunu balonda gormesi gerekir.
     """
-    bundle = source.read()
-    # Eski uc'lu donus de kabul edilir: sohbetler bos gecer.
-    calls, calendar, names, threads = (*bundle, [])[:4] if len(bundle) == 3 else bundle
+    bundle = tuple(source.read())
+    # Eski donusler de kabul edilir: eksik parcalar bos gecer.
+    calls, calendar, names, threads, attended = (*bundle, [], [], [], [])[:5]
     rows = normalize(calls, calendar, names, seen_at, threads)
+
+    # Toplanti sohbetlerinden gelen katilim kayitlari: `call-history`de zaten
+    # gecen bir arama varsa (ayni `callId`) chat kaydi EKLENMEZ.
+    history_ids = {row["call_id"] for row in rows} | repository.history_call_ids(conn)
+    marker = my_mri(calls, setting=my_mri_setting)
+    chat_rows = normalize_attendance(
+        within(attended, since_of(ATTENDANCE_DAYS)),
+        marker,
+        calendar,
+        names,
+        seen_at,
+        known_ids=history_ids,
+    )
+    rows = rows + chat_rows
     report = repository.import_calls(conn, rows)
+    report["from_chat"] = len(chat_rows)
+    report["my_mri_known"] = bool(marker)
     report["meetings_matched"] = sum(1 for row in rows if row["kind"] == KIND_MEETING)
     # Tekrarlayan toplantilar yalnizca kimlik eslemesiyle yakalanir; kac
     # tanesinin seri kaydindan geldigi ayrica sayilir.

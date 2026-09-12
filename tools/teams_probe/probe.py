@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import re
 import os
 import shutil
 import sys
@@ -593,6 +594,259 @@ def render(
 # --- komut satiri --------------------------------------------------------
 
 
+# --- toplanti katilimi sondasi (--meetings) ------------------------------
+#
+# Asil soru: "hangi toplantiya katildim, kac dakika kaldim". Cevabi
+# `replychain-manager` veritabanindaki `replychains` store'u tasiyor: toplanti
+# sohbetine Teams bir sistem mesaji yaziyor ve icinde kisi basina sure olan
+# bir `<partlist>` bloku duruyor. Bu bolum O YAPIYI olcer; hicbir ad, mesaj
+# metni ya da sure DEGERI basilmaz -- yalnizca etiket adlari, sayilar ve
+# tarih araliklari.
+
+REPLYCHAIN_ROLE = "replychain-manager"
+REPLYCHAIN_STORE = "replychains"
+PROFILE_ROLE = "profiles"
+CALL_ROLE = "call-history-manager"
+
+MEETING_PREFIX = "19:meeting_"
+THREAD_PREFIX = "19:"
+
+MEETINGS_OUTPUT_NAME = "teams-meetings-probe.txt"
+
+# XML etiket adi: deger degil, YALNIZCA ad toplanir.
+_TAG_NAME = re.compile(r"<\s*([A-Za-z][\w:-]*)", re.ASCII)
+_PARTLIST_TYPE = re.compile(r'<partlist\b[^>]*\btype\s*=\s*"([^"]*)"', re.IGNORECASE)
+_PART_COUNT = re.compile(r"<part\b", re.IGNORECASE)
+_HAS_DURATION = re.compile(r"<duration\b", re.IGNORECASE)
+_IDENTITY = re.compile(r'\bidentity\s*=\s*"([^"]*)"', re.IGNORECASE)
+
+
+def database_segment(name: Any) -> str:
+    """`Teams:calendar:react-web-client:...` -> `calendar`."""
+    text = str(name or "").strip()
+    parts = text.split(":")
+    return parts[1] if len(parts) > 1 else text
+
+
+@dataclass
+class ChainReport:
+    """Tek bir sohbet turu icin (toplanti / grup) toplanan sayilar."""
+
+    label: str
+    threads: int = 0
+    messages: int = 0
+    message_types: Counter = field(default_factory=Counter)
+    call_events: int = 0
+    partlists: int = 0
+    partlist_types: Counter = field(default_factory=Counter)
+    tags: set = field(default_factory=set)
+    parts_total: int = 0
+    parts_max: int = 0
+    with_duration: int = 0
+    mine: int = 0
+    oldest: dt.datetime | None = None
+    newest: dt.datetime | None = None
+
+    def observe_moment(self, moment: dt.datetime | None) -> None:
+        if moment is None:
+            return
+        aware = moment if moment.tzinfo else moment.replace(tzinfo=dt.timezone.utc)
+        self.oldest = aware if self.oldest is None else min(self.oldest, aware)
+        self.newest = aware if self.newest is None else max(self.newest, aware)
+
+    @property
+    def parts_average(self) -> float:
+        return round(self.parts_total / self.partlists, 1) if self.partlists else 0.0
+
+
+def content_tags(text: str) -> set:
+    """Iceriden YALNIZCA etiket adlari (deger yok)."""
+    return {name.casefold() for name in _TAG_NAME.findall(text)}
+
+
+def scan_message(report: ChainReport, message: Any, my_mri: str) -> None:
+    """Tek mesaji olcer. Icerikten yalnizca yapi bilgisi cikar."""
+    if not isinstance(message, dict):
+        return
+    report.messages += 1
+    kind = str(message.get("messageType") or "").strip()
+    report.message_types[kind or "(bos)"] += 1
+
+    content = message.get("content")
+    text = content.decode("utf-8", "replace") if isinstance(content, bytes) else str(content or "")
+    is_event = "call" in kind.casefold() or "event" in kind.casefold()
+    has_list = "<partlist" in text.casefold()
+    if not (is_event or has_list):
+        return
+
+    report.call_events += 1
+    report.observe_moment(parse_moment("originalArrivalTime", message.get("originalArrivalTime")))
+    if not has_list:
+        return
+
+    report.partlists += 1
+    report.tags |= content_tags(text)
+    found = _PARTLIST_TYPE.search(text)
+    report.partlist_types[(found.group(1) if found else "(yok)").casefold()] += 1
+    count = len(_PART_COUNT.findall(text))
+    report.parts_total += count
+    report.parts_max = max(report.parts_max, count)
+    if _HAS_DURATION.search(text):
+        report.with_duration += 1
+    if my_mri and any(my_mri == value.strip() for value in _IDENTITY.findall(text)):
+        report.mine += 1
+
+
+def find_my_mri(wrapper: Any) -> str:
+    """Kullanicinin kendi kimligi: `call-history.userParticipantId`.
+
+    Ciktiya YAZILMAZ; yalnizca "kac mesajda kendim geciyorum" sayimi icin
+    kullanilir.
+    """
+    for db_id in wrapper.database_ids:
+        if database_segment(db_id.name).casefold() != CALL_ROLE:
+            continue
+        try:
+            database = wrapper[db_id.dbid_no]
+        except Exception:  # pragma: no cover - bozuk ust veri
+            continue
+        for store in database:
+            if str(store.name) != "call-history":
+                continue
+            try:
+                for record in store.iterate_records():
+                    value = getattr(record, "value", None)
+                    if not isinstance(value, dict):
+                        continue
+                    marker = str(value.get("userParticipantId") or "").strip()
+                    if marker:
+                        return marker if ":" in marker else f"8:orgid:{marker}"
+            except Exception:  # pragma: no cover
+                return ""
+    return ""
+
+
+def scan_meetings(wrapper: Any) -> tuple[ChainReport, ChainReport, str]:
+    """`replychains` store'unu tarar: toplanti sohbetleri ve grup sohbetleri."""
+    meetings = ChainReport("toplanti sohbetleri (19:meeting_)")
+    groups = ChainReport("diger 19: sohbetleri")
+    my_mri = find_my_mri(wrapper)
+
+    for db_id in wrapper.database_ids:
+        if database_segment(db_id.name).casefold() != REPLYCHAIN_ROLE:
+            continue
+        try:
+            database = wrapper[db_id.dbid_no]
+        except Exception:  # pragma: no cover - bozuk ust veri
+            continue
+        for store in database:
+            if str(store.name) != REPLYCHAIN_STORE:
+                continue
+            for record in store.iterate_records():
+                value = getattr(record, "value", None)
+                if not isinstance(value, dict):
+                    continue
+                thread = str(value.get("conversationId") or "").strip()
+                if not thread.startswith(THREAD_PREFIX):
+                    continue
+                report = meetings if thread.casefold().startswith(MEETING_PREFIX) else groups
+                messages = value.get("messageMap")
+                if not isinstance(messages, dict):
+                    continue
+                report.threads += 1
+                for message in messages.values():
+                    scan_message(report, message, my_mri)
+    return meetings, groups, my_mri
+
+
+def render_meetings(
+    leveldb: Path, reports: Iterable[ChainReport], my_known: bool, seconds: float
+) -> str:
+    """Katilim sondasinin ciktisi. Ad, metin ve sure DEGERI icermez."""
+    lines: list[str] = []
+    add = lines.append
+    add("Holocron - toplanti katilimi yapi sondasi")
+    add("=" * 52)
+    add("")
+    add("Bu dosya YAPI bilgisi tasir: etiket ADLARI, sayilar ve tarih araliklari.")
+    add("Hicbir ad, mesaj metni ya da sure degeri yazilmaz.")
+    add("")
+    add(f"Kaynak klasor     : {leveldb.name}")
+    add(f"Kendi kimligim    : {'bulundu' if my_known else 'bulunamadi'}")
+    add(f"Sure              : {seconds:.1f} sn")
+    add("")
+
+    for report in reports:
+        add("-" * 52)
+        add(f"{report.label.upper()}")
+        add(f"  sohbet            : {report.threads}")
+        add(f"  mesaj             : {report.messages}")
+        add(f"  arama/olay mesaji : {report.call_events}")
+        add(f"  partlist tasiyan  : {report.partlists}")
+        if report.partlist_types:
+            add(
+                "  partlist type     : "
+                + ", ".join(f"{name} x{count}" for name, count in report.partlist_types.most_common())
+            )
+        if report.tags:
+            add("  icerik etiketleri : " + ", ".join(sorted(report.tags)))
+        add(f"  part sayisi       : ort {report.parts_average} / maks {report.parts_max}")
+        add(f"  duration tasiyan  : {report.with_duration}")
+        add(f"  kendim gecen      : {report.mine}")
+        if report.oldest is not None:
+            add(f"  tarih araligi     : {format_moment(report.oldest)} .. {format_moment(report.newest)}")
+        add("  mesaj turleri     :")
+        for name, count in report.message_types.most_common(15):
+            add(f"    {name}: {count}")
+        add("")
+
+    add("Son.")
+    return "\n".join(lines) + "\n"
+
+
+def run_meetings(
+    path: Path | None = None, output: Path | None = None, no_copy: bool = False
+) -> int:
+    """`--meetings`: yalnizca toplanti katilimi yapisini olcer."""
+    started = time.monotonic()
+    leveldb = Path(path) if path else default_cache_path()
+    if not leveldb.is_dir():
+        print(f"Klasor bulunamadi: {leveldb}", file=sys.stderr)
+        return 2
+
+    blob = blob_dir_for(leveldb)
+    source = leveldb
+    blob_source = blob if blob.is_dir() else None
+    if not no_copy:
+        root = temp_root()
+        report = copy_tree(leveldb, root / leveldb.name)
+        source = report.target
+        if blob_source is not None:
+            blob_source = copy_tree(blob_source, root / blob.name).target
+
+    reader = load_reader()
+    wrapper = reader.WrappedIndexDB(str(source), str(blob_source) if blob_source else None)
+    try:
+        meetings, groups, my_mri = scan_meetings(wrapper)
+    finally:
+        try:
+            wrapper.close()
+        except Exception:  # pragma: no cover
+            pass
+
+    seconds = time.monotonic() - started
+    text = render_meetings(leveldb, (meetings, groups), bool(my_mri), seconds)
+    destination = Path(output) if output else Path.cwd() / MEETINGS_OUTPUT_NAME
+    destination.write_text(text, encoding="utf-8")
+    print(f"Toplanti sohbeti : {meetings.threads}")
+    print(f"partlist mesaji  : {meetings.partlists}")
+    print(f"Sure             : {seconds:.1f} sn")
+    print(f"Yazildi          : {destination}")
+    print("Icinde kisisel deger yok: yalnizca etiket adlari, sayilar, tarihler.")
+    return 0
+
+
+
 def run(
     path: Path | None = None,
     output: Path | None = None,
@@ -667,7 +921,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--limit", type=int, default=SAMPLE_LIMIT, help=f"ornek kayit sayisi (varsayilan {SAMPLE_LIMIT})"
     )
+    parser.add_argument(
+        "--meetings",
+        action="store_true",
+        help="yalnizca toplanti katilimi yapisini olcer (replychains)",
+    )
     args = parser.parse_args(argv)
+    if args.meetings:
+        return run_meetings(args.path, args.output, args.no_copy)
     return run(args.path, args.output, args.no_copy, max(1, int(args.limit)))
 
 

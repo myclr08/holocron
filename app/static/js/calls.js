@@ -343,9 +343,18 @@ function callRow(call) {
     }),
   ]);
   row.appendChild(name);
-  row.appendChild(
-    h("td", {}, [h("span", { class: "call-kind kind-" + call.kind, text: call.kind_label })])
-  );
+  const kinds = [h("span", { class: "call-kind kind-" + call.kind, text: call.kind_label })];
+  if (call.source === "chat") {
+    // Bu kayit arama gecmisinde degil, toplanti sohbetinde bulundu.
+    kinds.push(
+      h("span", {
+        class: "call-source",
+        text: "sohbetten",
+        title: "Toplantı sohbetindeki katılım kaydından",
+      })
+    );
+  }
+  row.appendChild(h("td", {}, kinds));
   row.appendChild(
     h("td", {}, [
       h("span", { class: "call-state state-" + (call.state || "none"), text: call.state_label || "—" }),
@@ -618,6 +627,7 @@ function openCallDetail(call) {
     lines.push(["Karşı taraf", call.counterpart_label]);
   }
   if (call.topic && call.topic !== call.title) lines.push(["Sohbet", call.topic]);
+  if (call.source === "chat") lines.push(["Kaynak", "Toplantı sohbetindeki katılım kaydı"]);
   if (call.meeting_organizer) lines.push(["Organizatör", call.meeting_organizer]);
   if (call.my_response) lines.push(["Yanıtım", call.my_response]);
   if (call.forwarded) lines.push(["Yönlendirme", call.forwarded]);

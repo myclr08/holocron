@@ -473,6 +473,18 @@ def _migration_0010_mail_send(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migration_0011_call_source(conn: sqlite3.Connection) -> None:
+    """Arama kaydinin nereden geldigi: arama gecmisi mi, toplanti sohbeti mi.
+
+    `call-history` yalnizca baslatilan ya da gelen aramalari tutuyor; takvimden
+    katilinan planli toplantilar orada hic gecmiyor. O toplantilar sohbetteki
+    `<partlist type="ended">` mesajindan gelir ve `source='chat'` ile
+    isaretlenir. Eski satirlar 'history' sayilir.
+    """
+    _add_column(conn, "teams_calls", "source", "TEXT NOT NULL DEFAULT 'history'")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_teams_calls_source ON teams_calls(source)")
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
@@ -485,6 +497,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (8, "teams calls", _migration_0008_teams_calls),
     (9, "teams call threads", _migration_0009_call_threads),
     (10, "mail send templates", _migration_0010_mail_send),
+    (11, "teams call source", _migration_0011_call_source),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

@@ -878,7 +878,11 @@ def scan_calls(request: Request) -> dict[str, Any]:
     source = calls_source(context, config)
     started = time.monotonic()
     with context.db_lock:
-        result = calls_intake.scan(context.connection(), source)
+        result = calls_intake.scan(
+            context.connection(),
+            source,
+            my_mri_setting=context.settings.get("calls.my_mri", "") or "",
+        )
     result["ms"] = int((time.monotonic() - started) * 1000)
     stamp = repository.now_iso()
     context.settings.set("calls.scanned_at", stamp)

@@ -479,6 +479,7 @@ function fillTeams(settings) {
   document.getElementById("calls-cache-path").value = settings["calls.cache_path"] || "";
   document.getElementById("calls-scan-on-refresh").checked =
     settings["calls.scan_on_refresh"] === "1";
+  document.getElementById("calls-my-mri").value = settings["calls.my_mri"] || "";
 }
 
 /** ISO damgayi yerel saatle "GG.AA.YYYY SS:dd" yazar. */
@@ -693,6 +694,7 @@ function saveTeams() {
     "teams.topic_format": topic,
     "calls.cache_path": document.getElementById("calls-cache-path").value.trim(),
     "calls.scan_on_refresh": document.getElementById("calls-scan-on-refresh").checked ? "1" : "0",
+    "calls.my_mri": document.getElementById("calls-my-mri").value.trim(),
   };
   teamsAction(
     () => api("/api/settings", { method: "PUT", body: JSON.stringify(payload) }),

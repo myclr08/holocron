@@ -1723,6 +1723,18 @@ html.crawl-open .layout { visibility: hidden; }
 .call-kind.kind-group_call { color: var(--saber-purple); border-color: rgba(168, 85, 247, .45); }
 .call-kind.kind-one_to_one { color: var(--saber-green); border-color: rgba(57, 211, 83, .45); }
 
+/* Toplanti sohbetinden gelen kayit: kucuk, sessiz bir rozet. */
+.call-source {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .call-state.state-Missed { color: var(--saber-red); border-color: rgba(255, 59, 59, .45); }
 .call-state.state-Declined { color: #ffab40; border-color: rgba(255, 171, 64, .45); }
 
