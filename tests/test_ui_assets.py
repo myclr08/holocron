@@ -62,6 +62,64 @@ def test_javascript_messages_are_turkish(api_client):
     assert "Bağlantı kurulamadı: " in settings_js
 
 
+def test_jira_detail_field_picker_is_group_scoped_and_keeps_other_sections(api_client):
+    home = api_client.get("/").text
+    assert 'id="drawer-fields"' in home
+    assert "Alanları seç" in home
+    script = api_client.get("/static/js/app.js").text
+    for marker in (
+        'api("/api/jira/fields")',
+        "detail_fields: detailFields",
+        'text: "Hiçbiri"',
+        'text: "Varsayılana dön"',
+        'item.kind === "local" ? "Yerel alanlar" : "Jira alanları"',
+        "state.activeId !== groupId || state.drawerKey !== drawerKey",
+    ):
+        assert marker in script
+    assert "renderDrawerTeams(body);" in script
+
+
+def test_local_detail_visibility_runs_in_the_real_javascript():
+    """Gerçek render fonksiyonu null/[]/local:id ayrımını uygular."""
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node yok")
+    script = (STATIC / "js" / "app.js").read_text(encoding="utf-8")
+    probe = r"""
+const fakeNode = () => ({
+  children: [], firstChild: null, classList: { add() {}, contains() { return false; } },
+  appendChild(child) { this.children.push(child); this.firstChild ||= child; return child; },
+  removeChild() { this.children.shift(); this.firstChild = this.children[0] || null; },
+  setAttribute() {}, addEventListener() {}, focus() {},
+});
+globalThis.document = {
+  addEventListener() {}, createElement() { return fakeNode(); },
+  createTextNode(text) { return { textContent: text }; }, getElementById() { return fakeNode(); },
+};
+function count(selection) {
+  state.group = { detail_fields: selection };
+  state.drawerKey = "DEMO-1";
+  state.drawerLocal = [
+    { field: "local:1", name: "Not", type_label: "Metin", text: "saklı", value: "saklı", history: [] },
+    { field: "local:2", name: "Puan", type_label: "Sayı", text: "5", value: "5", history: [] },
+  ];
+  const body = fakeNode();
+  renderDrawerLocal(body);
+  return body.children.length ? body.children[0].children.length - 1 : 0;
+}
+process.stdout.write(JSON.stringify([count(null), count([]), count(["local:2"])]));
+"""
+    setup, exercise = probe.split("function count", 1)
+    result = subprocess.run(
+        [node], input=setup + script + "\nfunction count" + exercise,
+        capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == [2, 0, 1]
+
+
 def test_hidden_attribute_always_hides(api_client):
     """Iptal dugmesi is calismazken gorunmuyordu: button display kurali [hidden]'i eziyordu."""
     css = api_client.get("/static/css/app.css").text

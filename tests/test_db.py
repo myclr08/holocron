@@ -58,6 +58,31 @@ def test_new_migration_is_applied_on_top(tmp_path):
         conn.close()
 
 
+def test_group_detail_fields_migration_preserves_existing_group_and_items(tmp_path):
+    conn = db.connect(tmp_path / "detail-fields.db")
+    try:
+        assert db.migrate(conn, db.MIGRATIONS[:-1]) == 12
+        cursor = conn.execute(
+            "INSERT INTO groups (name, kind, position) VALUES ('Filo', 'manual', 0)")
+        conn.execute(
+            "INSERT INTO group_items (group_id, issue_key, pinned) VALUES (?, 'DEMO-1', 1)",
+            (cursor.lastrowid,),
+        )
+        conn.commit()
+        assert db.migrate(conn) == db.SCHEMA_VERSION
+        row = conn.execute(
+            "SELECT name, detail_fields_json FROM groups WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+        assert dict(row) == {"name": "Filo", "detail_fields_json": None}
+        assert conn.execute(
+            "SELECT issue_key, pinned FROM group_items WHERE group_id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()["issue_key"] == "DEMO-1"
+    finally:
+        conn.close()
+
+
 def test_group_kind_is_constrained(conn):
     conn.execute(
         "INSERT INTO groups (name, kind, position) VALUES (?, ?, ?)", ("Manuel", "manual", 0)

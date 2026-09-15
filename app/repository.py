@@ -515,6 +515,10 @@ def update_group(conn: sqlite3.Connection, group_id: int, payload: dict[str, Any
     if "sort" in payload:
         updates["sort_json"] = _dump_sort(payload["sort"])
 
+    if "detail_fields" in payload:
+        updates["detail_fields_json"] = _dump_detail_fields(
+            payload["detail_fields"])
+
     if not updates:
         return group
 
@@ -2292,6 +2296,7 @@ def last_call_seen(conn: sqlite3.Connection) -> str:
 def _group_dict(row: sqlite3.Row) -> dict[str, Any]:
     columns = _loads(row["columns_json"])
     sort = _loads(row["sort_json"])
+    detail_fields = _loads(row["detail_fields_json"])
     return {
         "id": row["id"],
         "name": row["name"],
@@ -2300,6 +2305,8 @@ def _group_dict(row: sqlite3.Row) -> dict[str, Any]:
         "color": row["color"] or DEFAULT_COLOR,
         "columns": [str(item) for item in columns] if isinstance(columns, list) else [],
         "sort": sort if isinstance(sort, dict) else None,
+        "detail_fields": ([str(item) for item in detail_fields]
+                          if isinstance(detail_fields, list) else None),
         "position": row["position"],
         "created_at": row["created_at"],
         "count": row["item_count"] if "item_count" in row.keys() else 0,
@@ -2343,6 +2350,24 @@ def _dump_sort(sort: Any) -> str | None:
     if direction not in SORT_DIRECTIONS:
         raise RepositoryError("invalid_sort", "Sıralama yönü 'asc' ya da 'desc' olmalı.")
     return json.dumps({"field": field_id, "dir": direction}, ensure_ascii=False)
+
+
+def _dump_detail_fields(fields: Any) -> str | None:
+    if fields is None:
+        return None
+    if not isinstance(fields, list) or len(fields) > 10_000:
+        raise RepositoryError(
+            "invalid_detail_fields", "Detay alanları en fazla 10000 kimlikten oluşan liste olmalı.")
+    cleaned: list[str] = []
+    for item in fields:
+        if not isinstance(item, str):
+            raise RepositoryError("invalid_detail_fields", "Detay alan kimlikleri metin olmalı.")
+        field_id = item.strip()
+        if not field_id or len(field_id) > 200:
+            raise RepositoryError("invalid_detail_fields", "Detay alan kimliği geçersiz.")
+        if field_id not in cleaned:
+            cleaned.append(field_id)
+    return json.dumps(cleaned, ensure_ascii=False)
 
 
 def _loads(value: Any) -> Any:

@@ -62,6 +62,39 @@ def test_group_lifecycle(api_client):
     assert api_client.get("/api/groups").json()["groups"] == []
 
 
+def test_detail_fields_are_group_specific_and_null_differs_from_empty(api_client):
+    first = make_group(api_client, "Birinci")
+    second = make_group(api_client, "İkinci")
+    assert first["detail_fields"] is None
+    saved = api_client.put(
+        f"/api/groups/{first['id']}", json={"detail_fields": []})
+    assert saved.status_code == 200
+    assert saved.json()["group"]["detail_fields"] == []
+    assert api_client.get(
+        f"/api/groups/{second['id']}").json()["group"]["detail_fields"] is None
+    reset = api_client.put(
+        f"/api/groups/{first['id']}", json={"detail_fields": None})
+    assert reset.json()["group"]["detail_fields"] is None
+
+
+def test_detail_fields_validate_atomically_and_allow_large_jira_catalog(api_client):
+    group = make_group(api_client, "Değişmemeli")
+    fields = [f"customfield_{index}" for index in range(500)]
+    saved = api_client.put(
+        f"/api/groups/{group['id']}", json={"detail_fields": fields})
+    assert saved.status_code == 200
+    assert saved.json()["group"]["detail_fields"] == fields
+
+    invalid = api_client.put(
+        f"/api/groups/{group['id']}",
+        json={"name": "Yanlış", "detail_fields": ["summary", 7]},
+    )
+    assert invalid.status_code == 400
+    unchanged = api_client.get(f"/api/groups/{group['id']}").json()["group"]
+    assert unchanged["name"] == "Değişmemeli"
+    assert unchanged["detail_fields"] == fields
+
+
 def test_filter_group_needs_jql(api_client):
     response = api_client.post("/api/groups", json={"name": "Filtre", "kind": "filter"})
     assert response.status_code == 400

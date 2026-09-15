@@ -236,6 +236,7 @@ function showPlaceholder() {
 
 async function selectGroup(groupId, keepView) {
   const changing = state.activeId !== groupId;
+  if (changing && state.drawerKey) closeDrawer();
   // Arka planda tazeleme (keepView) gorev panosunu kapatmaz; grubu tiklamak kapatir.
   if (!keepView) {
     leaveTasks();
@@ -564,6 +565,7 @@ async function removeItem(key) {
 // --- detay cekmecesi ----------------------------------------------------
 
 async function openDrawer(key) {
+  const groupId = state.activeId;
   state.drawerKey = key;
   el("drawer-key").textContent = key;
   const body = el("drawer-body");
@@ -574,6 +576,7 @@ async function openDrawer(key) {
 
   try {
     const data = await api(`/api/issues/${encodeURIComponent(key)}`);
+    if (state.activeId !== groupId || state.drawerKey !== key) return;
     const link = el("drawer-link");
     link.hidden = !data.url;
     if (data.url) link.href = data.url;
@@ -584,8 +587,9 @@ async function openDrawer(key) {
     renderDrawerBody();
     // Teams bolumu ayri okunur: gecikirse kaydin alanlari beklemez.
     await loadTeams(key);
-    if (state.drawerKey === key) renderDrawerBody();
+    if (state.activeId === groupId && state.drawerKey === key) renderDrawerBody();
   } catch (err) {
+    if (state.activeId !== groupId || state.drawerKey !== key) return;
     state.drawerFields = [];
     state.drawerLocal = [];
     state.teams = null;
@@ -607,7 +611,9 @@ function renderDrawerBody() {
   }
   renderDrawerLocal(body);
   renderDrawerTeams(body);
+  const selected = state.group && state.group.detail_fields;
   (state.drawerFields || [])
+    .filter((item) => selected === null || selected === undefined || selected.includes(item.field))
     .filter((item) => state.drawerShowEmpty || !item.empty)
     .forEach((item) => {
       body.appendChild(
@@ -617,6 +623,144 @@ function renderDrawerBody() {
         ])
       );
     });
+}
+
+async function drawerFieldsModal() {
+  if (!state.group || !state.drawerKey) return;
+  const groupId = state.group.id;
+  const groupName = state.group.name;
+  const drawerKey = state.drawerKey;
+  const savedFields = state.group.detail_fields;
+  const loading = h("p", { class: "hint", text: "Alanlar okunuyor..." });
+  openModal(
+    "Detay alanları",
+    loading,
+    [{ label: "Vazgeç", onClick: closeModal }]
+  );
+  let jiraFields;
+  try {
+    jiraFields = (await api("/api/jira/fields")).fields;
+  } catch (err) {
+    if (el("modal").hidden || !loading.isConnected
+        || el("modal-body").firstChild !== loading) return;
+    closeModal();
+    fail(err);
+    return;
+  }
+  if (el("modal").hidden || !loading.isConnected
+      || el("modal-body").firstChild !== loading) return;
+  if (state.activeId !== groupId || state.drawerKey !== drawerKey) {
+    closeModal();
+    return;
+  }
+  const byId = new Map();
+  jiraFields.forEach((item) => {
+    byId.set(item.id, { id: item.id, name: item.name || item.id, kind: "jira" });
+  });
+  (state.drawerFields || []).forEach((item) => {
+    if (!byId.has(item.field)) {
+      byId.set(item.field, {
+        id: item.field, name: item.name || item.field, kind: "jira",
+      });
+    }
+  });
+  (state.drawerLocal || []).forEach((item) => {
+    byId.set(item.field, {
+      id: item.field, name: item.name || item.field, kind: "local",
+    });
+  });
+  (savedFields || []).forEach((id) => {
+    if (!byId.has(id)) {
+      byId.set(id, {
+        id, name: id, kind: id.startsWith("local:") ? "local" : "jira",
+      });
+    }
+  });
+  const available = Array.from(byId.values()).sort((a, b) =>
+    a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name, "tr")
+  );
+  let useDefault = savedFields === null || savedFields === undefined;
+  let chosen = new Set(useDefault ? available.map((item) => item.id) : savedFields);
+  const list = h("div", { class: "column-list" }, []);
+  const search = h("input", { type: "search", placeholder: "Alan ara" });
+  const status = h("p", { class: "hint" });
+
+  function render() {
+    clear(list);
+    const query = search.value.trim().toLocaleLowerCase("tr");
+    status.textContent = useDefault
+      ? "Varsayılan: tüm Jira ve yerel alanlar"
+      : `${chosen.size} alan seçili`;
+    let lastKind = null;
+    available.filter((item) =>
+      !query || `${item.name} ${item.id}`.toLocaleLowerCase("tr").includes(query)
+    ).forEach((item) => {
+      if (item.kind !== lastKind) {
+        list.appendChild(h("h3", {
+          text: item.kind === "local" ? "Yerel alanlar" : "Jira alanları",
+        }));
+        lastKind = item.kind;
+      }
+      const check = h("input", { type: "checkbox" });
+      check.checked = chosen.has(item.id);
+      check.addEventListener("change", () => {
+        useDefault = false;
+        if (check.checked) chosen.add(item.id);
+        else chosen.delete(item.id);
+        render();
+      });
+      list.appendChild(h("label", { class: "entry checkbox" }, [
+        check,
+        h("span", { text: `${item.name} (${item.id})` }),
+      ]));
+    });
+  }
+  search.addEventListener("input", render);
+  const body = h("div", {}, [
+    h("p", { class: "hint", text: `Filo: ${groupName}` }),
+    search,
+    h("div", { class: "toolbar" }, [
+      h("button", { text: "Tümü", onclick: () => {
+        useDefault = false;
+        chosen = new Set(available.map((item) => item.id));
+        render();
+      } }),
+      h("button", { text: "Hiçbiri", onclick: () => {
+        useDefault = false;
+        chosen = new Set();
+        render();
+      } }),
+      h("button", { text: "Varsayılana dön", onclick: () => {
+        useDefault = true;
+        chosen = new Set(available.map((item) => item.id));
+        render();
+      } }),
+    ]),
+    status,
+    list,
+  ]);
+  render();
+  openModal("Detay alanları", body, [
+    { label: "Vazgeç", onClick: closeModal },
+    { label: "Kaydet", kind: "primary", onClick: async () => {
+      const detailFields = useDefault ? null : Array.from(chosen);
+      try {
+        const data = await api(`/api/groups/${groupId}`, {
+          method: "PUT",
+          body: JSON.stringify({ detail_fields: detailFields }),
+        });
+        if (state.activeId === groupId && state.group && state.group.id === groupId) {
+          state.group = data.group;
+          const index = state.groups.findIndex((group) => group.id === groupId);
+          if (index >= 0) state.groups[index] = data.group;
+          renderDrawerBody();
+        }
+        closeModal();
+      } catch (err) {
+        fail(err);
+      }
+    } },
+  ]);
 }
 
 function closeDrawer() {
@@ -906,7 +1050,10 @@ function closeHistory() {
 // --- detay cekmecesindeki yerel bolum -----------------------------------
 
 function renderDrawerLocal(body) {
-  const items = state.drawerLocal || [];
+  const selected = state.group && state.group.detail_fields;
+  const items = (state.drawerLocal || []).filter(
+    (item) => selected === null || selected === undefined || selected.includes(item.field)
+  );
   if (!items.length) return;
   const key = state.drawerKey;
   const section = h("section", { class: "drawer-local" }, [
@@ -2599,6 +2746,7 @@ function bindEvents() {
   el("refresh-cancel").addEventListener("click", cancelRefresh);
   el("modal-close").addEventListener("click", closeModal);
   el("drawer-close").addEventListener("click", closeDrawer);
+  el("drawer-fields").addEventListener("click", drawerFieldsModal);
   el("drawer-empty").addEventListener("change", (event) => {
     state.drawerShowEmpty = event.target.checked;
     renderDrawerBody();

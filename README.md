@@ -219,6 +219,11 @@ Satıra tıklamak sağdan detay çekmecesini açar (`Esc` kapatır); anahtar sü
 kaydı Jira'da yeni sekmede açar. Yerel alan hücresine tıklamak çekmeceyi açmaz,
 hücreyi düzenlemeye alır.
 
+Detay çekmecesindeki **Alanları seç** düğmesi Jira ve yerel alanları arayıp
+seçmenizi sağlar. Seçim filo bazında saklanır; **Hiçbiri** bu iki alan grubunu
+gizler, **Varsayılana dön** hepsini yeniden gösterir. Değerler yalnız gizlenir,
+silinmez; Teams bölümü bu seçimden etkilenmez.
+
 ### Satır seçimi
 
 Grid'in ilk sütunu onay kutusudur; başlıktaki kutu **görünen** (süzülmüş)

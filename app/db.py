@@ -607,6 +607,11 @@ def _migration_0012_gamify(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migration_0013_group_detail_fields(conn: sqlite3.Connection) -> None:
+    """Jira detay alanı seçimini filo bazında, null=varsayılan tümü olarak saklar."""
+    _add_column(conn, "groups", "detail_fields_json", "TEXT")
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
@@ -621,6 +626,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (10, "mail send templates", _migration_0010_mail_send),
     (11, "teams call source", _migration_0011_call_source),
     (12, "gamify campaigns", _migration_0012_gamify),
+    (13, "group Jira detail fields", _migration_0013_group_detail_fields),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]
