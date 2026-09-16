@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.7.3** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.8.2** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -1099,6 +1099,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.8.2** | 16 Eylül 2026 | Yerel alan geçmişi popover'ı "Okunuyor..." yazısında takılı kalıyordu: `campaign.js` ile `app.js` aynı sayfada iki ayrı `renderHistory` tanımlıyordu, sonra yüklenen sefer sürümü diğerini eziyordu. Sefer sürümü `renderCampaignHistory` oldu; aynı sayfadaki betiklerde ad çakışmasını yasaklayan test eklendi |
 | **v0.8.1** | 12 Eylül 2026 | Sefer: geçmiş sefer silme, XP satırı silme (yeniden değerlendirme, iptal işareti yok), güç dengesi ve Denge rozeti kaldırıldı, rütbe ve rozet görselleri dairesel çerçevede |
 | **v0.8.0** | 12 Eylül 2026 | **Sefer**: bitiş tarihli XP kampanyası, ayarlanabilir kural motoru, hedefe oranlı rütbeler, 11 rozet, haftalık görev emirleri, iş günü serisi ve aylık Güç koruması, XP defteri (+ Excel, satır silme ve yeniden değerlendirme), geçmiş seferler (silinebilir), pazartesi "Holocron kaydı" |
 | **v0.7.3** | 12 Eylül 2026 | Toplantı katılımı: birleştirme anahtarı toplantı kimliği + gün (farklı gün/thread asla birleşmez), ad alanlı XML etiketleri, yeniden taramada eski sohbet kayıtlarının temizlenmesi |
