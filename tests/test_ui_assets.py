@@ -205,6 +205,8 @@ SCRIPTS = (
     "addressbox.js",
     "mailsend.js",
     "mailsend-settings.js",
+    "campaign.js",
+    "campaign-settings.js",
 )
 
 
@@ -278,6 +280,99 @@ def test_javascript_files_parse(api_client):
         path = STATIC / "js" / name
         result = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
         assert result.returncode == 0, f"{name}: {result.stderr}"
+
+
+def test_no_page_loads_two_scripts_with_the_same_global_name():
+    """Ayni sayfadaki iki betik ayni ust duzey adi tanimlamasin.
+
+    `campaign.js` `app.js`'ten sonra yuklendigi icin kendi `renderHistory`
+    fonksiyonu digerini eziyordu: yerel alan gecmisi popover'i "Okunuyor..."
+    yazisinda kaliyor, girdiler sessizce gizli sefer paneline cizilyordu.
+    Hata firlamadigi icin `openHistory`'nin catch'i de hic calismiyordu.
+    """
+    import re
+    from collections import defaultdict
+
+    declaration = re.compile(
+        r"^(?:async\s+)?(?:function|class)\s+([A-Za-z_$][\w$]*)"
+        r"|^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*="
+    )
+    for page in sorted(STATIC.glob("*.html")):
+        scripts = re.findall(r'<script src="/static/js/([^"]+)"', page.read_text(encoding="utf-8"))
+        seen: dict[str, list[str]] = defaultdict(list)
+        for name in scripts:
+            for line in (STATIC / "js" / name).read_text(encoding="utf-8").splitlines():
+                found = declaration.match(line)
+                if found:
+                    seen[found.group(1) or found.group(2)].append(name)
+        clashes = {key: files for key, files in seen.items() if len(files) > 1}
+        assert not clashes, f"{page.name}: {clashes}"
+
+
+def test_local_history_popover_renders_with_the_real_javascript():
+    """Saat ikonuna basinca popover gercekten dolsun: "Okunuyor..." kalmasin.
+
+    `openHistory` -> `renderHistory` zinciri sayfadaki butun betikler
+    yuklendikten sonraki global adlarla calistirilir; boylece ad cakismasi
+    tekrar olursa bu test duser.
+    """
+    import json
+    import re
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node yok")
+
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    scripts = [
+        name
+        for name in re.findall(r'<script src="/static/js/([^"]+)"', page)
+        if name in {"app.js", "campaign.js"}
+    ]
+    assert "app.js" in scripts and "campaign.js" in scripts
+
+    shim = r"""
+const nodes = {};
+const fakeNode = (id) => ({
+  id: id || "", hidden: false, style: {}, children: [], firstChild: null, textContent: "",
+  disabled: false, className: "",
+  classList: { add() {}, contains() { return false; } },
+  appendChild(child) { this.children.push(child); this.firstChild ||= child; return child; },
+  removeChild() { this.children.shift(); this.firstChild = this.children[0] || null; },
+  setAttribute() {}, addEventListener() {}, focus() {},
+  getBoundingClientRect() { return { left: 0, top: 0, bottom: 0, right: 0 }; },
+  text() { return this.children.map((kid) => kid.textContent || kid.text()).join(" "); },
+});
+globalThis.window = { innerWidth: 1200, innerHeight: 800, addEventListener() {} };
+globalThis.document = {
+  addEventListener() {}, createElement() { return fakeNode(); },
+  createTextNode(text) { return { textContent: text }; },
+  getElementById(id) { return (nodes[id] ||= fakeNode(id)); },
+};
+globalThis.api = async () => ({
+  entries: [
+    { id: 2, old_text: "müşteriye soruldu", new_text: "çözüldü", changed_at: "2026-01-02T10:00:00+00:00" },
+    { id: 1, old_text: "", new_text: "müşteriye soruldu", changed_at: "2026-01-01T09:00:00+00:00" },
+  ],
+});
+"""
+    probe = r"""
+(async () => {
+  await openHistory(document.getElementById("clock"), "DEMO-1", { id: 1, name: "Müşteri durumu" });
+  const body = document.getElementById("history-body");
+  process.stdout.write(JSON.stringify({ lines: body.children.length, text: body.text() }));
+})();
+"""
+    source = "\n".join((STATIC / "js" / name).read_text(encoding="utf-8") for name in scripts)
+    result = subprocess.run(
+        [node], input=shim + source + probe, capture_output=True, text=True, check=True
+    )
+    report = json.loads(result.stdout)
+    assert report["lines"] == 2, report
+    assert "Okunuyor" not in report["text"], report
+    assert "çözüldü" in report["text"], report
 
 
 def test_starfield_respects_the_motion_preference(api_client):

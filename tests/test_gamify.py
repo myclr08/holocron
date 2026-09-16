@@ -63,7 +63,7 @@ def test_migration_creates_the_campaign_tables(conn):
     assert {
         "campaigns", "xp_events", "xp_rules", "badges", "quests", "streaks"
     } <= db.table_names(conn)
-    assert db.SCHEMA_VERSION == 12
+    assert db.SCHEMA_VERSION == 13
 
 
 def test_rules_are_seeded_once(conn):
@@ -875,7 +875,7 @@ def test_campaign_script_covers_the_panel(api_client):
         "function renderWeek",
         "function renderBadgeWall",
         "function renderLedger",
-        "function renderHistory",
+        "function renderCampaignHistory",
         "function renderDigest",
         "function celebrateRank",
         "function startCampaign",

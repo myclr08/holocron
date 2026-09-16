@@ -94,7 +94,7 @@ function renderCampaign() {
     ? `${data.xp} / ${data.campaign.target_xp} XP`
     : "sefer yok";
 
-  renderHistory(data.history || []);
+  renderCampaignHistory(data.history || []);
   if (!running) {
     // Sefer yokken de geçmiş kartları görünür: "neyi bitirdim" sorusu durur.
     el("campaign-digest").hidden = true;
@@ -381,7 +381,7 @@ function exportLedger() {
 
 // --- geçmiş seferler -----------------------------------------------------
 
-function renderHistory(history) {
+function renderCampaignHistory(history) {
   const box = el("campaign-history");
   clear(box);
   if (!history.length) {
@@ -418,7 +418,7 @@ async function dropHistory(item) {
   try {
     const data = await api(`/api/campaign/history/${item.id}`, { method: "DELETE" });
     if (campaignState.data) campaignState.data.history = data.campaigns || [];
-    renderHistory(data.campaigns || []);
+    renderCampaignHistory(data.campaigns || []);
     toast("Sefer silindi", item.name, "ok");
   } catch (err) {
     fail(err);
