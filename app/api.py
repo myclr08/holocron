@@ -70,6 +70,8 @@ def heartbeat(request: Request) -> dict[str, Any]:
 @router.post("/shutdown")
 def shutdown(request: Request) -> dict[str, Any]:
     context = get_context(request)
+    # Kapanma sebebi logdan okunabilsin: dugme mi, nabiz kesilmesi mi.
+    log.info("Kapat dugmesi: kullanici kapatma istedi")
     context.heartbeat.request_stop()
     context.shutdown_hook()
     return {"ok": True, "message": "Holocron kapatılıyor."}

@@ -21,6 +21,25 @@ if /i "%~1"=="--console" set "CONSOLE=1"
 if /i "%~1"=="-c" set "CONSOLE=1"
 if /i "%~1"=="/console" set "CONSOLE=1"
 
+rem Cift baslatma korumasi: zaten calisan bir ornek varsa yeni surec acma,
+rem yalnizca tarayiciyi o adrese getir. (Argumanla calistirildiysa atlanir:
+rem --console ya da --port veren kullanici bilerek ikinci ornek istiyordur.)
+if not "%~1"=="" goto pick_python
+if not exist "%PORTFILE%" goto pick_python
+set "PORT="
+set /p PORT=<"%PORTFILE%"
+if not defined PORT goto pick_python
+call :probe_health %PORT%
+if not errorlevel 1 goto already_running
+rem Port dosyasi bayat: cevap yok, normal baslatmaya devam.
+goto pick_python
+
+:already_running
+echo [holocron] Zaten calisiyor: http://127.0.0.1:%PORT%/
+start "" "http://127.0.0.1:%PORT%/"
+goto :eof
+
+:pick_python
 if exist "python-embed\python.exe" goto run_embed
 if exist "%VENV_PY%" goto run_venv
 goto create_venv
@@ -100,11 +119,7 @@ if not exist "%PORTFILE%" goto have_port
 set /p PORT=<"%PORTFILE%"
 
 :have_port
-set "HEALTH=http://127.0.0.1:%PORT%/api/health"
-curl.exe -s -o nul --max-time 5 "%HEALTH%" >nul 2>&1
-if not errorlevel 1 goto started
-rem Windows 10 1803 oncesinde curl.exe yok; PowerShell yedegi.
-powershell -NoProfile -Command "try { $null = Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 '%HEALTH%' } catch { exit 1 }" >nul 2>&1
+call :probe_health %PORT%
 if not errorlevel 1 goto started
 goto start_failed
 
@@ -160,4 +175,15 @@ exit /b 1
 :deps_failed
 echo [holocron] Bagimliliklar kurulamadi.
 pause
+exit /b 1
+
+rem --- alt yordam: /api/health yoklamasi ---------------------------------
+rem Cagri: call :probe_health <port>. Donus: errorlevel 0 ise ayakta.
+:probe_health
+set "HEALTH=http://127.0.0.1:%~1/api/health"
+curl.exe -s -o nul --max-time 5 "%HEALTH%" >nul 2>&1
+if not errorlevel 1 exit /b 0
+rem Windows 10 1803 oncesinde curl.exe yok; PowerShell yedegi.
+powershell -NoProfile -Command "try { $null = Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 '%HEALTH%' } catch { exit 1 }" >nul 2>&1
+if not errorlevel 1 exit /b 0
 exit /b 1

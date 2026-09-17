@@ -97,7 +97,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--timeout",
         type=float,
         default=BEAT_TIMEOUT_SECONDS,
-        help="Nabiz kesilince kapanma suresi (saniye)",
+        help="Nabiz kesilince kapanma suresi (saniye, varsayilan 12 saat)",
     )
     # holocron.bat --console bunu oldugu gibi gecirir; burada ayrica log
     # ayrintisini artirir, hata ekranda da kalir.

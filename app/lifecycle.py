@@ -1,19 +1,30 @@
 """Nabiz takibi ve kendini kapatma.
 
-Arayuz her 30 saniyede bir nabiz gonderir. Tarayici sekmesi kapandiginda
-surecin arkada asili kalmamasi icin 5 dakika nabiz gelmezse kapanir.
+Arayuz her 30 saniyede bir nabiz gonderir. Zaman asimi bir is gunudur
+(12 saat): amac "sekme kapaninca hemen kapan" degil, "unutulmus surec gece
+boyu ayakta kalmasin".
+
+Once 5 dakikaydi ve kullaniciyi vuruyordu: Edge'in uyuyan sekmeleri, ekran
+kilidi ve arka plan sekme kisitlamasi zamanlayicilari tamamen durduruyor,
+uygulama kullanici baska bir ise bakarken kendini kapatiyordu. Sekme
+kapatildiginda hizli kapanmayi arayuzdeki "Kapat" dugmesi saglar.
+
 Saat disaridan verilebilir; testler beklemeden zaman ilerletir.
 """
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Callable
 
 BEAT_INTERVAL_SECONDS = 30
-BEAT_TIMEOUT_SECONDS = 300
+# Bir is gunu. --timeout ile degistirilebilir.
+BEAT_TIMEOUT_SECONDS = 12 * 60 * 60
 WATCHDOG_TICK_SECONDS = 5
+
+log = logging.getLogger("holocron.lifecycle")
 
 
 class Heartbeat:
@@ -91,6 +102,23 @@ class Watchdog:
 
     def _run(self) -> None:
         while not self._cancel.wait(self._tick):
-            if self._heartbeat.is_expired():
-                self._on_expire()
-                return
+            if not self._heartbeat.is_expired():
+                continue
+            self._log_reason()
+            self._on_expire()
+            return
+
+    def _log_reason(self) -> None:
+        """Kapanma sebebi loga ayirt edilebilir yazilsin.
+
+        Kullanici "uygulama kendi kendine kapandi" dediginde logdan hangisi
+        oldugu anlasilmali: "Kapat" dugmesi mi, yoksa nabiz kesilmesi mi.
+        """
+        if self._heartbeat.stop_requested:
+            log.info("Kapat dugmesi: kapaniliyor")
+            return
+        log.warning(
+            "nabiz %.0f sn'dir yok, zaman asimi %.0f sn: kapaniliyor",
+            self._heartbeat.seconds_since_beat(),
+            self._heartbeat.timeout,
+        )

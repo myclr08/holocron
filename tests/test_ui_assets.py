@@ -931,3 +931,104 @@ def test_the_search_folder_root_cannot_be_ticked(api_client):
     assert "selectable !== false" in script
     css = api_client.get("/static/css/app.css").text
     assert ".folder-row.is-virtual" in css
+
+
+# --- nabiz: dondurulan sekme uygulamayi oldurmesin ----------------------
+
+
+def test_heartbeat_chains_timeouts_and_wakes_with_the_tab(api_client):
+    """setInterval dondurulmus sekmede birikip patliyordu; zincir + uyanma olaylari."""
+    script = api_client.get("/static/js/common.js").text
+    assert "setInterval(" not in script  # yalnizca yorumda anilir
+    assert "scheduleHeartbeat" in script
+    for marker in (
+        'document.addEventListener("visibilitychange"',
+        'window.addEventListener("focus"',
+        'window.addEventListener("pageshow"',
+    ):
+        assert marker in script, marker
+    # Uyanan sekmede odak + gorunurluk birlikte gelir: tek istege insmeli.
+    assert "heartbeatInFlight" in script
+
+
+def test_server_gone_banner_text_and_style(api_client):
+    script = api_client.get("/static/js/common.js").text
+    assert "Holocron kapanmış görünüyor. holocron.bat ile yeniden başlatıp sayfayı yenileyin." in script
+    assert "HEARTBEAT_FAIL_LIMIT = 2" in script
+    css = api_client.get("/static/css/app.css").text
+    assert ".server-gone {" in css
+    assert "html.server-gone-open body" in css
+    assert "--offline-bar-height" in css
+
+
+def test_server_gone_banner_runs_in_the_real_javascript():
+    """Serit iki basarisiz nabizda cikar, sunucu donunce kalkar, kapatilabilir."""
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node yok")
+    script = (STATIC / "js" / "common.js").read_text(encoding="utf-8")
+    probe = r"""
+const fakeEl = (tag) => ({
+  tag, id: "", className: "", type: "", title: "", textContent: "", hidden: false,
+  children: [], attrs: {}, listeners: {},
+  appendChild(child) { this.children.push(child); return child; },
+  insertBefore(child) { this.children.unshift(child); return child; },
+  setAttribute(key, value) { this.attrs[key] = value; },
+  addEventListener(name, fn) { (this.listeners[name] = this.listeners[name] || []).push(fn); },
+});
+const made = [];
+const body = fakeEl("body");
+const classes = new Set();
+globalThis.document = {
+  body, hidden: false,
+  documentElement: { classList: {
+    add(name) { classes.add(name); }, remove(name) { classes.delete(name); },
+    contains(name) { return classes.has(name); }, toggle() {},
+  } },
+  createElement(tag) { const el = fakeEl(tag); made.push(el); return el; },
+  createElementNS(ns, tag) { return fakeEl(tag); },
+  getElementById(id) { return made.find((el) => el.id === id) || null; },
+  addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; },
+};
+globalThis.window = { addEventListener() {}, innerWidth: 1200 };
+let serverUp = false;
+globalThis.fetch = async () => {
+  if (!serverUp) throw new Error("baglanti yok");
+  return { ok: true, json: async () => ({ ok: true }) };
+};
+async function probe() {
+  const shown = () => {
+    const bar = document.getElementById("server-gone");
+    return !!bar && bar.hidden === false && classes.has("server-gone-open");
+  };
+  const steps = [];
+  await beat();
+  steps.push(shown());            // 1. hata: serit yok
+  await beat();
+  steps.push(shown());            // 2. hata: serit var
+  serverUp = true;
+  await beat();
+  steps.push(shown());            // sunucu dondu: serit kalkti
+  serverUp = false;
+  await beat();
+  await beat();
+  steps.push(shown());            // yine dustu: serit geri geldi
+  const bar = document.getElementById("server-gone");
+  bar.children.find((child) => child.tag === "button").listeners.click[0]();
+  steps.push(shown());            // kullanici kapatti
+  await beat();
+  steps.push(shown());            // kapatilan serit geri gelmez
+  stopHeartbeat();
+  process.stdout.write(JSON.stringify(steps));
+}
+probe();
+"""
+    setup, exercise = probe.split("async function probe", 1)
+    result = subprocess.run(
+        [node], input=setup + script + "\nasync function probe" + exercise,
+        capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == [False, True, False, True, False, False]

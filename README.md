@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.8.2** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.8.3** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -97,8 +97,15 @@ python3 -m venv .venv
 ### Çalıştırma seçenekleri
 
 Uygulama boş bir port bulur (tercihen 8765), varsayılan tarayıcıyı açar ve
-adresi konsola yazar. Sekme kapatılıp beş dakika nabız gelmezse süreç kendini
-kapatır; arayüzdeki **Kapat** düğmesi de aynı işi anında yapar.
+adresi konsola yazar. Açık sekme her 30 saniyede bir nabız gönderir; **on iki
+saat** hiç nabız gelmezse süreç kendini kapatır. Bu süre "sekmeyi kapatınca
+hemen kapansın" için değil, "unutulmuş bir süreç gece boyu ayakta kalmasın"
+içindir — işiniz bitince arayüzdeki **Kapat** düğmesi süreci anında bitirir.
+Başka bir süre isterseniz `--timeout` saniye cinsinden verilir.
+
+Başlatıcıyı ikinci kez çalıştırırsanız yeni bir süreç açılmaz: çalışan örnek
+`holocron.port` dosyasından bulunur, sağlığı yoklanır ve yalnızca tarayıcı o
+adrese getirilir ("Zaten calisiyor: http://127.0.0.1:8765/").
 
 ```bash
 ./holocron.sh --port 8765     # sabit port
@@ -889,6 +896,21 @@ Uygulama kendisi boş bir port seçer ve seçtiğini `holocron.port` dosyasına
 yazar; başlatıcı sağlık yoklamasında o dosyayı okur. Sabit port isterseniz
 `--port` verin. Çalışan adres log dosyasının ilk satırında da yazılıdır.
 
+### Uygulama bir süre sonra kendiliğinden kapandı
+
+Sekmeye dönünce sayfanın tepesinde "Holocron kapanmış görünüyor" şeridi
+varsa süreç gerçekten kapanmıştır: `holocron.bat` ile yeniden başlatıp sayfayı
+yenileyin. Sebebi `holocron.log` dosyasında yazar:
+
+- `nabiz ... sn'dir yok, zaman asimi ... sn: kapaniliyor` — on iki saat boyunca
+  hiçbir sekme nabız göndermemiş. Sekmeyi kapattıysanız beklenen davranış.
+- `Kapat dugmesi: kapaniliyor` — arayüzdeki **Kapat** düğmesine basılmış.
+
+v0.8.3'ten önce zaman aşımı beş dakikaydı ve tarayıcı arka plandaki sekmeyi
+dondurduğunda (Edge'in uyuyan sekmeleri, ekran kilidi, uzun süre başka
+sekmede çalışmak) nabız kesildiği için uygulama siz kullanırken kapanıyordu.
+Şimdi süre on iki saat ve sekme her görünür olduğunda anında bir nabız gider.
+
 ### Tarayıcı açılmıyor ama uygulama çalışıyor
 
 Log dosyasındaki adresi (`http://127.0.0.1:<port>/`) elle açın. Windows'ta
@@ -1099,6 +1121,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.8.3** | 17 Eylül 2026 | Uygulama bir süre sonra kendiliğinden kapanıyordu: tarayıcı arka plandaki sekmenin zamanlayıcılarını dondurunca (Edge uyuyan sekmeler, ekran kilidi) nabız kesiliyor, beş dakikalık zaman aşımı dolup süreç kapanıyordu. Zaman aşımı 12 saat oldu, nabız `setInterval` yerine zincirleme `setTimeout` ile atılıyor ve sekme görünür olunca / pencere odaklanınca anında bir nabız gidiyor. Sunucuya iki kez ulaşılamazsa sayfanın tepesinde kapatılabilir bir şerit çıkar, sunucu dönünce kendiliğinden kalkar. Başlatıcılar çalışan örneği bulup yalnızca tarayıcıyı açar; kapanma sebebi loga ayırt edilebilir yazılır |
 | **v0.8.2** | 16 Eylül 2026 | Yerel alan geçmişi popover'ı "Okunuyor..." yazısında takılı kalıyordu: `campaign.js` ile `app.js` aynı sayfada iki ayrı `renderHistory` tanımlıyordu, sonra yüklenen sefer sürümü diğerini eziyordu. Sefer sürümü `renderCampaignHistory` oldu; aynı sayfadaki betiklerde ad çakışmasını yasaklayan test eklendi |
 | **v0.8.1** | 12 Eylül 2026 | Sefer: geçmiş sefer silme, XP satırı silme (yeniden değerlendirme, iptal işareti yok), güç dengesi ve Denge rozeti kaldırıldı, rütbe ve rozet görselleri dairesel çerçevede |
 | **v0.8.0** | 12 Eylül 2026 | **Sefer**: bitiş tarihli XP kampanyası, ayarlanabilir kural motoru, hedefe oranlı rütbeler, 11 rozet, haftalık görev emirleri, iş günü serisi ve aylık Güç koruması, XP defteri (+ Excel, satır silme ve yeniden değerlendirme), geçmiş seferler (silinebilir), pazartesi "Holocron kaydı" |

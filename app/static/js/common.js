@@ -1,5 +1,9 @@
 // Ortak yardimcilar: API cagrisi, nabiz, kapatma, ikonlar, gorunum tercihleri.
 const HEARTBEAT_INTERVAL_MS = 30000;
+// Sunucuya ulasilamiyorken daha sik denenir: geri geldiginde serit hemen kalksin.
+const HEARTBEAT_RETRY_MS = 5000;
+// Kac art arda basarisiz nabizdan sonra "sunucu gitti" deriz.
+const HEARTBEAT_FAIL_LIMIT = 2;
 
 // Emoji yerine kendi cizdigimiz ince cizgi ikonlar (14px, currentColor).
 const ICON_SHAPES = {
@@ -111,16 +115,125 @@ async function api(path, options = {}) {
   return payload;
 }
 
+// --- nabiz -------------------------------------------------------------
+//
+// Nabiz `setInterval` ile atiliyordu ve bu, dondurulan sekmelerde uygulamayi
+// olduruyordu: Edge'in uyuyan sekmeleri, ekran kilidi ve arka plan sekme
+// kisitlamasi zamanlayiciyi tamamen durduruyor, sunucu nabiz gelmedi diye
+// kendini kapatiyordu. Uc degisiklik:
+//
+// 1. Zincirleme `setTimeout`: donmus sekme uyaninca birikmis cagrilar tek
+//    seferde patlamaz, bir sonraki nabiz her zaman oncekinin bitisinden sayilir.
+// 2. Sekme gorunur olunca / pencere odaklaninca / geri tusuyla donulunce
+//    aninda nabiz: kullanici sayfaya dondugu anda sunucu bunu bilir.
+// 3. Ust uste basarisiz nabizda serit: sunucu gercekten kapandiysa sayfa
+//    sessiz kalmaz.
+
+let heartbeatTimer = null;
+let heartbeatInFlight = false;
+let heartbeatStopped = false;
+let heartbeatFailures = 0;
+let serverGoneDismissed = false;
+
+function scheduleHeartbeat(delayMs) {
+  if (heartbeatTimer !== null) clearTimeout(heartbeatTimer);
+  heartbeatTimer = setTimeout(() => {
+    heartbeatTimer = null;
+    beat();
+  }, delayMs);
+}
+
+async function beat() {
+  // Ayni anda iki istek olmasin: uyanan sekmede odak + gorunurluk birlikte gelir.
+  if (heartbeatStopped || heartbeatInFlight) return;
+  heartbeatInFlight = true;
+  try {
+    const response = await fetch("/api/heartbeat", { method: "POST", cache: "no-store" });
+    if (!response.ok) throw new Error("heartbeat " + response.status);
+    heartbeatFailures = 0;
+    setServerGone(false);
+  } catch (err) {
+    heartbeatFailures += 1;
+    if (heartbeatFailures >= HEARTBEAT_FAIL_LIMIT) setServerGone(true);
+  } finally {
+    heartbeatInFlight = false;
+    if (!heartbeatStopped) {
+      scheduleHeartbeat(heartbeatFailures ? HEARTBEAT_RETRY_MS : HEARTBEAT_INTERVAL_MS);
+    }
+  }
+}
+
+/** "Kapat" sonrasi nabiz susar: kapanmayi biz istedik, serit cikmasin. */
+function stopHeartbeat() {
+  heartbeatStopped = true;
+  if (heartbeatTimer !== null) clearTimeout(heartbeatTimer);
+  heartbeatTimer = null;
+}
+
 function startHeartbeat() {
-  const beat = () => {
-    fetch("/api/heartbeat", { method: "POST" }).catch(() => {});
-  };
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) beat();
+  });
+  window.addEventListener("focus", () => beat());
+  // Geri/ileri onbelleginden donen sayfa: hic olay almadan canlanir.
+  window.addEventListener("pageshow", () => beat());
   beat();
-  setInterval(beat, HEARTBEAT_INTERVAL_MS);
+}
+
+/** "Sunucu kapanmis" seridi: kalici ama kapatilabilir, sunucu donunce kalkar. */
+function serverGoneBanner() {
+  let bar = document.getElementById("server-gone");
+  if (bar) return bar;
+  bar = document.createElement("div");
+  bar.id = "server-gone";
+  bar.className = "server-gone";
+  bar.setAttribute("role", "alert");
+  bar.hidden = true;
+
+  const text = document.createElement("span");
+  text.className = "server-gone-text";
+  text.textContent =
+    "Holocron kapanmış görünüyor. holocron.bat ile yeniden başlatıp sayfayı yenileyin.";
+
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "server-gone-close";
+  close.title = "Şeridi kapat";
+  close.setAttribute("aria-label", "Şeridi kapat");
+  close.textContent = "✕";
+  close.addEventListener("click", () => {
+    serverGoneDismissed = true;
+    hideServerGone(bar);
+  });
+
+  bar.appendChild(text);
+  bar.appendChild(close);
+  document.body.insertBefore(bar, document.body.firstChild);
+  return bar;
+}
+
+function hideServerGone(bar) {
+  bar.hidden = true;
+  document.documentElement.classList.remove("server-gone-open");
+}
+
+function setServerGone(gone) {
+  if (!gone) {
+    // Sunucu geri geldi: serit kalkar, kapatma tercihi de sifirlanir.
+    serverGoneDismissed = false;
+    const bar = document.getElementById("server-gone");
+    if (bar) hideServerGone(bar);
+    return;
+  }
+  if (serverGoneDismissed) return;
+  const bar = serverGoneBanner();
+  bar.hidden = false;
+  document.documentElement.classList.add("server-gone-open");
 }
 
 async function shutdown() {
   if (!confirm("Holocron kapatılsın mı?")) return;
+  stopHeartbeat();
   try {
     await api("/api/shutdown", { method: "POST" });
   } catch (err) {

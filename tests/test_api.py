@@ -40,12 +40,17 @@ def test_heartbeat_resets_timer(api_client, context):
     assert context.heartbeat.seconds_since_beat() < 1
 
 
-def test_shutdown_marks_stop_and_calls_hook(api_client, context):
+def test_shutdown_marks_stop_and_calls_hook(api_client, context, caplog):
+    import logging
+
     called = []
     context.shutdown_hook = lambda: called.append(True)
-    assert api_client.post("/api/shutdown").json()["ok"] is True
+    with caplog.at_level(logging.INFO, logger="holocron.api"):
+        assert api_client.post("/api/shutdown").json()["ok"] is True
     assert context.heartbeat.stop_requested is True
     assert called == [True]
+    # Loga sebep dussun: kullanici "kendi kendine kapandi" derse ayirt edilebilsin.
+    assert "Kapat dugmesi" in "\n".join(r.getMessage() for r in caplog.records)
 
 
 def test_settings_round_trip_hides_secret(api_client):

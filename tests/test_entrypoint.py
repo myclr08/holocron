@@ -194,6 +194,53 @@ def test_run_entrypoint_puts_its_own_folder_on_the_path():
     assert "from app.__main__ import main" in source
 
 
+# --- cift baslatma korumasi ---------------------------------------------
+
+
+def test_windows_launcher_opens_the_running_instance_instead_of_a_second_one():
+    """Ikinci cift tiklama yeni surec acmasin: port dosyasi + /api/health."""
+    text = BAT.read_text(encoding="utf-8")
+    assert ":already_running" in text
+    assert "[holocron] Zaten calisiyor: http://127.0.0.1:%PORT%/" in text
+    guard = text.split(":already_running", 1)[0]
+    # Koruma Python secilmeden once calismali.
+    assert guard.index("call :probe_health") < text.index("\n:pick_python")
+    assert 'if not exist "%PORTFILE%" goto pick_python' in guard
+    # Argumanla calistirildiysa (--console, --port) koruma atlanir.
+    assert 'if not "%~1"=="" goto pick_python' in guard
+    # Bayat port dosyasi baslatmayi engellemesin.
+    assert guard.count("goto pick_python") >= 4
+
+
+def test_windows_launcher_probes_health_from_one_place():
+    text = BAT.read_text(encoding="utf-8")
+    assert ":probe_health" in text
+    assert text.count("\ncall :probe_health") == 2  # yorumdaki kullanim sayilmaz
+    probe = text.split(":probe_health", 2)[2]
+    assert "curl.exe" in probe
+    assert "Invoke-WebRequest" in probe
+    assert "exit /b 0" in probe and "exit /b 1" in probe
+    text.encode("ascii")
+
+
+def test_shell_launcher_also_opens_the_running_instance():
+    text = SH.read_text(encoding="utf-8")
+    assert "probe_health()" in text
+    assert "holocron.port" in text
+    assert "[holocron] Zaten calisiyor: $RUNNING_URL" in text
+    # Arguman verildiyse koruma atlanir; yoklayacak arac yoksa da engellemez.
+    assert '[ "$#" -eq 0 ]' in text
+    assert "xdg-open" in text
+
+
+def test_readme_documents_the_self_shutdown_reason():
+    """Kullanici "kendiliginden kapandi" dediginde belgede karsiligi olsun."""
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "### Uygulama bir süre sonra kendiliğinden kapandı" in text
+    assert "nabiz ... sn'dir yok" in text
+    assert "Kapat dugmesi: kapaniliyor" in text
+
+
 def test_readme_documents_the_troubleshooting_path():
     """Sessiz cokmenin cevabi belgede olmazsa kimse --console'u bulamaz."""
     text = (ROOT / "README.md").read_text(encoding="utf-8")

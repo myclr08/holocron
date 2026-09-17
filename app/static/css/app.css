@@ -102,6 +102,7 @@
   --gap: 16px;
   --sidebar-width: 264px;
   --header-height: 58px;
+  --offline-bar-height: 34px;
   --ease: cubic-bezier(.2, .8, .2, 1);
   --speed: 170ms;
   --shadow: 0 18px 48px rgba(0, 0, 0, .55);
@@ -1005,6 +1006,56 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 
 .column-list .entry.derived { padding-left: 22px; }
 .column-list .entry.derived .name { color: var(--muted); }
+
+/* --- sunucu gitti seridi -------------------------------------------------
+   Nabiz ust uste basarisiz olunca sayfanin tepesine oturur: sunucu kapandiysa
+   ekran sessizce olu kalmasin. Kapatilabilir, sunucu geri gelince kendi kalkar. */
+
+.server-gone {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--offline-bar-height);
+  padding: 7px 14px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--saber-red);
+  box-shadow: 0 0 22px var(--saber-red-glow);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.server-gone::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--saber-red);
+  box-shadow: 0 0 10px var(--saber-red-glow);
+}
+
+.server-gone-text { flex: 1 1 auto; }
+
+.server-gone-close {
+  flex: none;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  padding: 0 4px;
+}
+
+.server-gone-close:hover { color: var(--text); }
+
+/* Serit acikken sayfa asagi kayar: ust cubuk altinda kalmasin. */
+html.server-gone-open body {
+  box-sizing: border-box;
+  padding-top: var(--offline-bar-height);
+}
 
 /* --- balonlar ----------------------------------------------------------- */
 

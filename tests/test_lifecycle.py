@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 
 from app.lifecycle import (
@@ -25,7 +26,10 @@ class FakeClock:
 
 def test_defaults_match_product_rules():
     assert BEAT_INTERVAL_SECONDS == 30
-    assert BEAT_TIMEOUT_SECONDS == 300
+    # Bir is gunu: amac "sekme kapaninca hemen kapan" degil, "unutulmus surec
+    # gece boyu ayakta kalmasin". Kisa zaman asimi (5 dk) dondurulmus sekmede
+    # uygulamayi kullanici calisirken olduruyordu.
+    assert BEAT_TIMEOUT_SECONDS == 12 * 60 * 60
 
 
 def test_fresh_heartbeat_is_alive():
@@ -98,3 +102,51 @@ def test_watchdog_stops_without_firing():
     watchdog.stop()
     clock.advance(999)
     assert fired.wait(0.1) is False
+
+
+def test_timeout_is_long_enough_for_a_frozen_tab():
+    """Edge uyuyan sekmede zamanlayiciyi saatlerce durdurabiliyor."""
+    clock = FakeClock()
+    beat = Heartbeat(clock=clock)
+    clock.advance(4 * 60 * 60)  # dort saat kilitli ekran
+    assert beat.is_expired() is False
+
+
+def test_watchdog_logs_why_it_closed(caplog):
+    clock = FakeClock()
+    beat = Heartbeat(timeout=300, clock=clock)
+    fired = threading.Event()
+
+    watchdog = Watchdog(beat, fired.set, tick=0.01)
+    with caplog.at_level(logging.INFO, logger="holocron.lifecycle"):
+        watchdog.start()
+        try:
+            clock.advance(400)
+            assert fired.wait(1.0) is True
+        finally:
+            watchdog.stop()
+
+    message = "\n".join(record.getMessage() for record in caplog.records)
+    assert "nabiz 400 sn'dir yok" in message
+    assert "zaman asimi 300 sn" in message
+    assert "kapaniliyor" in message
+
+
+def test_watchdog_separates_the_close_button_from_a_dead_heartbeat(caplog):
+    """Logdan hangisi oldugu anlasilmali: dugme mi, nabiz kesilmesi mi."""
+    clock = FakeClock()
+    beat = Heartbeat(timeout=300, clock=clock)
+    fired = threading.Event()
+
+    watchdog = Watchdog(beat, fired.set, tick=0.01)
+    with caplog.at_level(logging.INFO, logger="holocron.lifecycle"):
+        watchdog.start()
+        try:
+            beat.request_stop()
+            assert fired.wait(1.0) is True
+        finally:
+            watchdog.stop()
+
+    message = "\n".join(record.getMessage() for record in caplog.records)
+    assert "Kapat dugmesi" in message
+    assert "nabiz" not in message
