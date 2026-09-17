@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.8.3** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.9.0** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -551,10 +551,13 @@ vardır), Linux zip'ine alınmaz. Ayrı bir `pywin32_postinstall` adımı
 
 Sol kenarda, **Görevlerim**'in altında duran **Teams Aramalar**, Teams
 istemcisinin *Aramalar → Geçmiş* ekranında zaten gördüğünüz **kendi** arama
-geçmişinizi yerelde tablo ve istatistik olarak gösterir.
+geçmişinizi yerelde tablo ve istatistik olarak gösterir. Yalnız iki tür vardır:
+**birebir** ve **grup** aramaları. (v0.9.0'da toplantı kavramı tümden kaldırıldı:
+takvim eşleşmesi de toplantı sohbetinden katılım türetme de düzgün
+çalışmıyordu, ikisi de koddan, veritabanından ve ekrandan çıktı.)
 
-> **Nereden okur.** Yeni Teams, sohbet/arama/takvim verisini kendi makinenizde
-> bir Chromium **IndexedDB** klasöründe tutar:
+> **Nereden okur.** Yeni Teams, sohbet/arama verisini kendi makinenizde bir
+> Chromium **IndexedDB** klasöründe tutar:
 > `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView\WV2Profile_tfw\IndexedDB\https_teams.microsoft.com_0.indexeddb.leveldb`
 > (yanındaki `.blob` klasörüyle birlikte). Holocron o klasörü
 > **okur** — ağa çıkmaz, Graph API kullanmaz, izin istemez, hiçbir şey
@@ -572,128 +575,80 @@ Nasıl çalışır:
   okunur (okuyucu salt okuma yapar, Teams'in verisine dokunmaz); o da
   başarısız olursa kopyadan okunan sonuç bir uyarıyla birlikte gelir.
   Özet balonu kaç kayıt okunduğunu, **en yeni aramanın tarihini**, kaçının yeni
-  olduğunu, kaç toplantının eşleştiğini ve okumanın kaç saniye sürdüğünü
+  olduğunu, kaç grup araması bulunduğunu ve okumanın kaç saniye sürdüğünü
   söyler. Aynı önbelleği ikinci kez taramak kopya oluşturmaz: tekilleştirme
   `callId` üzerindendir; silinmiş (`isDeleted`) kayıtlar hiç alınmaz.
-- **Takvimden katıldığınız toplantılar.** `call-history` yalnızca
-  *başlattığınız ya da size gelen* aramaları tutar; takvimden katıldığınız
-  planlı toplantılar orada hiç geçmez. Onlar **toplantı sohbetinden** gelir:
-  Teams her toplantı bitiminde sohbete `<partlist type="ended">` bloklu bir
-  sistem mesajı yazar ve içinde **kişi başına saniye** vardır. Holocron o
-  bloktan kendi katılımınızı çıkarır — süreniz *sizin* `duration`'ınızdır,
-  listede **sohbetten** rozetiyle görünür. **Katılmadığınız toplantı kayıt
-  üretmez**: katılımcı listesinde yoksanız ya da süreniz yazmıyorsa satır
-  oluşmaz — yedek olarak "toplantının en uzun katılımı" kullanılmaz, bu
-  katılmadığınız toplantıların listelenmesine yol açıyordu. Kimliğiniz listede
-  `8:orgid:<guid>` yerine `8:<guid>` ya da farklı harf büyüklüğüyle geçse de
-  tanınır; **aynı gün aynı toplantıya** yeniden katılmanın parçaları tek
-  kayıtta **toplanır** (farklı gün ya da farklı sohbet asla birleşmez:
-  birleştirme anahtarı `callid`/sohbet/`icaluid` **artı gün**, hiçbir koşulda
-  boş kalmaz); her yeni tarama sohbetten gelen kayıtları yeniden üretir ve
-  artık üretilmeyen eskilerini siler (arama geçmişi kayıtlarına dokunmaz);
-  `<partlist>` taşıyan her mesaj adaydır (tür alanının `Event/Call` olması
-  şart değil). Aynı arama zaten arama geçmişinde varsa ikinci kayıt oluşmaz.
-
-  Mesajın yapısı iki biçimde geliyor: eskisi olay türünü `type="ended"`
-  özniteliğinde, yenisi `<calleventtype>` elemanında taşır; ikisi de okunur.
-  Yeni biçimdeki `<meetingdetails>` bloğu toplantının `icaluid` değerini de
-  veriyor — takvim eşleşmesinin **en kesin yolu** budur, thread kimliğinden
-  önce denenir. Türü yazmayan bloklarda süre varsa toplantı bitmiş sayılır,
-  süre yoksa mesaj atlanır ("başladı" mesajı katılım bilgisi taşımaz).
-
-  Kendi kimliğiniz **veritabanı adından** okunur
-  (`Teams:<rol>:react-web-client:<kiracı>:<kullanıcı>:<dil>`), olmazsa kendi
-  gönderdiğiniz bir mesajın `creator` alanından; **Ayarlar → Teams → Kendi
-  Teams kimliğim** alanına elle de yazabilirsiniz (ayar her ikisini de ezer).
-  Kimlik bulunamazsa sohbetten gelen toplantı hiç eklenmez. Pencere son
-  90 gündür.
 - **Ne okunur.** Önbellekte yüzden fazla veritabanı var; Holocron yalnızca
-  **beşini** açar — `call-history-manager` (aramalar), `calendar`
-  (toplantılar), `profiles` (kimlik → ad), `conversation-manager` (grup
-  sohbetlerinin adı) ve `replychain-manager` (toplantı katılımı; 270 bin
-  kaydın içinden yalnız `19:meeting_` ile başlayan sohbetler açılır). Seçim veritabanı adının ikinci segmentiyle **tam**
-  eşleşir, böylece `call-history-sync-state-manager` gibi kardeşler hiç
-  açılmaz. Alan değerleri büyük/küçük harfe duyarsız okunur (`twoParty` /
-  `TwoParty`) ve `bytes` olarak gelen adlar (Teams bazı dizgeleri öyle yazar)
-  çözülür.
-- **Tür.** `twoParty` **birebir** görüşmedir. `multiParty` ise takvimle
-  eşleşiyorsa **toplantı** (konu ve organizatör oradan gelir), eşleşmiyorsa
-  **grup araması** sayılır. Eşleşme iki yoldan denenir: önce **kesin** yol —
-  aramanın `threadId` değeri takvim kaydının `skypeTeamsDataObj.cid` alanına
-  (ya da toplantı bağlantısına) denk geliyorsa saat hiç hesaba katılmaz —
-  sonra ± 10 dakikalık zaman yakınlığı. **Tekrarlayan toplantılar** (sabah
-  daily'leri) takvimde çoğu zaman yalnız *seri kaydı* olarak durur,
-  oluşumları ayrı kayıt değildir: bu yüzden seri kaydı — iptal edilmiş olsa
-  bile — **kimlik eşleşmesinde adaydır**, zaman eşleşmesine ise hiç girmez
-  (tarihi serinin ilk günüdür). "Ofiste değilim" hiçbir yolda eşleşmez.
-  Özet balonu kaç toplantının eşleştiğini ve kaçının tekrarlayan seriden
-  geldiğini ayrı ayrı söyler.
-- **Grup sohbetleri.** Aramanın `groupChatThreadId` değeri bir sohbete
-  denk geliyorsa başlık o sohbetin **kendi adı** olur ("Grup araması" yerine
-  "Proje ekibi"); katılımcı listesi boşsa sohbetin üyeleri yedeğe geçer.
-- **Saatler.** Takvim kayıtlarındaki saat alanları saat dilimi taşımaz ama
-  değerleri **UTC**'dir; Holocron bunları UTC kabul edip ekranda yerel saate
-  çevirir. (Yerel saat sayıldıklarında bütün takvim UTC farkı kadar kayıyor,
-  10:00'daki toplantı 07:00 görünüyor ve ± 10 dakikalık eşleşme hiç
-  tutmuyordu.)
-- **Katılanlar ve davetliler ayrıdır.** Aramaya gerçekten katılanlar arama
-  kaydının `participantList` alanından, davetliler ise takvim kaydının
-  `attendees` alanından gelir; çekmecede ve Excel'de iki ayrı başlıktır.
+  **ikisini** açar — `call-history-manager` (aramalar) ve `profiles`
+  (kimlik → ad). Seçim veritabanı adının ikinci segmentiyle **tam** eşleşir,
+  böylece `call-history-sync-state-manager` gibi kardeşler hiç açılmaz. Takvim
+  (`calendar`), sohbet (`conversation-manager`) ve toplantı sohbeti
+  (`replychain-manager`) veritabanları **artık hiç açılmaz**. Alan değerleri
+  büyük/küçük harfe duyarsız okunur (`twoParty` / `TwoParty`) ve `bytes`
+  olarak gelen adlar (Teams bazı dizgeleri öyle yazar) çözülür.
+- **Tür kuralı (birebir / grup).** `twoParty` **birebir**, `multiParty`
+  **grup** aramasıdır. Alan boşsa ya da tanınmayan bir değer taşıyorsa
+  katılımcı sayısına bakılır: **kendim hariç katılımcı birden fazlaysa grup**,
+  değilse birebir. Kendi kimliğiniz bilinmiyorsa kimse elenemez; o durumda
+  listenin kendisi sayılır (birebir aramada iki kişi vardır: siz ve karşı
+  taraf). Kendi kimliğiniz önbellekteki veritabanı adından
+  (`Teams:<rol>:react-web-client:<kiracı>:<kullanıcı>:<dil>`) türetilir ve
+  taramada saklanır; **Ayarlar → Teams → Kendi Teams kimliğim** alanına elle
+  yazarsanız ayar her zaman öne geçer.
+- **Gruplar katılımcı kümesidir.** Bir grubun kimliği **kendiniz hariç
+  katılımcıların sıralanmış kümesidir**: aynı kişilerle yapılan bütün grup
+  aramaları — hangi sohbetten başlatılmış olursa olsun — tek satırda toplanır.
+  Sohbet kimliği (`threadId` / `groupChatThreadId`) gruplamada kullanılmaz ve
+  grup adı önbellekten **aranmaz**: etiket katılımcı adlarından türer
+  ("Ali, Veli, Ayşe +2", adlar alfabetik sırada), tam liste satırın altında ve
+  ipucunda durur. Katılımcısı hiç kaydedilmemiş bir grup araması listede
+  "Grup araması" olarak görünür ama Gruplar sekmesine girmez (kimliği yoktur).
 - **Süre.** Kayıtta `durationInMs` varsa o, yoksa *bitiş − bağlanma*, o da
   yoksa *bitiş − başlangıç*. Kaçırılan ve reddedilen aramanın süresi yoktur;
   bunlar **temas süresine girmez**, ayrı sayılır.
 - **Karşı taraf.** Gelen aramada arayan, giden aramada aranan. Ad, Teams'in
   profil/kişi store'larından çözülür; çözülemezse kaydın kendi adı kullanılır.
   Bir kişiyle bir kez birebir görüştüyseniz adı, sonraki grup aramalarının
-  başlığında da çıkar (ad sözlüğü kayıtlı satırlardan yeniden kurulur).
-- **İstatistik şeridi.** En çok görüşülen beş kişi (yalnız birebir), üç dilim
-  (toplantı / grup / birebir — yüzde ve saat), aradım/arandım (bağlanan sayı
-  ve süre, kaçırılan ve reddedilen ayrı), toplam temas süresi ve **iş günü
-  başına ortalama** + en yoğun gün. İş günü Pazartesi-Cuma sayılır, resmî
-  tatiller düşülmez.
-- **Kim görünür.** Birebir görüşmede karşı tarafın adı yazar. Çok kişili
-  aramada "karşı taraf" diye bir şey yoktur: toplantıda **konu**, grup
-  aramasında **katılımcı adları** (en fazla üç ad, kalanı `+N`), katılımcı
-  kaydedilmemişse "Grup araması" görünür. Adı çözülemeyen bir kimlik hiçbir
-  yerde ham gösterilmez; "Bilinmeyen kişi (son altı hane)" yazar. Arama
-  kutusu katılımcı adlarında da arar.
+  etiketinde de çıkar (ad sözlüğü kayıtlı satırlardan yeniden kurulur). Adı
+  çözülemeyen bir kimlik hiçbir yerde ham gösterilmez; "Bilinmeyen kişi (son
+  altı hane)" yazar.
+- **İstatistik şeridi: tam olarak dört kutu.**
+  1. **En çok görüşülenler** — birebir aramalarda, süreye göre ilk beş kişi.
+  2. **Grupta en çok görüşülenler** — grup aramalarına katılanlar; bir grup
+     aramasının süresi katılan **herkese** yazılır ("bu kişiyle aynı aramada ne
+     kadar bulundum"), kendiniz listede yoksunuz.
+  3. **Toplamda en çok görüşülenler** — birebir + grup toplamı, tek satırda.
+  4. **Dağılım** — birebir / grup payı: çubuk süreye göre, satırlar adet ve
+     süre, altında süre ve adet yüzdesi.
+  Kutulardaki bir isme tıklamak kişi çekmecesini açar. ("Toplam Teams" ve "iş
+  günü başına" kutuları v0.9.0'da kaldırıldı.)
 - **Sekmeler.** **Liste** her aramayı tarih, yön (↗ / ↙), karşı taraf ya da
-  toplantı/katılımcı adı, tür, durum ve süreyle gösterir. **Kişiler** aynı pencereyi
-  kişi başına toplar (sayı, süre, giden/gelen, kaçırılan) ve başlığa tıklayarak
-  sıralanır.
+  grup etiketi, tür, durum ve süreyle gösterir. **Kişiler** aynı pencereyi kişi
+  başına toplar (sayı, süre, giden/gelen, kaçırılan). **Gruplar** her grubu bir
+  satırda verir: etiket ve tam katılımcı listesi, arama sayısı, toplam süre,
+  son arama tarihi ve kişi sayısı. Üçünde de başlığa tıklayarak sıralanır.
+- **Gruba tıklayınca** Liste sekmesi yalnız o grubun aramalarını gösterir;
+  araç çubuğunda "Grup: …" şeridi çıkar, ✕ ile kalkar. Süzgeç uca da geçer:
+  `GET /api/calls/view?days=30&group=<kimlik>`.
 - **Çekmece.** Kişi satırına ya da listede bir ada tıklamak sağdan kişi
   çekmecesini açar: özet (toplam süre, sayı, giden/gelen, kaçırılan, en uzun,
-  son görüşme), o kişiyle bütün görüşmeler ve katıldığı grup/toplantılar.
-  Toplantı satırı organizatör, yanıt ve (kayıtta varsa) katılımcıları gösterir.
-- **Katılım teşhisi.** Araç çubuğundaki **Katılım teşhisi** düğmesi toplantı
-  sohbetlerini yeniden okuyup her katılım mesajının ne olduğunu yazar: kayıt
-  oluştu, katılımcı listesinde yokum, süre yazmıyor, yalnızca başlama mesajı,
-  aynı toplantıya eklendi, arama geçmişinde zaten var. Kimliğinizin nasıl
-  eşleştiği (tam / guid) da görünür. Uçtan da alınabilir:
-  `GET /api/calls/attendance-diagnose?days=30`
-- **Hız.** Pencere değiştirmek ve arama kutusuna yazmak **hiçbir zaman**
-  Teams önbelleğini okumaz: ekranın tamamı tek bir SQLite sorgusundan gelir
-  (`GET /api/calls/view?days=&q=` — liste, kişiler ve istatistik aynı
-  yanıtta). Önbelleği yalnızca **Aramaları çek** ve iki teşhis düğmesi açar.
-- **Eşleşmeyenler.** Bir grup araması toplantı olması gerekirken öyle
-  görünmüyorsa, araç çubuğundaki **Eşleşmeyenler** düğmesi (eşleşmeyen varsa
-  görünür) takvimi yeniden okuyup her arama için nedeni yazar: aramada
-  toplantı kimliği yok, kimlik takvimde bulunamadı, takvimdeki en yakın kayıt
-  N dakika uzakta, ya da "yeniden çekilince eşleşecek". **Grup sohbetinden
-  başlatılan aramalar** (`19:<32 onaltılık>@thread.v2`) ayrı işaretlenir ve
-  rozete sayılmaz: bunlar planlı toplantı değildir, takvimde karşılıkları
-  beklenmez. Her aramanın altında
-  en yakın üç takvim kaydı (konu, tür, saat farkı) listelenir. Aynı döküm
-  uçtan da alınabilir: `GET /api/calls/unmatched?days=30`
-- **Pencere.** 7 / 30 / 90 gün. Arama kutusu (`/` kısayolu) kişi adı, toplantı
-  konusu ve organizatör üzerinde süzer.
-- **Excel.** **Excel'e aktar** üç sayfalık bir dosya verir: **Aramalar**,
-  **Kişiler**, **İstatistik**. Doğrudan da indirilebilir:
-  `GET /api/calls/export.xlsx?days=30`
+  grup araması süresi, son görüşme), o kişiyle bütün birebir görüşmeler ve
+  ortak grup aramaları. Grup aramasının çekmecesi katılanları listeler ve
+  "Bu grubun aramaları" düğmesiyle listeyi süzer.
+- **Hız.** Pencere değiştirmek, arama kutusuna yazmak ve gruba tıklamak
+  **hiçbir zaman** Teams önbelleğini okumaz: ekranın tamamı tek bir SQLite
+  sorgusundan gelir (`GET /api/calls/view?days=&q=&group=` — liste, kişiler,
+  gruplar ve istatistik aynı yanıtta). Önbelleği yalnızca **Aramaları çek**
+  açar.
+- **Pencere.** 7 / 30 / 90 gün. Arama kutusu (`/` kısayolu) kişi adı ve
+  katılımcı adları üzerinde süzer.
+- **Excel.** **Excel'e aktar** dört sayfalık bir dosya verir: **Aramalar**,
+  **Kişiler**, **Gruplar**, **İstatistik**. Ekranda ne süzdüyseniz o iner.
+  Doğrudan da indirilebilir: `GET /api/calls/export.xlsx?days=30`
 - **Ayarlar.** **Ayarlar → Teams → Arama geçmişi** altında önbellek klasörünü
-  elle verebilir (boş bırakırsanız varsayılan yol kullanılır) ve
-  **Güncelle** işinin sonunda otomatik çekmeyi açabilirsiniz (varsayılan
-  kapalı: kopyalama birkaç saniye sürüyor).
+  elle verebilir, kendi Teams kimliğinizi yazabilir ve **Güncelle** işinin
+  sonunda otomatik çekmeyi açabilirsiniz (varsayılan kapalı: kopyalama birkaç
+  saniye sürüyor).
 
 Windows dışında ekran açılır ama **Aramaları çek** pasiftir ve uçlar
 `feature_unavailable` döner. IndexedDB okuyucusu (`ccl_chromium_reader`)
@@ -1096,13 +1051,13 @@ taşımaz.
 | `app/gamify_repo.py` | Seferler, XP defteri, kurallar, rozetler, emirler, seri (SQL) |
 | `app/api_gamify.py` | Sefer uçları (ayrı router) |
 | `app/teamscalls/` | Teams arama geçmişi (kaynak sözleşmesi, önbellek okuyucu, iş mantığı) |
-| `app/teamscalls/intake.py` | Normalize, tür kararı, istatistik (IndexedDB'den bağımsız) |
+| `app/teamscalls/intake.py` | Normalize, tür kararı, gruplar, istatistik (IndexedDB'den bağımsız) |
 | `app/teamscalls/teams_cache.py` | Teams'in yerel IndexedDB önbelleği (yalnız Windows) |
 | `app/vendor/` | Kurulum gerektirmeyen IndexedDB okuyucusu (MIT, `app/vendor/README.md`) |
 | `app/static/` | Vanilla HTML/CSS/JS arayüz, dış bağımlılık yok |
 | `app/static/fonts/` | Gömülü OFL yazı tipleri ve lisans metinleri |
 | `app/static/js/starfield.js` | Arka plandaki yıldız alanı (canvas) |
-| `app/static/js/calls.js` | Teams Aramalar ekranı (istatistik şeridi, sekmeler, çekmece) |
+| `app/static/js/calls.js` | Teams Aramalar ekranı (dört kutuluk şerit, Liste/Kişiler/Gruplar, çekmece) |
 | `app/static/js/addressbox.js` | Ortak adres kutusu: çipler, tamamlama, ayrıştırma |
 | `app/static/js/mailsend.js` | "E-posta ile gönder" penceresi |
 | `app/static/js/mailsend-settings.js` | Ayarlar → E-posta şablonları kartı |
@@ -1121,6 +1076,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.9.0** | 17 Eylül 2026 | **Teams Aramalar sadeleşti: toplantı kavramı tümden kaldırıldı** (takvim eşleşmesi, toplantı sohbetinden katılım türetme, toplantı satırları/sütunları, "Eşleşmeyenler" ve "Katılım teşhisi" ekranları; göç eski toplantı satırlarını siler). Geriye **birebir** ve **grup** aramaları kaldı. Grup artık **katılımcı kümesidir** (sohbet kimliği değil): aynı kişilerle yapılan bütün aramalar tek satırda toplanır, etiket katılımcı adlarından türer. Yeni **Gruplar** sekmesi (arama sayısı, toplam süre, son arama, katılımcılar; tıklayınca liste süzülür, Excel'de ayrı sayfa). İstatistik şeridi dört kutu oldu: birebir / grupta / toplamda en çok görüşülenler ve birebir-grup dağılımı ("Toplam Teams" ile "iş günü" kutuları kalktı). Önbellekte artık yalnız iki veritabanı açılıyor |
 | **v0.8.3** | 17 Eylül 2026 | Uygulama bir süre sonra kendiliğinden kapanıyordu: tarayıcı arka plandaki sekmenin zamanlayıcılarını dondurunca (Edge uyuyan sekmeler, ekran kilidi) nabız kesiliyor, beş dakikalık zaman aşımı dolup süreç kapanıyordu. Zaman aşımı 12 saat oldu, nabız `setInterval` yerine zincirleme `setTimeout` ile atılıyor ve sekme görünür olunca / pencere odaklanınca anında bir nabız gidiyor. Sunucuya iki kez ulaşılamazsa sayfanın tepesinde kapatılabilir bir şerit çıkar, sunucu dönünce kendiliğinden kalkar. Başlatıcılar çalışan örneği bulup yalnızca tarayıcıyı açar; kapanma sebebi loga ayırt edilebilir yazılır |
 | **v0.8.2** | 16 Eylül 2026 | Yerel alan geçmişi popover'ı "Okunuyor..." yazısında takılı kalıyordu: `campaign.js` ile `app.js` aynı sayfada iki ayrı `renderHistory` tanımlıyordu, sonra yüklenen sefer sürümü diğerini eziyordu. Sefer sürümü `renderCampaignHistory` oldu; aynı sayfadaki betiklerde ad çakışmasını yasaklayan test eklendi |
 | **v0.8.1** | 12 Eylül 2026 | Sefer: geçmiş sefer silme, XP satırı silme (yeniden değerlendirme, iptal işareti yok), güç dengesi ve Denge rozeti kaldırıldı, rütbe ve rozet görselleri dairesel çerçevede |

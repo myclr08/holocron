@@ -2,7 +2,7 @@
 
 Katmanlar (posta paketiyle birebir ayni desen):
 
-* `source.py`      -- kaynak-bagimsiz arama/takvim modeli ve `CallSource` sozlesmesi
+* `source.py`      -- kaynak-bagimsiz arama modeli ve `CallSource` sozlesmesi
 * `teams_cache.py` -- yeni Teams'in IndexedDB onbellegini okur (yalnizca Windows)
 * `fake.py`        -- bellek ici kaynak (testler icin)
 * `intake.py`      -- normalize, tur karari, istatistik (saf is mantigi)
@@ -23,7 +23,6 @@ from .source import (
     STATE_MISSED,
     TYPE_MULTI_PARTY,
     TYPE_TWO_PARTY,
-    CalendarRecord,
     CallRecord,
     CallsError,
     CallSource,
@@ -33,7 +32,6 @@ from .source import (
 )
 
 __all__ = [
-    "CalendarRecord",
     "CallRecord",
     "CallSource",
     "CallsError",

@@ -1,7 +1,7 @@
 """Kaynak-bagimsiz Teams arama gecmisi modeli.
 
-Burada ne IndexedDB var ne Windows: arama kaydi, takvim kaydi ve `CallSource`
-sozlesmesi duruyor. Yerel onbellek okuyucusu (`teams_cache.py`) ve testlerin
+Burada ne IndexedDB var ne Windows: arama kaydi ve `CallSource` sozlesmesi
+duruyor. Yerel onbellek okuyucusu (`teams_cache.py`) ve testlerin
 bellek ici kaynagi (`fake.py`) ayni sozlesmeyi uygular, boylece is mantigi
 (`intake.py`) Windows'a hic bakmadan sinanabilir.
 
@@ -53,8 +53,7 @@ def empty_diagnostics() -> dict[str, Any]:
         # Kac veritabani acildi ve okuma kac milisaniye surdu.
         "databases": 0,
         "read_ms": 0,
-        # Toplanti sohbetlerinden okunan katilim kaydi sayisi ve kendi kimligimiz.
-        "attendance": 0,
+        # Kendi kimligimiz: grup aramalarinda "ben" katilimci sayilmasin diye.
         "my_mri": "",
     }
 
@@ -72,11 +71,6 @@ STATES: tuple[str, ...] = (STATE_ACCEPTED, STATE_MISSED, STATE_DECLINED)
 # `callType`
 TYPE_TWO_PARTY = "TwoParty"
 TYPE_MULTI_PARTY = "MultiParty"
-
-# Takvimde atlanan kayitlar: yineleyen serinin sablonu ve "ofiste degilim".
-EVENT_RECURRING_MASTER = "RecurringMaster"
-SHOW_AS_OOF = "Oof"
-
 
 class CallsError(Exception):
     """Kullaniciya gosterilecek arama gecmisi hatasi (arayuz kodu okur)."""
@@ -109,9 +103,9 @@ class CallRecord:
     store'lari her ucunu de kullaniyor. Cevrim `intake` icinde yapilir ki ham
     kayit oldugu gibi saklanabilsin.
 
-    `thread_id` toplanti sohbetinin (`19:meeting_...@thread.v2`),
-    `group_thread_id` ise grup sohbetinin kimligidir; takvim ve sohbet
-    eslemesi bunlarla yapilir.
+    Sohbet kimligi (`threadId` / `groupChatThreadId`) TASINMAZ: gruplama
+    sohbet kimligiyle degil, **katilimci kumesiyle** yapilir (ayni kisilerle
+    yapilan aramalar ayni gruptur). Ham kayit yine de `raw` icinde durur.
     """
 
     call_id: str
@@ -127,76 +121,24 @@ class CallRecord:
     target_id: str = ""
     target_name: str = ""
     forwarded: str = ""
-    thread_id: str = ""
-    group_thread_id: str = ""
     subject: str = ""
     participants: list[str] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class CalendarRecord:
-    """Takvim kaydi; toplanti aramasini adiyla eslestirmek icin.
-
-    `start_time` / `end_time` Teams'in takvim store'unda **`datetime`** olarak
-    durur (JS `Date` nesnesi olarak seri hale getirilmis); eski surumlerde ve
-    disa aktarimlarda yerel saat metni ("YYYY-MM-DD HH:MM:SS") ya da epoch
-    milisaniye de gorulur. Ucu de kabul edilir; cevrim `intake` icinde.
-
-    `cid` toplanti sohbetinin kimligidir (`skypeTeamsDataObj.cid`): aramanin
-    `threadId` degeriyle esitse eslesme KESINDIR, zaman yakinligina gerek yok.
-    """
-
-    event_id: str = ""
-    start_time: Any = ""
-    end_time: Any = ""
-    subject: str = ""
-    organizer_name: str = ""
-    organizer_address: str = ""
-    my_response: str = ""
-    is_online_meeting: bool = False
-    is_cancelled: bool = False
-    location: str = ""
-    event_type: str = ""
-    show_as: str = ""
-    # Takvim kaydinin evrensel kimligi; katilim kaydindaki `icaluid` ile
-    # eslesir (thread kimliginden bile kesin bir yol).
-    ical_uid: str = ""
-    cid: str = ""
-    meeting_url: str = ""
-    attendees: list[str] = field(default_factory=list)
-
-
-@dataclass
-class ThreadRecord:
-    """Sohbet (konusma) kaydi: grup aramasinin adi ve uyeleri.
-
-    Grup aramasinin `groupChatThreadId` degeri buradaki kimlige denk gelir;
-    baslik "Grup araması" yerine sohbetin kendi adi olur.
-    """
-
-    thread_id: str = ""
-    topic: str = ""
-    members: list[str] = field(default_factory=list)
-    member_names: list[str] = field(default_factory=list)
 
 
 @runtime_checkable
 class CallSource(Protocol):
     """Arama gecmisi kaynagi sozlesmesi.
 
-    Tek cagri dort sey dondurur: aramalar, takvim kayitlari, kimlik -> ad
-    sozlugu ve sohbetler.
+    Tek cagri iki sey dondurur: aramalar ve kimlik -> ad sozlugu.
     """
 
-    def read(self) -> tuple[
-        list[CallRecord], list[CalendarRecord], dict[str, str], list[ThreadRecord]
-    ]:
-        """(aramalar, takvim kayitlari, kimlik -> ad, sohbetler).
+    def read(self) -> tuple[list[CallRecord], dict[str, str]]:
+        """(aramalar, kimlik -> ad).
 
-        Dordu birlikte doner cunku hepsi ayni veritabani acilisindan cikar;
-        ayri ayri okumak onbellegi dort kez acmak demek olurdu. Eski uc'lu
-        donusler de kabul edilir (`intake.scan` dorde tamamlar).
+        Ikisi birlikte doner cunku ayni veritabani acilisindan cikar; ayri
+        ayri okumak onbellegi iki kez acmak demek olurdu. Eksik donusler de
+        kabul edilir (`intake.scan` ikiye tamamlar).
         """
 
 
@@ -230,7 +172,7 @@ def temp_root(env: dict[str, str] | None = None) -> Path:
 def decode_text(value: Any) -> str:
     """Ham degeri metne cevirir. Teams bazi dizgeleri **bytes** olarak yaziyor.
 
-    `originatorParticipant.displayName`, takvim konusu, profil adi: hepsi
+    `originatorParticipant.displayName`, profil adi, arama konusu: hepsi
     kimi kayitta `str`, kimisinde `bytes` geliyor. Bytes once UTF-8 ile
     cozulur; gecerli UTF-8 degilse latin-1 denenir -- eski Windows kod
     sayfasindan gelen adlar (`\xdc` -> "Ü") boyle okunur. Latin-1 de bos
@@ -319,36 +261,6 @@ def parse_utc(value: Any) -> datetime | None:
     except ValueError:
         return None
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
-
-
-def parse_local(value: Any) -> datetime | None:
-    """Takvim damgasi -> saat dilimli an.
-
-    Takvim store'u **`datetime`** yaziyor (JS `Date`) ve okuyucu bunu saat
-    dilimsiz veriyor; degerin kendisi **UTC**'dir (epoch'tan uretilmis).
-    Saat dilimsiz bir `datetime`i yerel saat sanmak butun takvimi UTC ile
-    yerel saat arasindaki fark kadar kaydiriyordu -- 10:00'daki toplanti
-    07:00 gorunuyor, ±10 dakikalik eslesme hic tutmuyordu. Kayittaki
-    `utcOffset` / `eventTimeZone` alanlari bu yuzden UYGULANMAZ: deger zaten
-    UTC, cift cevrim olurdu.
-
-    Epoch milisaniye de UTC'dir. Yalnizca METIN bicimi ("YYYY-MM-DD
-    HH:MM:SS") yerel saat sayilir; o bicim disa aktarimlardan gelir.
-    """
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    stamped = epoch_moment(value)
-    if stamped is not None:
-        return stamped
-    text = clean_text(value)
-    if len(text) < 10:
-        return None
-    candidate = text[:-1] + "+00:00" if text.endswith(("Z", "z")) else text
-    try:
-        moment = datetime.fromisoformat(candidate)
-    except ValueError:
-        return None
-    return moment if moment.tzinfo else moment.astimezone()
 
 
 # --- alan degerlerinin normalizasyonu ------------------------------------

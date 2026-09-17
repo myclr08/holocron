@@ -61,7 +61,7 @@ def test_new_migration_is_applied_on_top(tmp_path):
 def test_group_detail_fields_migration_preserves_existing_group_and_items(tmp_path):
     conn = db.connect(tmp_path / "detail-fields.db")
     try:
-        assert db.migrate(conn, db.MIGRATIONS[:-1]) == 12
+        assert db.migrate(conn, db.MIGRATIONS[:12]) == 12
         cursor = conn.execute(
             "INSERT INTO groups (name, kind, position) VALUES ('Filo', 'manual', 0)")
         conn.execute(

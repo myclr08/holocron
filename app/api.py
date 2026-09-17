@@ -899,6 +899,19 @@ def calls_source(context: AppContext, config: Any = None) -> Any:
     return context.calls_factory(getattr(config, "cache_path", "") or "")
 
 
+def calls_me(context: AppContext) -> str:
+    """Kullanicinin kendi Teams kimligi: once ayar, sonra taramada bulunan.
+
+    Grup istatistiklerinde "ben" katilimci sayilmamali. Elle verilen ayar
+    (`calls.my_mri`) her zaman one gecer; taramanin veritabani adindan
+    buldugu kimlik `calls.my_mri_found` altinda saklanir.
+    """
+    return calls_intake.my_mri(
+        setting=context.settings.get("calls.my_mri", "") or "",
+        discovered=context.settings.get("calls.my_mri_found", "") or "",
+    )
+
+
 @router.post("/calls/scan")
 def scan_calls(request: Request) -> dict[str, Any]:
     """Onbellegi tarar.
@@ -919,6 +932,10 @@ def scan_calls(request: Request) -> dict[str, Any]:
             my_mri_setting=context.settings.get("calls.my_mri", "") or "",
         )
     result["ms"] = int((time.monotonic() - started) * 1000)
+    # Veritabani adindan bulunan kimlik saklanir: grup istatistiklerinde
+    # kendimi elemek icin ekranin da bilmesi gerekiyor.
+    if result.get("my_mri"):
+        context.settings.set("calls.my_mri_found", str(result["my_mri"]))
     stamp = repository.now_iso()
     context.settings.set("calls.scanned_at", stamp)
     result["scanned_at"] = stamp
@@ -932,6 +949,7 @@ def _calls_payload(
     direction: str = "",
     state: str = "",
     kind: str = "",
+    group: str = "",
     with_stats: bool = True,
 ) -> dict[str, Any]:
     """Ekranin tek yanitta ihtiyaci olan her sey. YALNIZCA SQLite okur.
@@ -944,28 +962,40 @@ def _calls_payload(
     since = calls_intake.iso_text(calls_intake.since_of(days))
     rows = repository.list_calls(conn, since=since)
     names = calls_intake.names_from_rows(rows)
+    me = calls_me(context)
     picked = calls_intake.select(
-        rows, days=days, q=q, direction=direction, state=state, kind=kind, names=names
+        rows,
+        days=days,
+        q=q,
+        direction=direction,
+        state=state,
+        kind=kind,
+        group=group,
+        names=names,
+        me=me,
     )
-    cards = [calls_intake.view(row, names) for row in picked]
+    cards = [calls_intake.view(row, names, me) for row in picked]
     payload: dict[str, Any] = {
         "calls": cards,
         "people": calls_intake.people_totals(picked, names),
+        # Gruplar sekmesi: grup suzgeci uygulanmadan once butun pencere
+        # gorunmeli, yoksa bir gruba tiklayinca liste tek satira duserdi.
+        "groups": calls_intake.group_totals(
+            calls_intake.select(
+                rows, days=days, q=q, direction=direction, state=state, names=names, me=me
+            ),
+            names,
+            me,
+        ),
         "count": len(picked),
         "total": repository.call_count(conn),
         "days": calls_intake._as_days(days),
         "windows": list(calls_intake.WINDOW_DAYS),
         "scanned_at": context.settings.get("calls.scanned_at", "") or "",
         "supported": calls_supported(),
-        # Rozet buradan hesaplanir; "Eslesmeyenler" ucuna istek atilmaz.
-        "unmatched": sum(
-            1
-            for card in cards
-            if card["kind"] == calls_intake.KIND_GROUP and card["thread_kind"] != "group_chat"
-        ),
     }
     if with_stats:
-        payload["stats"] = calls_intake.build_stats(rows, days=days, names=names)
+        payload["stats"] = calls_intake.build_stats(rows, days=days, names=names, me=me)
     return payload
 
 
@@ -977,9 +1007,10 @@ def read_calls_view(
     direction: str = "",
     state: str = "",
     kind: str = "",
+    group: str = "",
 ) -> dict[str, Any]:
-    """Liste + kisiler + istatistik tek istekte (ekranin kullandigi uc)."""
-    return _calls_payload(get_context(request), days, q, direction, state, kind)
+    """Liste + kisiler + gruplar + istatistik tek istekte (ekranin kullandigi uc)."""
+    return _calls_payload(get_context(request), days, q, direction, state, kind, group)
 
 
 @router.get("/calls")
@@ -990,21 +1021,22 @@ def read_calls(
     direction: str = "",
     state: str = "",
     kind: str = "",
+    group: str = "",
 ) -> dict[str, Any]:
-    """Pencere + suzgeclerle arama listesi ve ayni kumeden kisi dokumu."""
+    """Pencere + suzgeclerle arama listesi ve ayni kumeden kisi/grup dokumu."""
     payload = _calls_payload(
-        get_context(request), days, q, direction, state, kind, with_stats=False
+        get_context(request), days, q, direction, state, kind, group, with_stats=False
     )
     return payload
 
 
 @router.get("/calls/stats")
 def read_call_stats(request: Request, days: int = calls_intake.DEFAULT_DAYS) -> dict[str, Any]:
-    """Istatistik seridi: top 5, uc dilim, aradim/arandim, is gunu ortalamasi."""
+    """Istatistik seridi: dort kutu (birebir, grup, toplam, dagilim)."""
     context = get_context(request)
     since = calls_intake.iso_text(calls_intake.since_of(days))
     rows = repository.list_calls(context.connection(), since=since)
-    return calls_intake.build_stats(rows, days=days)
+    return calls_intake.build_stats(rows, days=days, me=calls_me(context))
 
 
 @router.get("/calls/export.xlsx")
@@ -1015,10 +1047,11 @@ def export_calls(
     direction: str = "",
     state: str = "",
     kind: str = "",
+    group: str = "",
 ):
     context = get_context(request)
     payload = export.build_calls_workbook(
-        context, days=days, q=q, direction=direction, state=state, kind=kind
+        context, days=days, q=q, direction=direction, state=state, kind=kind, group=group
     )
     return Response(
         content=payload,
@@ -1027,62 +1060,15 @@ def export_calls(
     )
 
 
-@router.get("/calls/unmatched")
-def read_unmatched_calls(
-    request: Request, days: int = calls_intake.DEFAULT_DAYS
-) -> dict[str, Any]:
-    """Teshis: eslesmemis cok kisili aramalar ve neden eslesmedikleri.
-
-    Takvimi TAZE okur (onbellek acilir), cunku asil soru "yeniden tarasam
-    duzelir mi". Windows disinda `feature_unavailable` doner.
-    """
-    context = get_context(request)
-    config = calls_intake.load_config(context.settings)
-    source = calls_source(context, config)
-    bundle = source.read()
-    calendar = bundle[1] if len(bundle) > 1 else []
-    return calls_intake.diagnose_unmatched(
-        repository.list_calls(context.connection()), calendar, days=days
-    )
-
-
-@router.get("/calls/attendance-diagnose")
-def read_attendance_diagnosis(
-    request: Request, days: int = calls_intake.DEFAULT_DAYS
-) -> dict[str, Any]:
-    """Teshis: toplanti sohbetlerindeki her katilim mesaji ne oldu, neden?
-
-    Onbellegi TAZE okur (saniyeler surer): yalnizca dugmeye basinca cagrilir.
-    """
-    context = get_context(request)
-    config = calls_intake.load_config(context.settings)
-    source = calls_source(context, config)
-    bundle = tuple(source.read())
-    calls, calendar, names, threads, attended = (*bundle, [], [], [], [])[:5]
-    found = calls_intake.source_diagnostics(source)
-    marker = calls_intake.my_mri(
-        setting=context.settings.get("calls.my_mri", "") or "",
-        discovered=found.get("my_mri"),
-    )
-    return calls_intake.diagnose_attendance(
-        attended,
-        marker,
-        calendar,
-        names,
-        known_ids=repository.history_call_ids(context.connection()),
-        days=days,
-    )
-
-
 @router.get("/calls/person/{counterpart_id}")
 def read_call_person(
     request: Request, counterpart_id: str, days: int = calls_intake.DEFAULT_DAYS
 ) -> dict[str, Any]:
-    """Kisi cekmecesi: ozet, o kisiyle butun gorusmeler, ortak grup/toplantilar."""
+    """Kisi cekmecesi: ozet, o kisiyle butun gorusmeler, ortak grup aramalari."""
     context = get_context(request)
     since = calls_intake.iso_text(calls_intake.since_of(days))
     rows = repository.list_calls(context.connection(), since=since)
-    return calls_intake.person_view(rows, counterpart_id, days=days)
+    return calls_intake.person_view(rows, counterpart_id, days=days, me=calls_me(context))
 
 
 # --- yerel alanlar ------------------------------------------------------

@@ -1,12 +1,12 @@
-// Teams Aramalar: istatistik seridi, liste/kisiler sekmeleri, kisi cekmecesi.
-// app.js buyudugu icin ayri dosya; ortak yardimcilar (api, h, el, toast)
-// app.js ve common.js icinden gelir, cerceve ve CDN yok.
+// Teams Aramalar: istatistik seridi, liste/kisiler/gruplar sekmeleri,
+// kisi cekmecesi. app.js buyudugu icin ayri dosya; ortak yardimcilar
+// (api, h, el, toast) app.js ve common.js icinden gelir, cerceve ve CDN yok.
 
 const CALL_WINDOWS = [7, 30, 90];
 const CALL_SEARCH_MS = 250;
 
-// Uc dilimin cizim sirasi ve renk sinifi (CSS'te .split-<kind>).
-const CALL_SPLIT_ORDER = ["meeting", "group_call", "one_to_one"];
+// Dagilim dilimlerinin cizim sirasi ve renk sinifi (CSS'te .split-<kind>).
+const CALL_SPLIT_ORDER = ["one_to_one", "group_call"];
 
 const callsState = {
   days: 30,
@@ -14,15 +14,18 @@ const callsState = {
   tab: "list",
   calls: [],
   people: [],
+  groups: [],
   stats: null,
   scannedAt: "",
   supported: true,
   peopleSort: { key: "ms", dir: "desc" },
+  groupSort: { key: "ms", dir: "desc" },
   searchTimer: null,
   drawerId: null,
   // Ayni anda yalnizca en son istegin yaniti cizilir.
   request: 0,
-  unmatched: 0,
+  // Gruplar sekmesinden secilen grup: liste yalnizca onun aramalarini gosterir.
+  group: null,
 };
 
 // --- gorunum acma / kapama ----------------------------------------------
@@ -53,6 +56,7 @@ function leaveCalls() {
 function callParams(extra) {
   const params = new URLSearchParams({ days: String(callsState.days) });
   if (callsState.query) params.set("q", callsState.query);
+  if (callsState.group) params.set("group", callsState.group.key);
   Object.entries(extra || {}).forEach(([key, value]) => params.set(key, value));
   return params;
 }
@@ -68,10 +72,10 @@ async function loadCalls() {
     if (token !== callsState.request) return;
     callsState.calls = data.calls || [];
     callsState.people = data.people || [];
+    callsState.groups = data.groups || [];
     callsState.scannedAt = data.scanned_at || "";
     callsState.supported = data.supported !== false;
     callsState.stats = data.stats || null;
-    callsState.unmatched = data.unmatched || 0;
     setCallsBadge(data.count || 0);
     renderCalls();
   } catch (err) {
@@ -131,8 +135,7 @@ async function scanCalls() {
       "Aramalar çekildi",
       `${result.scanned} kayıt, en yeni: ${newest}` +
         ` · ${result.new} yeni · ${result.updated} güncellendi` +
-        (result.meetings_matched ? ` · ${result.meetings_matched} toplantı eşleşti` : "") +
-        (result.recurring_matched ? ` (${result.recurring_matched} tekrarlayan)` : ""),
+        (result.groups ? ` · ${result.groups} grup araması` : ""),
       result.warning ? "error" : "ok",
       notes
     );
@@ -184,24 +187,42 @@ function renderCallWindows() {
 
 // --- ana cizim -----------------------------------------------------------
 
+const CALL_TABS = { list: "calls-tab-list", people: "calls-tab-people", groups: "calls-tab-groups" };
+
 function renderCalls() {
   el("calls-count").textContent = `${callsState.calls.length} arama`;
-  // Eslesmeyenler rozeti yalnizca SUPHELI olanlari sayar: grup sohbetinden
-  // baslatilan aramalarin takvimde karsiligi zaten beklenmez. Sayi listenin
-  // kendi yanitindan gelir; ayri bir istek ATILMAZ.
-  const orphans = callsState.unmatched;
-  el("calls-unmatched").hidden = orphans === 0;
-  el("calls-unmatched-count").textContent = String(orphans);
-  el("calls-unmatched").title = `${orphans} arama toplantıyla eşleşmedi (grup sohbetleri sayılmaz)`;
   el("calls-hint").textContent = callsHint();
   el("calls-scan").disabled = !callsState.supported;
-  el("calls-tab-list").classList.toggle("on", callsState.tab === "list");
-  el("calls-tab-people").classList.toggle("on", callsState.tab === "people");
-  el("calls-tab-list").setAttribute("aria-selected", String(callsState.tab === "list"));
-  el("calls-tab-people").setAttribute("aria-selected", String(callsState.tab === "people"));
+  Object.entries(CALL_TABS).forEach(([name, id]) => {
+    el(id).classList.toggle("on", callsState.tab === name);
+    el(id).setAttribute("aria-selected", String(callsState.tab === name));
+  });
+  renderCallFilter();
   renderCallStats();
   if (callsState.tab === "people") renderCallPeople();
+  else if (callsState.tab === "groups") renderCallGroups();
   else renderCallList();
+}
+
+/** Secili grup serdi: "Grup: Proje ekibi ✕". */
+function renderCallFilter() {
+  const box = el("calls-filter");
+  box.hidden = !callsState.group;
+  if (callsState.group) {
+    el("calls-filter-text").textContent = "Grup: " + callsState.group.name;
+  }
+}
+
+/** Bir gruba tiklandi: liste sekmesi yalnizca o grubun aramalarini gosterir. */
+function filterByGroup(group) {
+  callsState.group = { key: group.key, name: group.name };
+  callsState.tab = "list";
+  loadCalls();
+}
+
+function clearCallGroupFilter() {
+  callsState.group = null;
+  loadCalls();
 }
 
 // --- istatistik seridi ---------------------------------------------------
@@ -235,17 +256,31 @@ function renderCallStats() {
   const stats = callsState.stats;
   if (!stats) return;
 
-  // 1. En cok gorusulen bes kisi (yalniz birebir aramalar).
-  const top = (stats.top || []).length
-    ? stats.top.map((person) =>
-        statRow(person.name, `${person.duration_text} · ${person.count}`, () =>
-          openCallPerson(person.counterpart_id, person.name)
-        )
-      )
-    : [h("p", { class: "stat-note", text: "Bu pencerede birebir görüşme yok." })];
-  strip.appendChild(statCard("En çok görüşülen", top));
+  // 1. Birebir aramalarda en cok gorusulen bes kisi.
+  strip.appendChild(
+    statCard(
+      "En çok görüşülenler",
+      peopleRows(stats.top, "Bu pencerede birebir görüşme yok.")
+    )
+  );
 
-  // 2. Uc dilim: toplanti / grup / birebir.
+  // 2. Grup aramalarina katilanlar: aramanin suresi katilan herkese yazilir.
+  strip.appendChild(
+    statCard(
+      "Grupta en çok görüşülenler",
+      peopleRows(stats.group_top, "Bu pencerede grup araması yok.")
+    )
+  );
+
+  // 3. Birebir + grup toplami.
+  strip.appendChild(
+    statCard(
+      "Toplamda en çok görüşülenler",
+      peopleRows(stats.combined_top, "Bu pencerede görüşme yok.")
+    )
+  );
+
+  // 4. Dagilim: birebir / grup payi (adet ve sure).
   const bar = h("div", { class: "split-bar" }, []);
   const legend = [];
   CALL_SPLIT_ORDER.forEach((kind) => {
@@ -254,49 +289,21 @@ function renderCallStats() {
     if (part.percent > 0) {
       bar.appendChild(h("span", { class: "split-" + kind, style: `width:${part.percent}%` }));
     }
-    legend.push(statRow(part.label, `%${part.percent} · ${part.hours} sa`));
+    legend.push(statRow(part.label, `${part.count} arama · ${part.duration_text}`));
+    legend.push(
+      h("p", { class: "stat-note", text: `süre %${part.percent} · adet %${part.count_percent}` })
+    );
   });
   strip.appendChild(statCard("Dağılım", [bar, ...legend]));
+}
 
-  // 3. Aradim / arandim; kacirilan ve reddedilen ayri satirda.
-  const direction = stats.direction || {};
-  const out = direction.outgoing || { count: 0, duration_text: "—" };
-  const incoming = direction.incoming || { count: 0, duration_text: "—" };
-  strip.appendChild(
-    statCard("Aradım / Arandım", [
-      statRow("Aradım", `${out.count} · ${out.duration_text}`),
-      statRow("Arandım", `${incoming.count} · ${incoming.duration_text}`),
-      h("p", {
-        class: "stat-note",
-        text: `Kaçırılan ${direction.missed || 0} · reddedilen ${direction.declined || 0}`,
-      }),
-    ])
-  );
-
-  // 4. Toplam temas suresi.
-  strip.appendChild(
-    statCard("Toplam temas", [
-      h("div", { class: "stat-figure", text: stats.total_text || "—" }),
-      h("p", {
-        class: "stat-note",
-        text: `${stats.connected || 0} görüşme · ${stats.calls || 0} arama`,
-      }),
-    ])
-  );
-
-  // 5. Is gunu basina ortalama + en yogun gun.
-  const workday = stats.workday || {};
-  const busiest = workday.busiest;
-  strip.appendChild(
-    statCard("İş günü başına", [
-      h("div", { class: "stat-figure", text: workday.average_text || "—" }),
-      h("p", {
-        class: "stat-note",
-        text: busiest
-          ? `En yoğun gün ${dateText(busiest.date)} · ${busiest.duration_text}`
-          : `${workday.days || 0} iş günü (Pzt-Cum)`,
-      }),
-    ])
+/** Istatistik kutusundaki kisa kisi listesi; tiklanan kisi cekmeceyi acar. */
+function peopleRows(people, emptyText) {
+  if (!(people || []).length) return [h("p", { class: "stat-note", text: emptyText })];
+  return people.map((person) =>
+    statRow(person.name, `${person.duration_text} · ${person.count}`, () =>
+      openCallPerson(person.counterpart_id, person.name)
+    )
   );
 }
 
@@ -353,18 +360,9 @@ function callRow(call) {
     }),
   ]);
   row.appendChild(name);
-  const kinds = [h("span", { class: "call-kind kind-" + call.kind, text: call.kind_label })];
-  if (call.source === "chat") {
-    // Bu kayit arama gecmisinde degil, toplanti sohbetinde bulundu.
-    kinds.push(
-      h("span", {
-        class: "call-source",
-        text: "sohbetten",
-        title: "Toplantı sohbetindeki katılım kaydından",
-      })
-    );
-  }
-  row.appendChild(h("td", {}, kinds));
+  row.appendChild(
+    h("td", {}, [h("span", { class: "call-kind kind-" + call.kind, text: call.kind_label })])
+  );
   row.appendChild(
     h("td", {}, [
       h("span", { class: "call-state state-" + (call.state || "none"), text: call.state_label || "—" }),
@@ -444,179 +442,78 @@ function renderCallPeople() {
   });
 }
 
-// --- teshis: neden eslesmedi? -------------------------------------------
+// --- gruplar sekmesi -----------------------------------------------------
 
-const UNMATCHED_REASONS = {
-  no_thread_id: "Aramada toplantı kimliği yok",
-  no_calendar_with_core: "Bu kimlik takvimde bulunamadı",
-  matches_now: "Yeniden çekilince eşleşecek",
-  group_chat_thread: "Bu bir grup sohbeti araması, takvimde karşılığı beklenmez",
-};
+const CALL_GROUP_HEADS = [
+  { key: "name", label: "Grup" },
+  { key: "count", label: "Arama" },
+  { key: "ms", label: "Süre" },
+  { key: "last_at", label: "Son arama" },
+  { key: "people_count", label: "Kişi" },
+];
 
-function reasonText(reason) {
-  const marker = String(reason || "");
-  if (marker.startsWith("only_time_gap:")) {
-    return `Takvimde en yakın kayıt ${marker.split(":")[1]} dk uzakta`;
-  }
-  return UNMATCHED_REASONS[marker] || marker;
-}
-
-async function openUnmatched() {
-  const body = openCallsDrawer("Eşleşmeyen aramalar", "Teşhis");
-  clear(body);
-  body.appendChild(h("p", { class: "hint", text: "Takvim okunuyor..." }));
-  try {
-    const data = await api("/api/calls/unmatched?days=" + callsState.days);
-    renderUnmatched(body, data);
-  } catch (err) {
-    clear(body);
-    body.appendChild(h("p", { class: "hint", text: err.message }));
-  }
-}
-
-function renderUnmatched(body, data) {
-  clear(body);
-  const summary = data.summary || {};
-  const lines = [
-    ["Eşleşmeyen", String(summary.unmatched || 0)],
-    ["Bakılması gereken", String(summary.suspicious || 0)],
-    ["Grup sohbeti", String(summary.group_chat || 0)],
-    ["Kimliği yok", String(summary.no_thread_id || 0)],
-    ["Takvimde yok", String(summary.core_not_in_calendar || 0)],
-    ["Yeniden çekince düzelir", String(summary.matched_after_fix || 0)],
-    ["Takvim kaydı", String(data.calendar_events || 0)],
-  ];
-  lines.forEach(([label, value]) =>
-    body.appendChild(
-      h("div", { class: "detail-row" }, [
-        h("div", { class: "label", text: label }),
-        h("div", { class: "value", text: value }),
-      ])
-    )
-  );
-
-  if (!(data.calls || []).length) {
-    body.appendChild(h("p", { class: "hint", text: "Eşleşmeyen arama yok." }));
-    return;
-  }
-
-  body.appendChild(h("h3", { text: "Aramalar" }));
-  data.calls.forEach((call) => {
-    const box = h("div", { class: "unmatched" }, [
-      h("div", { class: "unmatched-head" }, [
-        h("span", { class: "when", text: stamp(call.started_at) }),
-        h("span", { class: "what", text: call.title }),
-        h("span", { class: "much", text: call.duration_text }),
-      ]),
-      h("div", {
-        class: "unmatched-why" + (call.thread_kind === "group_chat" ? " is-fine" : ""),
-        text: reasonText(call.reason),
-      }),
-    ]);
-    if (call.thread_core) {
-      box.appendChild(h("div", { class: "unmatched-id", text: "kimlik: " + call.thread_core }));
-    }
-    if ((call.participants || []).length) {
-      box.appendChild(
-        h("div", { class: "unmatched-id", text: "katılanlar: " + call.participants.join(", ") })
-      );
-    }
-    (call.candidates || []).forEach((item) =>
-      box.appendChild(
-        h("div", { class: "unmatched-candidate" }, [
-          h("span", { class: "when", text: stamp(item.start_time) }),
-          h("span", { class: "what", text: item.subject || "(konusuz)" }),
-          h("span", { class: "much", text: `${item.event_type || "?"} · ${item.gap_minutes} dk` }),
-        ])
-      )
-    );
-    body.appendChild(box);
+function sortedCallGroups() {
+  const { key, dir } = callsState.groupSort;
+  const groups = callsState.groups.slice();
+  groups.sort((left, right) => {
+    const a = left[key];
+    const b = right[key];
+    const result =
+      typeof a === "string" || typeof b === "string"
+        ? String(a || "").localeCompare(String(b || ""), "tr")
+        : (a || 0) - (b || 0);
+    return dir === "asc" ? result : -result;
   });
+  return groups;
 }
 
-// --- katilim teshisi ----------------------------------------------------
-
-const ATTENDANCE_DECISIONS = {
-  created: "Kayıt oluştu",
-  "skipped:no_me": "Katılımcı listesinde yokum",
-  "skipped:no_duration": "Süre yazmıyor",
-  "skipped:started": "Yalnızca başlama mesajı",
-  "deduped:history": "Arama geçmişinde zaten var",
-};
-
-function decisionText(decision) {
-  const marker = String(decision || "");
-  if (marker.startsWith("merged:")) return "Aynı toplantıya eklendi";
-  return ATTENDANCE_DECISIONS[marker] || marker;
-}
-
-function decisionClass(decision) {
-  const marker = String(decision || "");
-  if (marker === "created") return "is-good";
-  if (marker.startsWith("merged:")) return "is-fine";
-  return "is-skip";
-}
-
-async function openAttendance() {
-  const body = openCallsDrawer("Katılım teşhisi", "Teşhis");
+function renderCallGroups() {
+  const head = el("calls-head");
+  const body = el("calls-body");
+  clear(head);
   clear(body);
-  body.appendChild(h("p", { class: "hint", text: "Toplantı sohbetleri okunuyor..." }));
-  try {
-    const data = await api("/api/calls/attendance-diagnose?days=" + callsState.days);
-    renderAttendance(body, data);
-  } catch (err) {
-    clear(body);
-    body.appendChild(h("p", { class: "hint", text: err.message }));
-  }
-}
 
-function renderAttendance(body, data) {
-  clear(body);
-  const summary = data.summary || {};
-  const lines = [
-    ["Mesaj", String(data.messages || 0)],
-    ["Kayıt oluşan", String(data.created || 0)],
-    ["Atlanan", String(summary.skipped || 0)],
-    ["Birleşen", String(summary.merged || 0)],
-    ["Kimliğim", data.my_mri_known ? "bulundu" : "bulunamadı"],
-  ];
-  lines.forEach(([label, value]) =>
-    body.appendChild(
-      h("div", { class: "detail-row" }, [
-        h("div", { class: "label", text: label }),
-        h("div", { class: "value", text: value }),
-      ])
-    )
-  );
+  CALL_GROUP_HEADS.forEach((column) => {
+    head.appendChild(
+      h("th", {
+        class: callsState.groupSort.key === column.key ? "sorted" : "",
+        text: column.label,
+        title: "Sırala",
+        onclick: () => {
+          const same = callsState.groupSort.key === column.key;
+          callsState.groupSort = {
+            key: column.key,
+            dir: same && callsState.groupSort.dir === "desc" ? "asc" : "desc",
+          };
+          renderCallGroups();
+        },
+      })
+    );
+  });
 
-  if (!(data.meetings || []).length) {
-    body.appendChild(h("p", { class: "hint", text: "Bu pencerede katılım mesajı yok." }));
-    return;
-  }
+  const groups = sortedCallGroups();
+  el("calls-empty").hidden = groups.length > 0;
+  el("calls-empty-text").textContent = "Bu pencerede grup araması yok.";
+  el("calls-table").hidden = !groups.length;
 
-  body.appendChild(h("h3", { text: "Toplantılar" }));
-  data.meetings.forEach((item) => {
-    const box = h("div", { class: "unmatched" }, [
-      h("div", { class: "unmatched-head" }, [
-        h("span", { class: "when", text: stamp(item.ended_at) }),
-        h("span", { class: "what", text: item.subject || item.thread_core || "(konusuz)" }),
-        h("span", { class: "much", text: item.my_seconds ? `${Math.round(item.my_seconds / 60)} dk` : "—" }),
-      ]),
-      h("div", {
-        class: "unmatched-why " + decisionClass(item.decision),
-        text: decisionText(item.decision),
-      }),
-      h("div", {
-        class: "unmatched-id",
-        text:
-          `tür: ${item.event_kind} · katılımcı: ${item.part_count}` +
-          ` · ben: ${item.me_present || "yok"}` +
-          ` · callid: ${item.has_call_id ? "var" : "yok"}` +
-          ` · icaluid: ${item.has_ical_uid ? "var" : "yok"}` +
-          (item.day ? ` · gün: ${item.day}` : ""),
-      }),
-    ]);
-    body.appendChild(box);
+  groups.forEach((group) => {
+    // Gruba tiklamak listeyi o grupla suzer: ayri bir ekran gerekmiyor.
+    const everyone = group.participants.join(", ");
+    const row = h("tr", {
+      class: "call-row",
+      title: everyone,
+      onclick: () => filterByGroup(group),
+    });
+    // Etiket en fazla uc ad tasir; kalanlar varsa tam liste altta yazilir
+    // (ipucunda her zaman durur).
+    const cell = [h("div", { text: group.name })];
+    if (group.name !== everyone) cell.push(h("div", { class: "call-people", text: everyone }));
+    row.appendChild(h("td", {}, cell));
+    row.appendChild(h("td", { class: "when", text: String(group.count) }));
+    row.appendChild(h("td", { class: "when", text: group.duration_text }));
+    row.appendChild(h("td", { class: "when", text: group.last_at ? stamp(group.last_at) : "—" }));
+    row.appendChild(h("td", { class: "when", text: String(group.people_count) }));
+    body.appendChild(row);
   });
 }
 
@@ -636,7 +533,7 @@ function closeCallsDrawer() {
   callsState.drawerId = null;
 }
 
-/** Kisi cekmecesi: ozet + o kisiyle tum gorusmeler + ortak grup/toplantilar. */
+/** Kisi cekmecesi: ozet + o kisiyle tum gorusmeler + ortak grup aramalari. */
 async function openCallPerson(counterpartId, name) {
   if (!counterpartId) return;
   callsState.drawerId = counterpartId;
@@ -665,6 +562,7 @@ function renderCallPersonBody(body, data) {
     ["Giden / gelen", `${summary.outgoing || 0} / ${summary.incoming || 0}`],
     ["Kaçırılan", String(summary.missed || 0)],
     ["En uzun", summary.longest_text || "—"],
+    ["Grup araması", `${summary.group_count || 0} · ${summary.group_text || "—"}`],
     ["Son görüşme", summary.last_at ? stamp(summary.last_at) : "—"],
   ];
   const box = h("div", { class: "call-summary" }, []);
@@ -681,10 +579,8 @@ function renderCallPersonBody(body, data) {
   body.appendChild(h("h3", { text: "Görüşmeler" }));
   body.appendChild(callListBox(data.calls || [], "Bu pencerede birebir görüşme yok."));
 
-  body.appendChild(h("h3", { text: "Grup ve toplantılar" }));
-  body.appendChild(
-    callListBox(data.group_calls || [], "Ortak grup araması ya da toplantı yok.")
-  );
+  body.appendChild(h("h3", { text: "Grup aramaları" }));
+  body.appendChild(callListBox(data.group_calls || [], "Ortak grup araması yok."));
 }
 
 function callListBox(calls, emptyText) {
@@ -707,7 +603,7 @@ function callListBox(calls, emptyText) {
   return list;
 }
 
-/** Toplanti / grup / tek arama ayrintisi. */
+/** Grup ya da birebir aramanin ayrintisi. */
 function openCallDetail(call) {
   callsState.drawerId = call.call_id;
   const body = openCallsDrawer(call.title, call.kind_label);
@@ -722,10 +618,6 @@ function openCallDetail(call) {
   if (call.kind === "one_to_one" && call.counterpart_label) {
     lines.push(["Karşı taraf", call.counterpart_label]);
   }
-  if (call.topic && call.topic !== call.title) lines.push(["Sohbet", call.topic]);
-  if (call.source === "chat") lines.push(["Kaynak", "Toplantı sohbetindeki katılım kaydı"]);
-  if (call.meeting_organizer) lines.push(["Organizatör", call.meeting_organizer]);
-  if (call.my_response) lines.push(["Yanıtım", call.my_response]);
   if (call.forwarded) lines.push(["Yönlendirme", call.forwarded]);
   lines.forEach(([label, value]) =>
     body.appendChild(
@@ -755,16 +647,17 @@ function openCallDetail(call) {
     body.appendChild(h("p", { class: "hint", text: "Katılımcı listesi kayıtta yok." }));
   }
 
-  if ((call.attendees || []).length) {
-    // Davetliler: takvim kaydindan. Katilanlarla ayni sey DEGIL.
-    body.appendChild(h("h3", { text: "Davetliler" }));
-    const guests = h("div", { class: "call-list" }, []);
-    call.attendees.forEach((name) =>
-      guests.appendChild(
-        h("div", { class: "call-line" }, [h("span", { class: "what", text: name })])
-      )
+  if (call.kind === "group_call" && call.group_key) {
+    body.appendChild(
+      h("button", {
+        class: "small",
+        text: "Bu grubun aramaları",
+        onclick: () => {
+          closeCallsDrawer();
+          filterByGroup({ key: call.group_key, name: call.title });
+        },
+      })
     );
-    body.appendChild(guests);
   }
 
   if (call.counterpart_id && call.kind === "one_to_one") {
@@ -790,16 +683,13 @@ function bindCalls() {
   });
   el("calls-scan").addEventListener("click", scanCalls);
   el("calls-export").addEventListener("click", exportCalls);
-  el("calls-unmatched").addEventListener("click", openUnmatched);
-  el("calls-attendance").addEventListener("click", openAttendance);
   el("calls-drawer-close").addEventListener("click", closeCallsDrawer);
-  el("calls-tab-list").addEventListener("click", () => {
-    callsState.tab = "list";
-    renderCalls();
-  });
-  el("calls-tab-people").addEventListener("click", () => {
-    callsState.tab = "people";
-    renderCalls();
+  el("calls-filter-clear").addEventListener("click", clearCallGroupFilter);
+  Object.entries(CALL_TABS).forEach(([name, id]) => {
+    el(id).addEventListener("click", () => {
+      callsState.tab = name;
+      renderCalls();
+    });
   });
   el("calls-search").addEventListener("input", (event) => {
     callsState.query = event.target.value;

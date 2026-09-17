@@ -12,7 +12,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
-from .attendance import MeetingAttendance, MeetingPart
 from .source import (
     DIRECTION_IN,
     DIRECTION_OUT,
@@ -20,10 +19,8 @@ from .source import (
     STATE_ACCEPTED,
     TYPE_MULTI_PARTY,
     TYPE_TWO_PARTY,
-    CalendarRecord,
     CallRecord,
     CallsError,
-    ThreadRecord,
     empty_diagnostics,
 )
 
@@ -58,8 +55,6 @@ def call(
     participants: Iterable[str] = (),
     subject: str = "",
     forwarded: str = "",
-    thread_id: str = "",
-    group_thread_id: str = "",
 ) -> CallRecord:
     """Test verisi uretmeyi kisaltan yardimci."""
     started = start if isinstance(start, datetime) else datetime.fromisoformat(str(start))
@@ -81,76 +76,9 @@ def call(
         target_id=other if outgoing else ME,
         target_name=other_name if outgoing else "",
         forwarded=forwarded,
-        thread_id=thread_id,
-        group_thread_id=group_thread_id,
         subject=subject,
         participants=list(participants),
         raw={"callId": call_id},
-    )
-
-
-def attended(
-    thread_id: str,
-    ended: datetime,
-    parts: Iterable[tuple[str, int]] = (),
-    call_id: str = "",
-) -> MeetingAttendance:
-    """Toplanti sohbetindeki `<partlist type="ended">` kaydinin karsiligi."""
-    # Damgasiz kayit da uretilebilsin: teshis testleri bunu kullaniyor.
-    if isinstance(ended, datetime):
-        moment = ended if ended.tzinfo else ended.replace(tzinfo=timezone.utc)
-        stamp = moment.isoformat().replace("+00:00", "Z")
-    else:
-        stamp = str(ended or "")
-    return MeetingAttendance(
-        thread_id=thread_id,
-        call_id=call_id,
-        ended_at=stamp,
-        parts=[MeetingPart(mri=mri, seconds=seconds) for mri, seconds in parts],
-    )
-
-
-def event(
-    subject: str,
-    start: str,
-    minutes: float = 30,
-    organizer: str = "Örnek Kişi",
-    response: str = "Accepted",
-    event_type: str = "SingleInstance",
-    show_as: str = "Busy",
-    attendees: Iterable[str] = (),
-    cid: str = "",
-    meeting_url: str = "",
-    as_text: bool = False,
-) -> CalendarRecord:
-    """Takvim kaydi.
-
-    `start` YEREL duvar saatidir ("2026-09-11 10:00"). Gercek onbellekte saat
-    alanlari saat dilimsiz `datetime` nesnesidir ve degerleri **UTC** tasir;
-    sahte kaynak da ayni seyi uretir, yoksa testler gercege benzemez.
-    `as_text=True` ise eski metin bicimini (yerel saat) uretir.
-    """
-    started = datetime.fromisoformat(start)
-    ended = started + timedelta(minutes=minutes)
-    stamp = "%Y-%m-%d %H:%M:%S"
-
-    def as_utc(moment: datetime) -> datetime:
-        """Yerel duvar saati -> saat dilimsiz UTC (ccl'in verdigi bicim)."""
-        return moment.astimezone(timezone.utc).replace(tzinfo=None)
-    return CalendarRecord(
-        event_id=f"event-{subject}",
-        start_time=started.strftime(stamp) if as_text else as_utc(started),
-        end_time=ended.strftime(stamp) if as_text else as_utc(ended),
-        cid=cid,
-        meeting_url=meeting_url,
-        subject=subject,
-        organizer_name=organizer,
-        my_response=response,
-        is_online_meeting=True,
-        location="Microsoft Teams",
-        event_type=event_type,
-        show_as=show_as,
-        attendees=list(attendees),
     )
 
 
@@ -160,20 +88,14 @@ class FakeCallSource:
     def __init__(
         self,
         calls: Iterable[CallRecord] = (),
-        calendar: Iterable[CalendarRecord] = (),
         names: dict[str, str] | None = None,
-        threads: Iterable[ThreadRecord] = (),
-        attendance: Iterable[MeetingAttendance] = (),
         my_mri: str = "",
         error: CallsError | None = None,
         report: dict[str, Any] | None = None,
     ) -> None:
         self.calls: list[CallRecord] = list(calls)
-        self.calendar: list[CalendarRecord] = list(calendar)
         self.names: dict[str, str] = dict(DEFAULT_NAMES if names is None else names)
-        self.threads: list[ThreadRecord] = list(threads)
-        self.attendance: list[MeetingAttendance] = list(attendance)
-        # Gercek kaynak bunu veritabani adindan ya da kendi mesajindan bulur.
+        # Gercek kaynak bunu veritabani adindan bulur.
         self.my_mri = my_mri
         self.error = error
         self.reads = 0
@@ -184,43 +106,17 @@ class FakeCallSource:
     def diagnostics(self) -> dict[str, Any]:
         return dict(self.report)
 
-    def read(self) -> tuple[
-        list[CallRecord],
-        list[CalendarRecord],
-        dict[str, str],
-        list[ThreadRecord],
-        list[MeetingAttendance],
-    ]:
+    def read(self) -> tuple[list[CallRecord], dict[str, str]]:
         self.reads += 1
         if self.error is not None:
             raise self.error
-        # Teshis alani gercek kaynaktaki gibi okunan katilim sayisini tasir.
-        self.report["attendance"] = len(self.attendance)
         self.report["my_mri"] = self.my_mri
-        return (
-            list(self.calls),
-            list(self.calendar),
-            dict(self.names),
-            list(self.threads),
-            list(self.attendance),
-        )
+        return (list(self.calls), dict(self.names))
 
     # --- kolaylik -----------------------------------------------------
 
     def add(self, record: CallRecord) -> CallRecord:
         self.calls.append(record)
-        return record
-
-    def add_event(self, record: CalendarRecord) -> CalendarRecord:
-        self.calendar.append(record)
-        return record
-
-    def add_thread(self, record: ThreadRecord) -> ThreadRecord:
-        self.threads.append(record)
-        return record
-
-    def add_attendance(self, record: MeetingAttendance) -> MeetingAttendance:
-        self.attendance.append(record)
         return record
 
 

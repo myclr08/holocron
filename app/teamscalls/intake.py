@@ -5,10 +5,16 @@ Uc soru burada cevaplanir:
 1. **Bu arama ne kadar surdu?** `durationInMs` her kayitta yok; yoksa
    `endTime - connectTime`, o da yoksa `endTime - startTime` kullanilir.
    Kacirilmis aramada sure sifirdir (baglanti hic kurulmadi).
-2. **Bu arama ne turden?** `TwoParty` birebir gorusmedir. `MultiParty` ise
-   takvimde ayni saate denk gelen bir kayit varsa **toplanti**, yoksa
-   **grup aramasi** sayilir; eslesme penceresi +/- 10 dakikadir.
-3. **Karsi taraf kim?** Gelen aramada arayan (`originatorParticipant`),
+2. **Bu arama birebir mi, grup mu?** `TwoParty` birebir, `MultiParty` grup
+   aramasidir. Alan bos ya da taninmiyorsa katilimci sayisina bakilir:
+   **kendim haric katilimci > 1 ise grup**, degilse birebir. (Toplanti diye
+   bir tur YOKTUR: takvim eslemesi tumden kaldirildi.)
+3. **Bu arama hangi grupla yapildi?** Grubun kimligi **katilimci kumesidir**
+   (kendim haric, siralanmis kimlikler): ayni kisilerle yapilan butun grup
+   aramalari tek satirda toplanir. Sohbet kimligi (`threadId`) kullanilmaz,
+   grup adi da onbellekten ARANMAZ; etiket katilimci adlarindan turer
+   ("Ali, Veli, Ayse +2").
+4. **Karsi taraf kim?** Gelen aramada arayan (`originatorParticipant`),
    giden aramada aranan (`targetParticipant`). Ad, profil store'larindan
    cozulur; cozulemezse kaydin kendi `displayName` alani, o da yoksa kimlik
    yazilir (bos satir kullaniciya hicbir sey anlatmaz).
@@ -17,27 +23,21 @@ Uc soru burada cevaplanir:
 from __future__ import annotations
 
 import json
-import re
-from dataclasses import dataclass, field as dataclass_field
-from datetime import date, datetime, timedelta
-from typing import Any, Iterable, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any, Iterable
 
 from .. import fields as field_utils, repository
-from .attendance import PARTLIST_STARTED, MeetingAttendance, within
 from .source import (
     DIRECTION_IN,
     DIRECTION_OUT,
-    EVENT_RECURRING_MASTER,
-    SHOW_AS_OOF,
     STATE_ACCEPTED,
     STATE_DECLINED,
     STATE_MISSED,
     TYPE_MULTI_PARTY,
     TYPE_TWO_PARTY,
-    CalendarRecord,
     CallRecord,
     CallSource,
-    ThreadRecord,
     as_int,
     as_mri,
     canonical_direction,
@@ -47,20 +47,17 @@ from .source import (
     empty_diagnostics,
     iso_text,
     jsonable,
-    parse_local,
     parse_utc,
     utc_now,
 )
 
 # Arama turleri (veritabanindaki `kind` sutunu).
 KIND_ONE_TO_ONE = "one_to_one"
-KIND_MEETING = "meeting"
 KIND_GROUP = "group_call"
-KINDS: tuple[str, ...] = (KIND_ONE_TO_ONE, KIND_MEETING, KIND_GROUP)
+KINDS: tuple[str, ...] = (KIND_ONE_TO_ONE, KIND_GROUP)
 
 KIND_LABELS: dict[str, str] = {
     KIND_ONE_TO_ONE: "Birebir",
-    KIND_MEETING: "Toplantı",
     KIND_GROUP: "Grup araması",
 }
 
@@ -75,12 +72,6 @@ STATE_LABELS: dict[str, str] = {
     STATE_DECLINED: "Reddedilen",
 }
 
-# Toplanti eslemesi: aramanin baslangici takvim kaydina bu kadar yakinsa tutar.
-# (Thread kimligi tutuyorsa saat hic bakilmaz; bu yalnizca YEDEK yoldur.)
-MEETING_TOLERANCE_MINUTES = 10
-# Bu kadar kisa bir "thread kimligi" ile alt dizge eslemesi yapilmaz.
-MIN_THREAD_LENGTH = 10
-
 DEFAULT_DAYS = 30
 WINDOW_DAYS: tuple[int, ...] = (7, 30, 90)
 TOP_PEOPLE = 5
@@ -94,7 +85,6 @@ ID_TAIL = 6
 
 # Karsi tarafi olmayan aramalarin basligi.
 GROUP_TITLE = "Grup araması"
-MEETING_TITLE = "Toplantı"
 # Grup basliginda en fazla kac ad yazilir; kalani "+N" olur.
 MAX_PARTY_NAMES = 3
 
@@ -203,213 +193,35 @@ def counterpart_of(call: CallRecord, names: dict[str, str] | None) -> tuple[str,
     return clean_text(person_id), resolve_name(person_id, fallback, names)
 
 
-# --- takvim eslemesi -----------------------------------------------------
+def same_person(left: Any, right: Any) -> bool:
+    """Iki kimlik ayni kisi mi? (`8:orgid:` oneki ve harf buyuklugu onemsiz)"""
+    first = as_mri(clean_text(left)).casefold()
+    second = as_mri(clean_text(right)).casefold()
+    return bool(first) and first == second
 
 
-def usable_events(calendar: Iterable[CalendarRecord]) -> list[CalendarRecord]:
-    """**Zaman** eslemesine girebilecek takvim kayitlari.
+# --- tur karari ----------------------------------------------------------
 
-    Yineleyen serinin sablonu (`RecurringMaster`) buraya GIRMEZ: tarihi
-    serinin ilk gunudur, bugunku aramayla saat karsilastirmak anlamsiz olur.
-    Iptal edilmis kayit ve "ofiste degilim" de girmez.
+
+def kind_of(call: CallRecord, me: str = "") -> str:
+    """Birebir mi, grup mu?
+
+    Once Teams'in kendi alani: `TwoParty` birebir, `MultiParty` gruptur.
+    Alan bos ya da taninmiyorsa (eski kayitlar, bozuk deger) katilimci
+    sayisina bakilir: **kendim haric katilimci birden fazlaysa grup**.
+    Kimligim bilinmiyorsa kimse elenemez; o zaman listenin KENDISI sayilir
+    (birebir aramada iki kisi vardir: ben ve karsi taraf).
     """
-    picked: list[CalendarRecord] = []
-    for event in calendar or ():
-        if clean_text(event.event_type) == EVENT_RECURRING_MASTER:
-            continue
-        if clean_text(event.show_as) == SHOW_AS_OOF:
-            continue
-        if getattr(event, "is_cancelled", False):
-            continue
-        if parse_local(event.start_time) is None:
-            continue
-        picked.append(event)
-    return picked
-
-
-def identity_events(calendar: Iterable[CalendarRecord]) -> list[CalendarRecord]:
-    """**Kimlik** eslemesine girebilecek kayitlar (kimligi olan her sey).
-
-    Tekrarlayan toplantilar (sabah daily'leri) takvimde cogu zaman yalnizca
-    seri kaydi olarak durur; olusumlar ayri kayit olmayabilir. Kimlik
-    eslemesinde saat rol oynamadigi icin seri kaydi da, iptal edilmis seri de
-    adaydir: gecmis aramalar iptal edilmis bir seriye ait olabilir.
-    """
-    picked: list[CalendarRecord] = []
-    for event in calendar or ():
-        if clean_text(event.show_as) == SHOW_AS_OOF:
-            continue
-        if not clean_text(getattr(event, "cid", "")) and not clean_text(
-            getattr(event, "meeting_url", "")
-        ):
-            continue
-        picked.append(event)
-    return picked
-
-
-@dataclass
-class EventPools:
-    """Iki ayri havuz: kimlikle eslesenler ve saatle eslesenler."""
-
-    identity: list[CalendarRecord] = dataclass_field(default_factory=list)
-    time: list[CalendarRecord] = dataclass_field(default_factory=list)
-
-    def __iter__(self):
-        """Eski kod bunu duz bir takvim listesi gibi gezebilsin."""
-        return iter(self.time)
-
-
-def event_pools(calendar: Iterable[CalendarRecord]) -> EventPools:
-    """Takvimi bir kez suzup iki havuza ayirir (her arama icin tekrar etmesin)."""
-    if isinstance(calendar, EventPools):
-        return calendar
-    records = list(calendar or ())
-    return EventPools(identity=identity_events(records), time=usable_events(records))
-
-
-# `19:<32 hex>@thread.v2` bir grup SOHBETIDIR: planli toplanti degil, sohbetten
-# baslatilmis arama. Takvimde karsiligi olmasi beklenmez.
-GROUP_CHAT_CORE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
-
-THREAD_MEETING = "meeting"
-THREAD_GROUP_CHAT = "group_chat"
-THREAD_OTHER = "other"
-
-
-def thread_core(thread_id: Any) -> str:
-    """`19:meeting_ABC123@thread.v2` -> `ABC123`.
-
-    Toplanti baglantisinda thread kimligi URL kodlanmis gecer (`%3a`, `%40`),
-    duz alt dizge aramasi tutmaz; govdesi ise oldugu gibi durur.
-    """
-    text = clean_text(thread_id)
-    if ":" in text:
-        text = text.split(":", 1)[1]
-    if "@" in text:
-        text = text.split("@", 1)[0]
-    if text.startswith("meeting_"):
-        text = text[len("meeting_"):]
-    return text
-
-
-def thread_matches(thread_id: Any, event: CalendarRecord) -> bool:
-    """Arama ile takvim kaydi ayni toplantiya mi ait? (kesin eslesme)"""
-    marker = clean_text(thread_id)
-    if len(marker) < MIN_THREAD_LENGTH:
-        return False
-    cid = clean_text(getattr(event, "cid", ""))
-    if cid and (cid == marker or marker in cid or cid in marker):
-        return True
-    core = thread_core(marker)
-    if not core or len(core) < MIN_THREAD_LENGTH:
-        return False
-    url = clean_text(getattr(event, "meeting_url", ""))
-    return bool(url and core in url)
-
-
-def row_threads(row: dict[str, Any]) -> list[str]:
-    """Satirin tasidigi sohbet kimlikleri (toplanti ve grup sohbeti)."""
-    markers = [clean_text(row.get("thread_id")), clean_text(row.get("group_thread_id"))]
-    return [marker for marker in markers if marker]
-
-
-def core_kind(thread_id: Any) -> str:
-    """Bu kimlik planli bir toplantiya mi, grup sohbetine mi ait?"""
-    marker = clean_text(thread_id)
-    if not marker:
-        return ""
-    if "meeting_" in marker.casefold():
-        return THREAD_MEETING
-    if GROUP_CHAT_CORE.match(thread_core(marker)):
-        return THREAD_GROUP_CHAT
-    return THREAD_OTHER
-
-
-def thread_kind(record: dict[str, Any]) -> str:
-    """Satirin sohbet turu: `meeting`, `group_chat`, `other` ya da bos.
-
-    Toplanti kimligi (`19:meeting_...`) once gelir: ikisi birden varsa arama
-    bir toplantiya aittir.
-    """
-    kinds = [core_kind(marker) for marker in row_threads(record)]
-    for wanted in (THREAD_MEETING, THREAD_GROUP_CHAT, THREAD_OTHER):
-        if wanted in kinds:
-            return wanted
-    return ""
-
-
-def call_threads(call: CallRecord) -> list[str]:
-    """Aramanin tasidigi sohbet kimlikleri (toplanti ve grup sohbeti)."""
-    markers = [clean_text(call.thread_id), clean_text(call.group_thread_id)]
-    return [marker for marker in markers if marker]
-
-
-def match_by_thread(
-    call: CallRecord, events: Iterable[CalendarRecord]
-) -> CalendarRecord | None:
-    """Kimlikle kesin eslesme: `threadId` ya da `groupChatThreadId` <-> `cid`."""
-    markers = call_threads(call)
-    if not markers:
-        return None
-    for event in events:
-        if any(thread_matches(marker, event) for marker in markers):
-            return event
-    return None
-
-
-def match_event(
-    call: CallRecord,
-    events: Any,
-    tolerance_minutes: int = MEETING_TOLERANCE_MINUTES,
-) -> CalendarRecord | None:
-    """Aramanin takvim kaydi.
-
-    Once **kesin** yol denenir: aramanin `threadId` ya da `groupChatThreadId`
-    degeri takvim kaydinin `skypeTeamsDataObj.cid` alanina (ya da toplanti
-    baglantisinin govdesine) denk geliyorsa saat hic hesaba katilmaz --
-    tekrarlayan toplantilar yalnizca boyle eslesir. Kimlik tutmuyorsa
-    baslangic saatine en yakin kayit alinir; pencere disi eslesmez.
-    """
-    pools = event_pools(events)
-    exact = match_by_thread(call, pools.identity)
-    if exact is not None:
-        return exact
-
-    started = parse_utc(call.start_time)
-    if started is None:
-        return None
-    window = timedelta(minutes=max(0, int(tolerance_minutes)))
-    best: CalendarRecord | None = None
-    best_gap: timedelta | None = None
-    for event in pools.time:
-        moment = parse_local(event.start_time)
-        if moment is None:
-            continue
-        gap = abs(moment - started)
-        if gap > window:
-            continue
-        if best_gap is None or gap < best_gap:
-            best, best_gap = event, gap
-    return best
-
-
-def thread_index(threads: Iterable[ThreadRecord]) -> dict[str, ThreadRecord]:
-    """Sohbet kimligi -> sohbet kaydi."""
-    known: dict[str, ThreadRecord] = {}
-    for thread in threads or ():
-        marker = clean_text(thread.thread_id)
-        if marker:
-            known.setdefault(marker, thread)
-    return known
-
-
-def thread_of(call: CallRecord, threads: dict[str, ThreadRecord]) -> ThreadRecord | None:
-    """Aramanin bagli oldugu sohbet (once grup sohbeti, sonra toplanti)."""
-    for marker in (call.group_thread_id, call.thread_id):
-        thread = threads.get(clean_text(marker))
-        if thread is not None:
-            return thread
-    return None
+    call_type = canonical_type(call.call_type)
+    if call_type == TYPE_TWO_PARTY:
+        return KIND_ONE_TO_ONE
+    if call_type == TYPE_MULTI_PARTY:
+        return KIND_GROUP
+    people = [person for person in (clean_text(item) for item in (call.participants or [])) if person]
+    if clean_text(me):
+        others = [person for person in people if not same_person(person, me)]
+        return KIND_GROUP if len(others) > 1 else KIND_ONE_TO_ONE
+    return KIND_GROUP if len(people) > 2 else KIND_ONE_TO_ONE
 
 
 # --- normalize -----------------------------------------------------------
@@ -417,44 +229,24 @@ def thread_of(call: CallRecord, threads: dict[str, ThreadRecord]) -> ThreadRecor
 
 def normalize_call(
     call: CallRecord,
-    events: Any = (),
     names: dict[str, str] | None = None,
     seen_at: str | None = None,
-    threads: dict[str, ThreadRecord] | None = None,
+    me: str = "",
 ) -> dict[str, Any] | None:
     """Tek arama -> veritabani satiri. Kimliksiz kayit atlanir."""
     call_id = clean_text(call.call_id)
     if not call_id:
         return None
 
-    call_type = canonical_type(call.call_type)
-    event = match_event(call, events) if call_type != TYPE_TWO_PARTY else None
-    if call_type == TYPE_TWO_PARTY:
-        kind = KIND_ONE_TO_ONE
-    elif event is not None:
-        kind = KIND_MEETING
-    else:
-        kind = KIND_GROUP
-
-    thread = thread_of(call, threads or {})
     counterpart_id, counterpart_name = counterpart_of(call, names)
 
-    # Katilimcilar: aramanin kendi `participantList` alani; bos kalirsa
-    # sohbetin uyeleri yedege gecer. Adlar profil sozlugunden cozulur ve
-    # ad SATIRDA saklanir; boylece ekranda ham kimlik hic gorunmez.
+    # Katilimcilar aramanin kendi `participantList` alanindan gelir. Adlar
+    # profil sozlugunden cozulur ve ad SATIRDA saklanir; boylece ekranda ham
+    # kimlik hic gorunmez. Grubun kimligi de bu kumeden turer.
     people = [clean_text(item) for item in (call.participants or []) if clean_text(item)]
-    if not people and thread is not None:
-        people = [clean_text(item) for item in thread.members if clean_text(item)]
     participants = [
         {"id": person, "name": resolve_name(person, "", names)} for person in people
     ]
-
-    subject = clean_text(event.subject) if event is not None else clean_text(call.subject)
-    topic = clean_text(thread.topic) if thread is not None else ""
-    if not topic and thread is not None and thread.member_names:
-        # Basligi olmayan grup sohbetinde Teams de avatar adlarini yaziyor.
-        topic = ", ".join(thread.member_names[:MAX_PARTY_NAMES])
-    attendees = list(event.attendees) if event is not None else []
 
     return {
         "call_id": call_id,
@@ -464,41 +256,27 @@ def normalize_call(
         "duration_ms": duration_of(call),
         "direction": canonical_direction(call.direction),
         "state": canonical_state(call.state),
-        "kind": kind,
+        "kind": kind_of(call, me),
         "counterpart_id": counterpart_id,
         "counterpart_name": counterpart_name,
         "forwarded": clean_text(call.forwarded),
-        "meeting_subject": subject,
-        "meeting_organizer": clean_text(event.organizer_name) if event is not None else "",
-        "my_response": clean_text(event.my_response) if event is not None else "",
-        "thread_id": clean_text(call.thread_id),
-        "group_thread_id": clean_text(call.group_thread_id),
-        "topic": topic,
         "participants_json": json.dumps(participants, ensure_ascii=False),
-        "attendees_json": json.dumps(attendees, ensure_ascii=False),
         "raw_json": json.dumps(jsonable(call.raw or {}), ensure_ascii=False, default=str),
-        "source": SOURCE_HISTORY,
         "seen_at": seen_at or repository.now_iso(),
-        # Saklanmaz (tabloda sutunu yok): yalnizca tarama ozetindeki
-        # "kac tekrarlayan toplanti eslesti" sayimi icin tasinir.
-        "matched_event_type": clean_text(event.event_type) if event is not None else "",
     }
 
 
 def normalize(
     calls: Iterable[CallRecord],
-    calendar: Iterable[CalendarRecord] = (),
     names: dict[str, str] | None = None,
     seen_at: str | None = None,
-    threads: Iterable[ThreadRecord] = (),
+    me: str = "",
 ) -> list[dict[str, Any]]:
     """Ham kayitlar -> veritabani satirlari (eskiden yeniye)."""
-    events = event_pools(calendar)
-    known_threads = thread_index(threads)
     stamp = seen_at or repository.now_iso()
     rows: list[dict[str, Any]] = []
     for call in calls or ():
-        row = normalize_call(call, events, names, stamp, known_threads)
+        row = normalize_call(call, names, stamp, me)
         if row is not None:
             rows.append(row)
     rows.sort(key=lambda item: (item["started_at"], item["call_id"]))
@@ -541,65 +319,69 @@ def participants_of(row: dict[str, Any]) -> list[str]:
     return [pair["id"] for pair in participant_pairs(row) if pair["id"]]
 
 
-def attendees_of(row: dict[str, Any]) -> list[str]:
-    """Takvim davetlileri (katilanlar degil: davet edilenler)."""
-    return [clean_text(item) for item in _load_list(row.get("attendees_json")) if clean_text(item)]
+def other_pairs(row: dict[str, Any], me: str = "") -> list[dict[str, str]]:
+    """Kendim haric katilimcilar.
+
+    Grup istatistiginde "en cok gorusulen" ben olamam. Kimligim bilinmiyorsa
+    (ayar bos, tarama bulamadi) kimse elenmez -- yanlis kisiyi elemektense
+    hic elememek yeglenir.
+    """
+    return [pair for pair in participant_pairs(row) if not same_person(pair["id"], me)]
 
 
-def participant_labels(record: dict[str, Any], names: dict[str, str] | None = None) -> list[str]:
-    """Katilimcilarin gorunen adlari (ham kimlik cikmaz).
+def participant_labels(
+    record: dict[str, Any], names: dict[str, str] | None = None, me: str = ""
+) -> list[str]:
+    """Katilimcilarin gorunen adlari (ham kimlik cikmaz, ben listede yokum).
 
     Once tarama aninda profillerden cozulup satira yazilan ad, sonra ekran
     anindaki ad sozlugu, en sonunda "Bilinmeyen kişi (son alti hane)".
     """
-    return [person_label(pair["id"], pair["name"], names) for pair in participant_pairs(record)]
+    return [person_label(pair["id"], pair["name"], names) for pair in other_pairs(record, me)]
 
 
-def display_party(record: dict[str, Any], names: dict[str, str] | None = None) -> str:
+def party_text(labels: Iterable[str]) -> str:
+    """'Ali, Veli, Ayşe +2': en fazla uc ad, kalani sayiyla."""
+    people = list(labels)
+    if not people:
+        return ""
+    shown = ", ".join(people[:MAX_PARTY_NAMES])
+    rest = len(people) - MAX_PARTY_NAMES
+    return f"{shown} +{rest}" if rest > 0 else shown
+
+
+def display_party(
+    record: dict[str, Any], names: dict[str, str] | None = None, me: str = ""
+) -> str:
     """Satirin "karsi taraf" sutununda gorunen metin. Tek dogru kaynak budur.
 
-    Cok kisili aramada "karsi taraf" diye bir sey yoktur: toplantida konu,
-    grup aramasinda katilimci adlari (en fazla uc ad, kalani "+N") yazilir.
-    Katilimci da yoksa arama turunun kendisi yazilir. Birebir gorusmede
-    karsi tarafin adi; adi cozulemediyse "Bilinmeyen kişi (son alti hane)".
+    Grup aramasinda "karsi taraf" diye bir sey yoktur: katilimci adlari
+    (en fazla uc ad, kalani "+N") yazilir; katilimci kaydedilmemisse
+    "Grup araması". Birebir gorusmede karsi tarafin adi; adi cozulemediyse
+    "Bilinmeyen kişi (son alti hane)".
     """
-    kind = clean_text(record.get("kind"))
-    if kind == KIND_ONE_TO_ONE:
+    if clean_text(record.get("kind")) == KIND_ONE_TO_ONE:
         return person_label(record.get("counterpart_id"), record.get("counterpart_name"), names)
-
-    if kind == KIND_MEETING:
-        subject = clean_text(record.get("meeting_subject"))
-        if subject:
-            return subject
-
-    # Grup sohbetinin kendi adi varsa katilimci dokumunden daha anlamlidir.
-    topic = clean_text(record.get("topic"))
-    if topic:
-        return topic
-
-    people = participant_labels(record, names)
-    if people:
-        shown = ", ".join(people[:MAX_PARTY_NAMES])
-        rest = len(people) - MAX_PARTY_NAMES
-        return f"{shown} +{rest}" if rest > 0 else shown
-    return MEETING_TITLE if kind == KIND_MEETING else GROUP_TITLE
+    # Adlar alfabetik: ayni grup listede ve Gruplar sekmesinde AYNI etiketi
+    # tasisin (katilimci listesinin sirasi kayittan kayda degisiyor).
+    people = sorted(participant_labels(record, names, me), key=field_utils.fold)
+    return party_text(people) or GROUP_TITLE
 
 
-def view(row: dict[str, Any], names: dict[str, str] | None = None) -> dict[str, Any]:
+def view(
+    row: dict[str, Any], names: dict[str, str] | None = None, me: str = ""
+) -> dict[str, Any]:
     """Satirin arayuze giden hali: etiketler, okunur sure, gorunen taraf."""
     card = dict(row)
-    card["participants"] = participants_of(row)
-    card["participant_names"] = participant_labels(row, names)
-    # Katilanlar (arama kaydi) ile davetliler (takvim) ayri sutunlardir.
-    card["attendees"] = attendees_of(row)
+    card["participants"] = [pair["id"] for pair in other_pairs(row, me) if pair["id"]]
+    card["participant_names"] = participant_labels(row, names, me)
     card.pop("participants_json", None)
-    card.pop("attendees_json", None)
     card.pop("raw_json", None)
     card["kind_label"] = KIND_LABELS.get(row.get("kind", ""), "")
     card["direction_label"] = DIRECTION_LABELS.get(row.get("direction", ""), "")
     card["state_label"] = STATE_LABELS.get(row.get("state", ""), clean_text(row.get("state")))
     card["duration_text"] = duration_text(row.get("duration_ms"))
-    card["title"] = display_party(row, names)
+    card["title"] = display_party(row, names, me)
     # Ham kimlik ekrana cikmasin: birebirde cozulemeyen ad da etiketlenir.
     card["counterpart_label"] = (
         person_label(row.get("counterpart_id"), row.get("counterpart_name"), names)
@@ -607,11 +389,8 @@ def view(row: dict[str, Any], names: dict[str, str] | None = None) -> dict[str, 
         else ""
     )
     card["connected"] = is_connected(row)
-    # Grup sohbetinden baslatilan aramanin takvimde karsiligi beklenmez;
-    # arayuz "eslesmeyen" rozetine bunlari saymaz.
-    card["thread_kind"] = thread_kind(row)
-    card["source"] = clean_text(row.get("source")) or SOURCE_HISTORY
-    card["source_label"] = SOURCE_LABELS.get(card["source"], "")
+    # Gruplar sekmesinden listeye gecerken kullanilan anahtar.
+    card["group_key"] = group_key(row, me)
     return card
 
 
@@ -620,8 +399,10 @@ def is_connected(row: dict[str, Any]) -> bool:
     return clean_text(row.get("state")) == STATE_ACCEPTED
 
 
-def matches(row: dict[str, Any], needle: str, names: dict[str, str] | None = None) -> bool:
-    """Arama kutusu: gorunen taraf, katilimci adlari, konu, organizator, etiketler.
+def matches(
+    row: dict[str, Any], needle: str, names: dict[str, str] | None = None, me: str = ""
+) -> bool:
+    """Arama kutusu: gorunen taraf, katilimci adlari, sohbet adi, etiketler.
 
     Grup aramasinda ekranda katilimci adlari yaziyorsa arama da onlarda
     calismali; yoksa "gorunen ama bulunamayan" satirlar olurdu.
@@ -631,14 +412,10 @@ def matches(row: dict[str, Any], needle: str, names: dict[str, str] | None = Non
     haystack = " ".join(
         str(part or "")
         for part in (
-            display_party(row, names),
-            *participant_labels(row, names),
-            *attendees_of(row),
-            row.get("topic"),
+            display_party(row, names, me),
+            *participant_labels(row, names, me),
             row.get("counterpart_name"),
             row.get("counterpart_id"),
-            row.get("meeting_subject"),
-            row.get("meeting_organizer"),
             KIND_LABELS.get(row.get("kind", ""), ""),
             DIRECTION_LABELS.get(row.get("direction", ""), ""),
             STATE_LABELS.get(row.get("state", ""), ""),
@@ -669,8 +446,10 @@ def select(
     direction: str = "",
     state: str = "",
     kind: str = "",
+    group: str = "",
     now: datetime | None = None,
     names: dict[str, str] | None = None,
+    me: str = "",
 ) -> list[dict[str, Any]]:
     """Pencere + suzgecler; yeniden eskiye siralanmis satirlar."""
     rows = list(rows)
@@ -680,6 +459,7 @@ def select(
     wanted_direction = clean_text(direction)
     wanted_state = clean_text(state)
     wanted_kind = clean_text(kind)
+    wanted_group = clean_text(group)
 
     picked: list[dict[str, Any]] = []
     for row in rows:
@@ -691,35 +471,97 @@ def select(
             continue
         if wanted_kind and clean_text(row.get("kind")) != wanted_kind:
             continue
-        if not matches(row, needle, known):
+        if wanted_group and group_key(row, me) != wanted_group:
+            continue
+        if not matches(row, needle, known, me):
             continue
         picked.append(row)
     picked.sort(key=lambda item: (str(item.get("started_at") or ""), str(item.get("call_id") or "")), reverse=True)
     return picked
 
 
+# --- gruplar -------------------------------------------------------------
+#
+# Grup, KATILIMCI KUMESIDIR: ayni kisilerle yapilan butun aramalar tek
+# satirda toplanir. Sohbet kimligi (`threadId` / `groupChatThreadId`)
+# KULLANILMAZ: ayni ekip iki ayri sohbetten arayinca grup ikiye bolunuyordu.
+# Grubun adi da onbellekten ARANMAZ; etiket katilimci adlarindan turer.
+
+# Anahtardaki kimlikleri ayiran isaret.
+GROUP_KEY_SEPARATOR = "|"
+
+
+def group_key(row: dict[str, Any], me: str = "") -> str:
+    """Grup aramasinin kimligi: kendim haric katilimcilarin siralanmis kumesi.
+
+    Birebir aramada ve katilimcisi kaydedilmemis grup aramasinda bostur
+    (kimligi olmayan satir Gruplar sekmesine girmez).
+    """
+    if clean_text(row.get("kind")) != KIND_GROUP:
+        return ""
+    people = sorted({pair["id"] for pair in other_pairs(row, me) if pair["id"]})
+    return GROUP_KEY_SEPARATOR.join(people)
+
+
+def group_totals(
+    rows: Iterable[dict[str, Any]], names: dict[str, str] | None = None, me: str = ""
+) -> list[dict[str, Any]]:
+    """Gruplar sekmesi: her grup arama sayisi, toplam sure, son arama, katilimcilar.
+
+    Grup = katilimci kumesi. Etiket katilimci adlarindan turer ("A, B, C +2");
+    tam liste `participants` alaninda doner. Sure yalnizca gercekten
+    gorusulen aramalardan toplanir (kacirilan arama temas degildir) ama sayim
+    hepsini kapsar. Siralama sureye gore.
+    """
+    groups: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = group_key(row, me)
+        if not key:
+            continue
+        entry = groups.setdefault(
+            key,
+            {
+                "key": key,
+                "count": 0,
+                "ms": 0,
+                "last_at": "",
+                "people": {},
+            },
+        )
+        entry["count"] += 1
+        if is_connected(row):
+            entry["ms"] += as_int(row.get("duration_ms")) or 0
+        started = str(row.get("started_at") or "")
+        if started > entry["last_at"]:
+            entry["last_at"] = started
+        for pair in other_pairs(row, me):
+            if pair["id"] and pair["id"] not in entry["people"]:
+                entry["people"][pair["id"]] = person_label(pair["id"], pair["name"], names)
+
+    result: list[dict[str, Any]] = []
+    for entry in groups.values():
+        # Adlar alfabetik: ayni grup her zaman ayni etiketi tasisin (hangi
+        # aramanin once geldigine gore degismesin).
+        people = sorted(entry["people"].values(), key=field_utils.fold)
+        result.append(
+            {
+                "key": entry["key"],
+                # Etiket her zaman katilimci adlarindan turer.
+                "name": party_text(people) or GROUP_TITLE,
+                "count": entry["count"],
+                "ms": entry["ms"],
+                "duration_text": duration_text(entry["ms"]),
+                "last_at": entry["last_at"],
+                "participants": people,
+                "participant_ids": list(entry["people"].keys()),
+                "people_count": len(people),
+            }
+        )
+    result.sort(key=lambda item: (-item["ms"], -item["count"], field_utils.fold(item["name"])))
+    return result
+
+
 # --- istatistik ----------------------------------------------------------
-
-
-def local_day(row: dict[str, Any]) -> date | None:
-    """Aramanin YEREL gunu; gun dokumu makinenin saatine gore yapilir."""
-    moment = parse_utc(row.get("started_at"))
-    if moment is None:
-        return None
-    return moment.astimezone().date()
-
-
-def workdays_between(first: date, last: date) -> int:
-    """Iki tarih arasindaki is gunu (Pzt-Cum) sayisi; tatil dusulmez."""
-    if last < first:
-        return 0
-    count = 0
-    cursor = first
-    while cursor <= last:
-        if cursor.weekday() < 5:
-            count += 1
-        cursor += timedelta(days=1)
-    return count
 
 
 def people_totals(
@@ -766,13 +608,104 @@ def people_totals(
     return people
 
 
+def group_people_totals(
+    rows: Iterable[dict[str, Any]], names: dict[str, str] | None = None, me: str = ""
+) -> list[dict[str, Any]]:
+    """Grup aramalarina katilan kisiler, suresine gore.
+
+    Bir grup aramasinin butun suresi katilan HER kisiye yazilir: soru "bu
+    kisiyle ayni aramada ne kadar bulundum". Kendim listede yokum (kimligim
+    biliniyorsa); katilimci kaydedilmemisse karsi taraf yedege gecer.
+    """
+    totals: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if row.get("kind") != KIND_GROUP:
+            continue
+        pairs = other_pairs(row, me)
+        if not pairs:
+            # Katilimci listesi bos: hic degilse aramayi baslatan/aranan taraf.
+            marker = clean_text(row.get("counterpart_id"))
+            if not marker or same_person(marker, me):
+                continue
+            pairs = [{"id": marker, "name": clean_text(row.get("counterpart_name"))}]
+        ms = as_int(row.get("duration_ms")) or 0 if is_connected(row) else 0
+        key = group_key(row, me)
+        for pair in pairs:
+            marker = pair["id"] or pair["name"]
+            if not marker:
+                continue
+            entry = totals.setdefault(
+                marker,
+                {
+                    "counterpart_id": pair["id"],
+                    "name": person_label(pair["id"], pair["name"], names),
+                    "ms": 0,
+                    "count": 0,
+                    "groups": set(),
+                },
+            )
+            entry["count"] += 1
+            entry["ms"] += ms
+            if key:
+                entry["groups"].add(key)
+
+    people = []
+    for entry in totals.values():
+        entry["groups"] = len(entry["groups"])
+        entry["duration_text"] = duration_text(entry["ms"])
+        people.append(entry)
+    people.sort(key=lambda item: (-item["ms"], -item["count"], field_utils.fold(item["name"])))
+    return people
+
+
+def combined_people_totals(
+    rows: Iterable[dict[str, Any]], names: dict[str, str] | None = None, me: str = ""
+) -> list[dict[str, Any]]:
+    """Birebir + grup toplaminda en cok gorusulenler (ayni kisi tek satir)."""
+    rows = list(rows)
+    totals: dict[str, dict[str, Any]] = {}
+    for source, field_name in (
+        (people_totals(rows, names), "one_to_one_ms"),
+        (group_people_totals(rows, names, me), "group_ms"),
+    ):
+        for person in source:
+            key = person["counterpart_id"] or person["name"]
+            entry = totals.setdefault(
+                key,
+                {
+                    "counterpart_id": person["counterpart_id"],
+                    "name": person["name"],
+                    "ms": 0,
+                    "count": 0,
+                    "one_to_one_ms": 0,
+                    "group_ms": 0,
+                },
+            )
+            entry["ms"] += person["ms"]
+            entry["count"] += person["count"]
+            entry[field_name] += person["ms"]
+
+    people = list(totals.values())
+    for entry in people:
+        entry["duration_text"] = duration_text(entry["ms"])
+    people.sort(key=lambda item: (-item["ms"], -item["count"], field_utils.fold(item["name"])))
+    return people
+
+
 def build_stats(
     rows: Iterable[dict[str, Any]],
     days: Any = DEFAULT_DAYS,
     now: datetime | None = None,
     names: dict[str, str] | None = None,
+    me: str = "",
 ) -> dict[str, Any]:
-    """Istatistik seridi: top 5, uc dilim, aradim/arandim, is gunu ortalamasi."""
+    """Istatistik seridi: dort kutu.
+
+    1. birebir aramalarda en cok gorusulenler,
+    2. grup aramalarinda en cok gorusulenler,
+    3. ikisinin toplaminda en cok gorusulenler,
+    4. birebir / grup dagilimi (adet ve sure).
+    """
     rows = list(rows)
     known = names_from_rows(rows) if names is None else names
     moment = now or utc_now()
@@ -782,9 +715,10 @@ def build_stats(
     total_ms = sum(as_int(row.get("duration_ms")) or 0 for row in connected)
 
     split: list[dict[str, Any]] = []
-    for kind in (KIND_MEETING, KIND_GROUP, KIND_ONE_TO_ONE):
-        part = [row for row in connected if row.get("kind") == kind]
-        ms = sum(as_int(row.get("duration_ms")) or 0 for row in part)
+    for kind in (KIND_ONE_TO_ONE, KIND_GROUP):
+        part = [row for row in window if row.get("kind") == kind]
+        talked = [row for row in part if is_connected(row)]
+        ms = sum(as_int(row.get("duration_ms")) or 0 for row in talked)
         split.append(
             {
                 "kind": kind,
@@ -793,6 +727,7 @@ def build_stats(
                 "hours": round(ms / 3600000, 1),
                 "percent": round(ms * 100 / total_ms, 1) if total_ms else 0.0,
                 "count": len(part),
+                "count_percent": round(len(part) * 100 / len(window), 1) if window else 0.0,
                 "duration_text": duration_text(ms),
             }
         )
@@ -814,20 +749,6 @@ def build_stats(
         1 for row in window if clean_text(row.get("state")) == STATE_DECLINED
     )
 
-    daily: dict[date, dict[str, Any]] = {}
-    for row in connected:
-        day = local_day(row)
-        if day is None:
-            continue
-        entry = daily.setdefault(day, {"ms": 0, "count": 0})
-        entry["ms"] += as_int(row.get("duration_ms")) or 0
-        entry["count"] += 1
-
-    first = since.astimezone().date()
-    last = moment.astimezone().date()
-    workdays = workdays_between(first, last)
-    busiest = max(daily.items(), key=lambda item: (item[1]["ms"], item[0]), default=None)
-
     return {
         "days": _as_days(days),
         "since": iso_text(since),
@@ -836,24 +757,11 @@ def build_stats(
         "connected": len(connected),
         "total_ms": total_ms,
         "total_text": duration_text(total_ms),
-        "top": people_totals(connected, known)[:TOP_PEOPLE],
+        "top": people_totals(window, known)[:TOP_PEOPLE],
+        "group_top": group_people_totals(window, known, me)[:TOP_PEOPLE],
+        "combined_top": combined_people_totals(window, known, me)[:TOP_PEOPLE],
         "split": split,
         "direction": directions,
-        "workday": {
-            "days": workdays,
-            "average_ms": int(total_ms / workdays) if workdays else 0,
-            "average_text": duration_text(int(total_ms / workdays) if workdays else 0),
-            "busiest": (
-                {
-                    "date": busiest[0].isoformat(),
-                    "ms": busiest[1]["ms"],
-                    "count": busiest[1]["count"],
-                    "duration_text": duration_text(busiest[1]["ms"]),
-                }
-                if busiest
-                else None
-            ),
-        },
     }
 
 
@@ -879,8 +787,9 @@ def person_view(
     days: Any = DEFAULT_DAYS,
     now: datetime | None = None,
     names: dict[str, str] | None = None,
+    me: str = "",
 ) -> dict[str, Any]:
-    """Bir kisiyle butun gorusmeler + katildigi grup/toplantilar."""
+    """Bir kisiyle butun birebir gorusmeler + ortak grup aramalari."""
     rows = list(rows)
     known = names_from_rows(rows) if names is None else names
     marker = clean_text(counterpart_id)
@@ -895,13 +804,16 @@ def person_view(
     shared = [
         row
         for row in window
-        if row.get("kind") != KIND_ONE_TO_ONE
+        if row.get("kind") == KIND_GROUP
         and (clean_text(row.get("counterpart_id")) == marker or marker in participants_of(row))
     ]
 
     connected = [row for row in personal if is_connected(row)]
     total_ms = sum(as_int(row.get("duration_ms")) or 0 for row in connected)
     longest = max((as_int(row.get("duration_ms")) or 0 for row in connected), default=0)
+    group_ms = sum(
+        as_int(row.get("duration_ms")) or 0 for row in shared if is_connected(row)
+    )
     last_at = max((str(row.get("started_at") or "") for row in personal + shared), default="")
     name = next(
         (
@@ -933,461 +845,28 @@ def person_view(
             "longest_text": duration_text(longest),
             "last_at": last_at,
             "group_count": len(shared),
+            "group_ms": group_ms,
+            "group_text": duration_text(group_ms),
         },
-        "calls": [view(row, known) for row in sorted(personal, key=_order, reverse=True)],
-        "group_calls": [view(row, known) for row in sorted(shared, key=_order, reverse=True)],
+        "calls": [view(row, known, me) for row in sorted(personal, key=_order, reverse=True)],
+        "group_calls": [view(row, known, me) for row in sorted(shared, key=_order, reverse=True)],
     }
 
 
-# --- teshis: neden eslesmedi? --------------------------------------------
-#
-# Tekrarlayan toplantilar uzun sure "grup aramasi" olarak kaldi. Bu bolum
-# kullanicinin ekranindan tek tikla toplanabilen bir dokum uretir: hangi
-# arama hangi sebeple eslesmedi, takvimde en yakin adaylar neydi.
-
-# Bir arama icin en fazla kac takvim adayi gosterilir.
-MAX_CANDIDATES = 3
-# Aday sayilabilmek icin en fazla bu kadar uzakta olabilir.
-CANDIDATE_WINDOW_HOURS = 24
-
-REASON_NO_THREAD = "no_thread_id"
-REASON_GROUP_CHAT = "group_chat_thread"
-REASON_NO_CORE = "no_calendar_with_core"
-REASON_TIME_GAP = "only_time_gap"
-REASON_MATCHES_NOW = "matches_now"
-
-
-def event_view(event: CalendarRecord, gap_minutes: int | None = None) -> dict[str, Any]:
-    """Takvim adayinin teshis dokumu (kimlik govdeleriyle)."""
-    url = clean_text(getattr(event, "meeting_url", ""))
-    moment = parse_local(event.start_time)
-    return {
-        "subject": clean_text(event.subject),
-        "event_type": clean_text(event.event_type),
-        "start_time": iso_text(moment),
-        "cid_core": thread_core(getattr(event, "cid", "")),
-        "url_core": url[-40:] if url else "",
-        "is_cancelled": bool(getattr(event, "is_cancelled", False)),
-        "gap_minutes": gap_minutes,
-    }
-
-
-def candidates_for(
-    row: dict[str, Any], events: Sequence[CalendarRecord], limit: int = MAX_CANDIDATES
-) -> list[dict[str, Any]]:
-    """Aramaya zaman olarak en yakin takvim kayitlari (neden eslesmedigi icin)."""
-    started = parse_utc(row.get("started_at"))
-    if started is None:
-        return []
-    window = timedelta(hours=CANDIDATE_WINDOW_HOURS)
-    near: list[tuple[timedelta, CalendarRecord]] = []
-    for event in events:
-        moment = parse_local(event.start_time)
-        if moment is None:
-            continue
-        gap = abs(moment - started)
-        if gap <= window:
-            near.append((gap, event))
-    near.sort(key=lambda item: item[0])
-    return [
-        event_view(event, int(gap.total_seconds() // 60)) for gap, event in near[:limit]
-    ]
-
-
-def diagnose_unmatched(
-    rows: Iterable[dict[str, Any]],
-    calendar: Iterable[CalendarRecord] = (),
-    days: Any = DEFAULT_DAYS,
-    now: datetime | None = None,
-    names: dict[str, str] | None = None,
-) -> dict[str, Any]:
-    """Eslesmemis cok kisili aramalarin dokumu + neden eslesmedikleri.
-
-    `calendar` TAZE okunan takvimdir: bir satirin bugun eslesip eslesmeyecegi
-    ("yeniden tarasam duzelir mi") ancak boyle anlasilir.
-    """
-    stored = list(rows)
-    known = names_from_rows(stored) if names is None else names
-    since = since_of(days, now)
-    pools = event_pools(calendar)
-
-    entries: list[dict[str, Any]] = []
-    counts = {
-        REASON_NO_THREAD: 0,
-        REASON_NO_CORE: 0,
-        REASON_MATCHES_NOW: 0,
-        REASON_GROUP_CHAT: 0,
-    }
-    for row in stored:
-        if row.get("kind") != KIND_GROUP or not in_window(row, since):
-            continue
-        markers = row_threads(row)
-        fresh = next(
-            (
-                event
-                for event in pools.identity
-                if any(thread_matches(marker, event) for marker in markers)
-            ),
-            None,
-        )
-        candidates = candidates_for(row, pools.time or pools.identity)
-
-        kind = thread_kind(row)
-        if not markers:
-            reason = REASON_NO_THREAD
-            counts[REASON_NO_THREAD] += 1
-        elif fresh is not None:
-            reason = REASON_MATCHES_NOW
-            counts[REASON_MATCHES_NOW] += 1
-        elif kind == THREAD_GROUP_CHAT:
-            # Grup sohbetinden baslatilmis arama: takvimde karsiligi yok,
-            # olmasi da beklenmez. "Eslesmeyen" degil, "eslesmesi gerekmeyen".
-            reason = REASON_GROUP_CHAT
-            counts[REASON_GROUP_CHAT] += 1
-        elif candidates and candidates[0]["gap_minutes"] is not None:
-            reason = f"{REASON_TIME_GAP}:{candidates[0]['gap_minutes']}"
-            counts[REASON_NO_CORE] += 1
-        else:
-            reason = REASON_NO_CORE
-            counts[REASON_NO_CORE] += 1
-
-        entries.append(
-            {
-                "call_id": row.get("call_id", ""),
-                "started_at": row.get("started_at", ""),
-                "duration_text": duration_text(row.get("duration_ms")),
-                "thread_id": clean_text(row.get("thread_id")),
-                "group_thread_id": clean_text(row.get("group_thread_id")),
-                "thread_core": thread_core(markers[0]) if markers else "",
-                "thread_kind": kind,
-                "participants": participant_labels(row, known),
-                "title": display_party(row, known),
-                "reason": reason,
-                "candidates": candidates,
-                "would_match": {"subject": clean_text(fresh.subject)} if fresh is not None else None,
-            }
-        )
-
-    entries.sort(key=lambda item: str(item.get("started_at") or ""), reverse=True)
-    return {
-        "days": _as_days(days),
-        "calendar_events": len(pools.identity) + len(pools.time),
-        "summary": {
-            "unmatched": len(entries),
-            "no_thread_id": counts[REASON_NO_THREAD],
-            "core_not_in_calendar": counts[REASON_NO_CORE],
-            "matched_after_fix": counts[REASON_MATCHES_NOW],
-            # Grup sohbeti aramalari: beklenen durum, sorun degil.
-            "group_chat": counts[REASON_GROUP_CHAT],
-            # Gercekten bakilmasi gerekenler.
-            "suspicious": len(entries) - counts[REASON_GROUP_CHAT],
-        },
-        "calls": entries,
-    }
-
-
-# --- toplanti sohbetinden katilim ----------------------------------------
-#
-# `call-history` yalnizca baslattigin ya da sana gelen aramalari tutuyor;
-# takvimden katildigin planli toplantilar orada HIC gecmiyor. Katilimin
-# kendisi toplanti sohbetindeki `<partlist type="ended">` mesajinda duruyor:
-# kim, kac saniye kaldi. "Kabul edip gitmedigim toplanti" sorunu da boyle
-# cozuluyor -- katilmayan kisi listede hic yok.
-
-SOURCE_HISTORY = "history"
-SOURCE_CHAT = "chat"
-CALL_SOURCES: tuple[str, ...] = (SOURCE_HISTORY, SOURCE_CHAT)
-
-SOURCE_LABELS: dict[str, str] = {SOURCE_HISTORY: "Arama geçmişi", SOURCE_CHAT: "Sohbetten"}
-
-# Katilim kayitlari icin pencere: daha eskisi kullaniciyi ilgilendirmiyor.
-ATTENDANCE_DAYS = 90
+# --- tarama --------------------------------------------------------------
 
 
 def my_mri(setting: Any = "", discovered: Any = "") -> str:
     """Kullanicinin kendi kimligi (MRI).
 
-    Sirayla: ayardan elle verilen deger, sonra kaynagin bulduğu deger
-    (veritabani adindaki kullanici GUID'i ya da kendi gonderdigi bir mesajin
-    `creator` alani). Bulunamazsa bos doner ve katilim kaydi URETILMEZ:
-    yanlis kayit uretmektense hic uretmemek yeglenir.
-
-    (`call-history.userParticipantId` bu is icin kullanilmaz: o alan
-    kullanicinin kimligi degil, arama basina katilimci kimligidir -- sahada
-    hicbir katilimci listesinde bulunamadi.)
+    Sirayla: ayardan elle verilen deger, sonra kaynagin buldugu deger
+    (veritabani adindaki kullanici GUID'i). Bulunamazsa bos doner; o zaman
+    grup aramalarinda kimse elenmez (yanlis kisiyi elemektense hic elememek).
     """
     manual = as_mri(clean_text(setting))
     if manual:
         return manual
     return as_mri(clean_text(discovered))
-
-
-def attendance_call_id(record: MeetingAttendance) -> str:
-    """Katilim kaydinin kimligi: `callId`, yoksa thread + bitis damgasi."""
-    marker = clean_text(record.call_id)
-    if marker:
-        return marker
-    ended = iso_text(parse_utc(record.ended_at)) or clean_text(record.ended_at)
-    return f"{clean_text(record.thread_id)}:{ended}"
-
-
-def match_attendance(record: MeetingAttendance, pools: Any) -> CalendarRecord | None:
-    """Katilim kaydinin takvim karsiligi.
-
-    Once `icaluid`: toplanti mesajindaki `meetingdetails.icaluid` takvim
-    kaydinin `iCalUid` alanina birebir esittir -- thread kimliginden bile
-    kesin bir yol. Yoksa thread kimligiyle denenir.
-    """
-    marker = clean_text(record.ical_uid)
-    if marker:
-        for event in pools.identity:
-            if clean_text(getattr(event, "ical_uid", "")) == marker:
-                return event
-        for event in pools.time:
-            if clean_text(getattr(event, "ical_uid", "")) == marker:
-                return event
-    return match_by_thread(
-        CallRecord(call_id=record.call_id, thread_id=record.thread_id), pools.identity
-    )
-
-
-DECISION_CREATED = "created"
-DECISION_NO_ME = "skipped:no_me"
-DECISION_NO_DURATION = "skipped:no_duration"
-DECISION_STARTED = "skipped:started"
-DECISION_HISTORY = "deduped:history"
-DECISION_MERGED = "merged"
-
-
-def attendance_day(record: MeetingAttendance) -> str:
-    """Katilimin YEREL gunu ("2026-09-11"); okunamazsa bos."""
-    moment = parse_utc(record.ended_at)
-    return moment.astimezone().date().isoformat() if moment is not None else ""
-
-
-def attendance_key(record: MeetingAttendance, fallback: str = "") -> str:
-    """Ayni toplantinin parcalarini birlestiren anahtar.
-
-    Sirasiyla `callid`, sohbet cekirdegi, `icaluid`; hepsinin yanina **gun**
-    eklenir. Ayni gun icinde ayni toplantiya yeniden katilmak tek satirda
-    toplanir; **farkli thread ya da farkli gun asla birlesmez**.
-
-    Anahtar hicbir kosulda bos ya da sabit olamaz: sahada `callid`
-    okunamayinca butun mesajlar tek kayda toplanip yanlis toplantinin adini
-    almisti. Hicbir isaret yoksa mesajin kendi anahtari kullanilir.
-    """
-    day = attendance_day(record)
-    core = thread_core(record.thread_id) or clean_text(record.thread_id)
-    marker = clean_text(record.call_id)
-    if not marker:
-        marker = core or clean_text(record.ical_uid)
-    if marker and day:
-        return f"{marker}:{day}"
-    if marker:
-        # Gun okunamadi: mesaji kendi basina birak, yanlis birlesme olmasin.
-        unique = clean_text(record.message_id) or clean_text(fallback)
-        return f"{marker}:{unique}" if unique else marker
-    return clean_text(record.message_id) or clean_text(fallback) or f"attendance:{id(record)}"
-
-
-@dataclass
-class AttendancePlan:
-    """Katilim kayitlarinin islenmis hali ve her mesaj icin verilen karar."""
-
-    rows: list[dict[str, Any]] = dataclass_field(default_factory=list)
-    decisions: list[dict[str, Any]] = dataclass_field(default_factory=list)
-
-
-def plan_attendance(
-    records: Iterable[MeetingAttendance],
-    mri: Any,
-    events: Any = (),
-    names: dict[str, str] | None = None,
-    seen_at: str | None = None,
-    known_ids: Iterable[str] = (),
-) -> AttendancePlan:
-    """Katilim mesajlarini satira cevirir ve her mesajin kaderini yazar.
-
-    Kurallar sert:
-
-    * Kullanici katilimci listesinde YOKSA kayit yok (katilmamis).
-    * Kullanicinin `duration` degeri yok ya da sifirsa kayit yok. ("En uzun
-      part" yedegi KALDIRILDI: katilmadigi toplantilarin listelenmesinin
-      nedeni oydu.)
-    * `started` mesaji ve turu yazmayan suresiz blok atlanir.
-    * Ayni anahtarli mesajlarin sureleri toplanir, tek satir olur.
-    """
-    plan = AttendancePlan()
-    marker = as_mri(clean_text(mri))
-    pools = event_pools(events)
-    stamp = seen_at or repository.now_iso()
-    skip = {clean_text(item) for item in known_ids}
-    made: dict[str, dict[str, Any]] = {}
-
-    for index, record in enumerate(records or ()):
-        key = attendance_key(record, fallback=f"mesaj-{index}")
-        mine, how = record.match_for(marker) if marker else (None, "")
-        seconds = mine.seconds if mine is not None else 0
-        note = {
-            "call_id": clean_text(record.call_id),
-            "key": key,
-            "thread_id": clean_text(record.thread_id),
-            "thread_core": thread_core(record.thread_id),
-            "ended_at": iso_text(parse_utc(record.ended_at)) or clean_text(record.ended_at),
-            "event_kind": clean_text(record.kind) or "(yok)",
-            "part_count": len(record.parts),
-            "me_present": how or "",
-            "my_seconds": int(seconds),
-            "ical_uid": clean_text(record.ical_uid),
-            # Anahtarin neye dayandigi: teshiste "neden birlesti" sorusu.
-            "has_call_id": bool(clean_text(record.call_id)),
-            "has_ical_uid": bool(clean_text(record.ical_uid)),
-            "day": attendance_day(record),
-        }
-
-        if clean_text(record.kind) == PARTLIST_STARTED:
-            note["decision"] = DECISION_STARTED
-        elif key in skip or (clean_text(record.call_id) and record.call_id in skip):
-            # Gecmis kaydiyla karsilastirma HAM `callid` uzerinden de yapilir:
-            # birlestirme anahtari artik gun ekini tasiyor.
-            note["decision"] = DECISION_HISTORY
-        elif mine is None:
-            note["decision"] = DECISION_NO_ME
-        elif seconds <= 0:
-            note["decision"] = DECISION_NO_DURATION
-        elif key in made:
-            # Cok oturumlu toplanti: sure eklenir, yeni satir acilmaz.
-            row = made[key]
-            row["duration_ms"] += int(seconds) * 1000
-            row["ended_at"] = max(row["ended_at"], note["ended_at"])
-            note["decision"] = f"{DECISION_MERGED}:{key}"
-        else:
-            row = _attendance_row(record, seconds, pools, names, stamp, key)
-            made[key] = row
-            plan.rows.append(row)
-            note["decision"] = DECISION_CREATED
-
-        plan.decisions.append(note)
-
-    plan.rows.sort(key=lambda item: (item["started_at"], item["call_id"]))
-    return plan
-
-
-def _attendance_row(
-    record: MeetingAttendance,
-    seconds: int,
-    pools: Any,
-    names: dict[str, str] | None,
-    stamp: str,
-    call_id: str,
-) -> dict[str, Any]:
-    """Tek katilim satiri (`source='chat'`)."""
-    ended = parse_utc(record.ended_at)
-    started = ended - timedelta(seconds=seconds) if ended is not None else None
-    event = match_attendance(record, pools)
-    participants = [
-        {
-            "id": part.mri,
-            "name": resolve_name(part.mri, "", names),
-            "seconds": int(part.seconds),
-        }
-        for part in record.parts
-    ]
-    return {
-        "call_id": call_id,
-        "started_at": iso_text(started),
-        "ended_at": iso_text(ended),
-        "connected_at": iso_text(started),
-        "duration_ms": int(seconds) * 1000,
-        # Toplantiya katildim: yon kavrami yok, durum "kabul".
-        "direction": "",
-        "state": STATE_ACCEPTED,
-        "kind": KIND_MEETING,
-        "counterpart_id": "",
-        "counterpart_name": "",
-        "forwarded": "",
-        "meeting_subject": clean_text(event.subject) if event is not None else "",
-        "meeting_organizer": clean_text(event.organizer_name) if event is not None else "",
-        "my_response": clean_text(event.my_response) if event is not None else "",
-        "thread_id": clean_text(record.thread_id),
-        "group_thread_id": "",
-        "topic": "",
-        "participants_json": json.dumps(participants, ensure_ascii=False),
-        "attendees_json": json.dumps(
-            list(event.attendees) if event is not None else [], ensure_ascii=False
-        ),
-        "raw_json": json.dumps(
-            {"thread_id": record.thread_id, "parts": len(record.parts)}, ensure_ascii=False
-        ),
-        "source": SOURCE_CHAT,
-        "seen_at": stamp,
-        "matched_event_type": clean_text(event.event_type) if event is not None else "",
-    }
-
-
-def normalize_attendance(
-    records: Iterable[MeetingAttendance],
-    mri: Any,
-    events: Any = (),
-    names: dict[str, str] | None = None,
-    seen_at: str | None = None,
-    known_ids: Iterable[str] = (),
-) -> list[dict[str, Any]]:
-    """Katilim kayitlari -> veritabani satirlari (`source='chat'`)."""
-    if not clean_text(mri):
-        return []
-    return plan_attendance(records, mri, events, names, seen_at, known_ids).rows
-
-
-def diagnose_attendance(
-    records: Iterable[MeetingAttendance],
-    mri: Any,
-    events: Any = (),
-    names: dict[str, str] | None = None,
-    known_ids: Iterable[str] = (),
-    days: Any = DEFAULT_DAYS,
-    now: datetime | None = None,
-) -> dict[str, Any]:
-    """Teshis: her partlist mesaji ne oldu, neden?
-
-    "Katildigim toplanti listede yok" ve "katilmadigim toplanti listede var"
-    sikayetlerinin ikisi de buradan okunur.
-    """
-    since = since_of(days, now)
-    picked = [
-        record
-        for record in records or ()
-        if (parse_utc(record.ended_at) is None or parse_utc(record.ended_at) >= since)
-    ]
-    plan = plan_attendance(picked, mri, events, names, known_ids=known_ids)
-    pools = event_pools(events)
-
-    subjects: dict[str, str] = {}
-    for index, record in enumerate(picked):
-        key = attendance_key(record, fallback=f"mesaj-{index}")
-        if key in subjects:
-            continue
-        event = match_attendance(record, pools)
-        subjects[key] = clean_text(event.subject) if event is not None else ""
-
-    counts: dict[str, int] = {}
-    for note in plan.decisions:
-        note["subject"] = subjects.get(note["key"], "")
-        head = str(note["decision"]).split(":", 1)[0]
-        counts[head] = counts.get(head, 0) + 1
-
-    plan.decisions.sort(key=lambda item: str(item.get("ended_at") or ""), reverse=True)
-    return {
-        "days": _as_days(days),
-        "my_mri_known": bool(clean_text(mri)),
-        "messages": len(plan.decisions),
-        "created": len(plan.rows),
-        "summary": counts,
-        "meetings": plan.decisions,
-    }
-
-
-# --- tarama ---# --- tarama --------------------------------------------------------------
 
 
 def source_diagnostics(source: Any) -> dict[str, Any]:
@@ -1418,46 +897,18 @@ def scan(
     """
     bundle = tuple(source.read())
     # Eski donusler de kabul edilir: eksik parcalar bos gecer.
-    calls, calendar, names, threads, attended = (*bundle, [], [], [], [])[:5]
-    rows = normalize(calls, calendar, names, seen_at, threads)
-
-    # Toplanti sohbetlerinden gelen katilim kayitlari: `call-history`de zaten
-    # gecen bir arama varsa (ayni `callId`) chat kaydi EKLENMEZ.
-    history_ids = {row["call_id"] for row in rows} | repository.history_call_ids(conn)
+    calls, names = (*bundle, [], {})[:2]
     found = source_diagnostics(source)
     marker = my_mri(setting=my_mri_setting, discovered=found.get("my_mri"))
-    chat_rows = normalize_attendance(
-        within(attended, since_of(ATTENDANCE_DAYS)),
-        marker,
-        calendar,
-        names,
-        seen_at,
-        known_ids=history_ids,
-    )
-    rows = rows + chat_rows
+    rows = normalize(calls, names, seen_at, marker)
     report = repository.import_calls(conn, rows)
-    # Onceki taramanin (yanlis anahtarla) urettigi chat kayitlari kalmasin:
-    # pencere icinde artik uretilmeyen `source='chat'` satirlari silinir.
-    # `history` satirlarina dokunulmaz.
-    report["chat_removed"] = repository.prune_chat_calls(
-        conn,
-        keep_ids={row["call_id"] for row in chat_rows},
-        since=iso_text(since_of(ATTENDANCE_DAYS)),
-    )
-    report["from_chat"] = len(chat_rows)
-    report["my_mri_known"] = bool(marker)
-    report["meetings_matched"] = sum(1 for row in rows if row["kind"] == KIND_MEETING)
-    # Tekrarlayan toplantilar yalnizca kimlik eslemesiyle yakalanir; kac
-    # tanesinin seri kaydindan geldigi ayrica sayilir.
-    report["recurring_matched"] = sum(
-        1
-        for row in rows
-        if row["kind"] == KIND_MEETING
-        and clean_text(row.get("matched_event_type")) == EVENT_RECURRING_MASTER
-    )
+    report["groups"] = sum(1 for row in rows if row["kind"] == KIND_GROUP)
     report["latest_call_at"] = max(
         (row["started_at"] for row in rows if row["started_at"]), default=""
     )
     report.update(found)
+    # Teshis sozlugunde de `my_mri` var (kaynagin buldugu); gecerli olan
+    # ayarla birlesmis olandir, bu yuzden EN SONDA yazilir.
+    report["my_mri"] = marker
     report["my_mri_known"] = bool(marker)
     return report

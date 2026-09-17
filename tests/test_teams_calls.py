@@ -1,13 +1,15 @@
-"""Asama 9: Teams arama gecmisi (yerel onbellekten tablo ve istatistik).
+"""Teams arama gecmisi (yerel onbellekten tablo, gruplar ve istatistik).
 
 Test edilen sorular:
 
 * Bu arama ne kadar surdu? (`durationInMs` yoksa iki yedek yol)
-* Ne turden? (birebir / toplanti / grup -- takvim eslesmesi +/- 10 dk)
+* Ne turden? (birebir / grup -- toplanti diye bir tur YOK)
 * Karsi taraf kim ve adi nereden cozuldu?
 * Ayni onbellek iki kez taranirsa kopya olusuyor mu? (olusmamali)
-* Istatistik: hafta sonu is gununden dusuluyor mu, kacirilan aramalar sureye
-  giriyor mu (girmemeli), yuzdeler ve ilk bes dogru mu?
+* Gruplar: ayni sohbetin aramalari tek satirda toplaniyor mu, ad nereden
+  geliyor, Excel'e ciktiginda ne yaziyor?
+* Istatistik: serit dort kutu mu, kacirilan aramalar sureye giriyor mu
+  (girmemeli), grup suresi katilan herkese yaziliyor mu?
 * Windows olmayan makinede uc ne diyor? (`feature_unavailable`)
 
 Gercek IndexedDB hicbir testte acilmaz: `app/teamscalls/fake.py` bellek ici
@@ -30,15 +32,12 @@ from openpyxl import load_workbook
 from app import db, repository as repo
 from app.teamscalls import CallsError, default_source, intake, teams_cache
 from app.teamscalls import source as source_module
-from app.teamscalls import attendance
 from app.teamscalls.fake import (
     ME,
     PERSON_ONE,
     PERSON_TWO,
     FakeCallSource,
-    attended,
     call,
-    event,
 )
 from app.teamscalls.source import (
     DIRECTION_IN,
@@ -48,9 +47,7 @@ from app.teamscalls.source import (
     STATE_MISSED,
     TYPE_MULTI_PARTY,
     TYPE_TWO_PARTY,
-    CalendarRecord,
     CallRecord,
-    ThreadRecord,
 )
 
 # Cuma 12:00 UTC: pencere hesabi makinenin gunune bagli kalmasin.
@@ -58,21 +55,15 @@ NOW = datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc)
 
 # Gercek bir onbellek sondasindan alinan adlar ve kimlik bicimleri.
 CALL_DB = "Teams:call-history-manager:react-web-client:kiraci:kullanici:tr-tr"
-CALENDAR_DB = "Teams:calendar:react-web-client:kiraci:kullanici:tr-tr"
 PROFILE_DB = "Teams:profiles:react-web-client:kiraci:kullanici:tr-tr"
 THREAD_DB = "Teams:conversation-manager:react-web-client:kiraci:kullanici:tr-tr"
 
-MEETING_THREAD = "19:meeting_NGY3ZjkwZDAtMTIzNC00@thread.v2"
 GROUP_THREAD = "19:abcdef0123456789abcdef0123456789@thread.v2"
+PERSON_THREE = "8:orgid:00000000-0000-0000-0000-000000000003"
 
 
 def moment(days: float = 0, hours: float = 0) -> datetime:
     return NOW - timedelta(days=days, hours=hours)
-
-
-def local_text(when: datetime) -> str:
-    """Takvim store'unun yazdigi bicim: yerel saat, saat dilimi eki yok."""
-    return when.astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
 # --- sure ----------------------------------------------------------------
@@ -123,7 +114,7 @@ def test_duration_text_is_turkish_and_short(ms, text):
     assert intake.duration_text(ms) == text
 
 
-# --- tur ucleme -----------------------------------------------------------
+# --- tur karari: birebir mi, grup mu? -------------------------------------
 
 
 def test_two_party_call_is_one_to_one():
@@ -131,70 +122,45 @@ def test_two_party_call_is_one_to_one():
     assert rows[0]["kind"] == intake.KIND_ONE_TO_ONE
 
 
-def test_multi_party_without_a_meeting_is_a_group_call():
+def test_multi_party_call_is_a_group_call():
     rows = intake.normalize([call("a", moment(1), call_type=TYPE_MULTI_PARTY)])
     assert rows[0]["kind"] == intake.KIND_GROUP
 
 
-def test_multi_party_on_a_calendar_slot_is_a_meeting():
-    started = moment(1)
-    rows = intake.normalize(
-        [call("a", started, call_type=TYPE_MULTI_PARTY)],
-        [event("Haftalık durum", local_text(started))],
+def test_an_unknown_call_type_falls_back_to_the_participant_count():
+    """Tur alani yazmiyorsa kural: kendim haric katilimci > 1 ise grup."""
+    crowded = call(
+        "grup", moment(1), call_type="", participants=[ME, PERSON_ONE, PERSON_TWO]
     )
-    assert rows[0]["kind"] == intake.KIND_MEETING
-    assert rows[0]["meeting_subject"] == "Haftalık durum"
-    assert rows[0]["meeting_organizer"] == "Örnek Kişi"
-    assert rows[0]["my_response"] == "Accepted"
+    alone = call("birebir", moment(1), call_type="", participants=[ME, PERSON_ONE])
+    rows = intake.normalize([crowded, alone], me=ME)
+    kinds = {row["call_id"]: row["kind"] for row in rows}
+    assert kinds == {"grup": intake.KIND_GROUP, "birebir": intake.KIND_ONE_TO_ONE}
 
 
-def test_a_meeting_nine_minutes_off_still_matches():
-    started = moment(1)
+def test_without_my_identity_the_fallback_still_counts_the_participants():
+    """Kimligim bilinmiyorsa kimse elenmez; iki kisilik liste yine birebirdir."""
+    rows = intake.normalize([call("a", moment(1), call_type="", participants=[ME, PERSON_ONE])])
+    assert rows[0]["kind"] == intake.KIND_ONE_TO_ONE
+
+
+def test_no_row_is_ever_a_meeting():
+    """Toplanti turu tumden kalkti: uretilen hicbir satir 'meeting' olamaz."""
     rows = intake.normalize(
-        [call("a", started, call_type=TYPE_MULTI_PARTY)],
-        [event("Gecikmeli toplantı", local_text(started - timedelta(minutes=9)))],
-    )
-    assert rows[0]["kind"] == intake.KIND_MEETING
-
-
-def test_a_meeting_eleven_minutes_off_does_not_match():
-    started = moment(1)
-    rows = intake.normalize(
-        [call("a", started, call_type=TYPE_MULTI_PARTY)],
-        [event("Başka toplantı", local_text(started - timedelta(minutes=11)))],
-    )
-    assert rows[0]["kind"] == intake.KIND_GROUP
-    assert rows[0]["meeting_subject"] == ""
-
-
-def test_a_recurring_master_never_matches():
-    started = moment(1)
-    rows = intake.normalize(
-        [call("a", started, call_type=TYPE_MULTI_PARTY)],
-        [event("Seri", local_text(started), event_type="RecurringMaster")],
-    )
-    assert rows[0]["kind"] == intake.KIND_GROUP
-
-
-def test_an_out_of_office_entry_never_matches():
-    started = moment(1)
-    rows = intake.normalize(
-        [call("a", started, call_type=TYPE_MULTI_PARTY)],
-        [event("İzin", local_text(started), show_as="Oof")],
-    )
-    assert rows[0]["kind"] == intake.KIND_GROUP
-
-
-def test_the_closest_calendar_entry_wins():
-    started = moment(1)
-    rows = intake.normalize(
-        [call("a", started, call_type=TYPE_MULTI_PARTY)],
         [
-            event("Uzak", local_text(started - timedelta(minutes=8))),
-            event("Yakın", local_text(started + timedelta(minutes=1))),
-        ],
+            call("bir", moment(1)),
+            call("grup", moment(2), call_type=TYPE_MULTI_PARTY, participants=[PERSON_ONE]),
+        ]
     )
-    assert rows[0]["meeting_subject"] == "Yakın"
+    assert {row["kind"] for row in rows} <= set(intake.KINDS)
+    assert "meeting" not in {row["kind"] for row in rows}
+    assert not hasattr(intake, "KIND_MEETING")
+
+
+def test_the_row_carries_no_meeting_columns():
+    row = intake.normalize([call("a", moment(1))])[0]
+    for name in ("meeting_subject", "meeting_organizer", "my_response", "attendees_json", "source"):
+        assert name not in row, name
 
 
 # --- karsi taraf ve ad cozumu --------------------------------------------
@@ -236,9 +202,10 @@ def test_missing_fields_do_not_break_the_row():
     rows = intake.normalize([CallRecord(call_id="a")])
     assert rows[0]["started_at"] == ""
     assert rows[0]["duration_ms"] == 0
-    assert rows[0]["kind"] == intake.KIND_GROUP
+    # Tur alani da katilimci da yok: bos kayit birebir sayilir.
+    assert rows[0]["kind"] == intake.KIND_ONE_TO_ONE
     assert rows[0]["counterpart_name"] == ""
-    assert intake.display_party(rows[0]) == intake.GROUP_TITLE
+    assert intake.display_party(rows[0]) == intake.UNKNOWN_PERSON
 
 
 def test_labels_are_turkish():
@@ -249,7 +216,7 @@ def test_labels_are_turkish():
     assert card["kind_label"] == "Birebir"
     assert card["direction_label"] == "Arandım"
     assert card["state_label"] == "Kaçırılan"
-    assert intake.KIND_LABELS[intake.KIND_MEETING] == "Toplantı"
+    assert intake.KIND_LABELS[intake.KIND_GROUP] == "Grup araması"
     assert intake.KIND_LABELS[intake.KIND_GROUP] == "Grup araması"
     assert intake.DIRECTION_LABELS[DIRECTION_OUT] == "Aradım"
     assert intake.STATE_LABELS[STATE_DECLINED] == "Reddedilen"
@@ -276,13 +243,14 @@ def test_an_unknown_person_without_an_id_is_still_readable():
     assert intake.person_label("", "") == intake.UNKNOWN_PERSON
 
 
-def test_a_meeting_shows_its_subject_not_a_counterpart():
-    started = moment(1)
+def test_a_group_call_is_labelled_from_the_participants_not_the_cache():
+    """Grup adi onbellekten ARANMAZ: etiket katilimci adlarindan turer."""
     rows = intake.normalize(
-        [call("a", started, call_type=TYPE_MULTI_PARTY, participants=[PERSON_ONE])],
-        [event("Bütçe toplantısı", local_text(started))],
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, participants=[PERSON_ONE, PERSON_TWO])],
+        names={PERSON_ONE: "Örnek Kişi", PERSON_TWO: "İkinci Örnek"},
     )
-    assert intake.display_party(rows[0]) == "Bütçe toplantısı"
+    # Adlar alfabetik siralanir: etiket kayittan kayda degismez.
+    assert intake.display_party(rows[0]) == "İkinci Örnek, Örnek Kişi"
 
 
 def test_a_group_call_shows_the_participants_by_name():
@@ -291,7 +259,7 @@ def test_a_group_call_shows_the_participants_by_name():
         names={PERSON_ONE: "Örnek Kişi", PERSON_TWO: "İkinci Örnek"},
     )
     assert intake.display_party(rows[0], {PERSON_ONE: "Örnek Kişi", PERSON_TWO: "İkinci Örnek"}) == (
-        "Örnek Kişi, İkinci Örnek"
+        "İkinci Örnek, Örnek Kişi"
     )
 
 
@@ -355,7 +323,7 @@ def test_the_search_also_looks_at_participant_names():
     assert [row["call_id"] for row in picked] == ["grup"]
 
 
-def test_the_person_drawer_titles_shared_meetings_the_same_way():
+def test_the_person_drawer_titles_shared_group_calls_the_same_way():
     started = moment(1)
     rows = intake.normalize(
         [
@@ -371,11 +339,11 @@ def test_the_person_drawer_titles_shared_meetings_the_same_way():
         names={PERSON_ONE: "Örnek Kişi", PERSON_TWO: "İkinci Örnek"},
     )
     data = intake.person_view(rows, PERSON_ONE, days=30, now=NOW)
-    assert data["group_calls"][0]["title"] == "Örnek Kişi, İkinci Örnek"
+    assert data["group_calls"][0]["title"] == "İkinci Örnek, Örnek Kişi"
     assert "8:orgid:" not in data["group_calls"][0]["title"]
 
 
-# --- yalnizca gereken dort veritabani acilir ------------------------------
+# --- yalnizca gereken uc veritabani acilir --------------------------------
 #
 # Sonda 112 veritabanini dolasmak 596 saniye surdu. Tarama ad suzgecini
 # `database_ids` uzerinde uygular: digerleri hic ACILMAZ.
@@ -436,12 +404,6 @@ class FakeWrapper:
                 })]),
                 FakeStore("call-history-settings", [FakeRecord({"x": 1})]),
             ])),
-            2: (CALENDAR_DB, FakeDatabase([
-                FakeStore("calendar", [FakeRecord({
-                    "startTime": datetime(2026, 9, 11, 11, 30),
-                    "subject": "Toplantı",
-                })]),
-            ])),
             3: (PROFILE_DB, FakeDatabase([
                 FakeStore("profiles", [FakeRecord({"mri": PERSON_ONE, "displayName": "Örnek Kişi"})]),
             ])),
@@ -477,22 +439,30 @@ def fake_reader(monkeypatch):
     return FakeWrapper
 
 
-def test_only_the_four_needed_databases_are_opened(fake_reader, tmp_path):
+def test_only_the_two_needed_databases_are_opened(fake_reader, tmp_path):
     source = teams_cache.TeamsCacheSource(cache_path=str(tmp_path), copy_first=False)
     bundle = source._read_all(tmp_path, None)
     opened = fake_reader.made[0].opened
-    assert opened == [CALL_DB, CALENDAR_DB, PROFILE_DB, THREAD_DB]
-    assert bundle.databases == 4
+    assert opened == [CALL_DB, PROFILE_DB]
+    assert bundle.databases == 2
     assert fake_reader.made[0].closed is True
 
 
-def test_the_read_collects_all_four_kinds(fake_reader, tmp_path):
+def test_the_calendar_and_conversation_databases_are_never_opened_any_more(fake_reader, tmp_path):
+    """Takvim eslemesi de sohbet adi kesfi de kalkti: roller listesinde yoklar."""
+    for name in ("calendar", "conversation-manager", "replychain-manager"):
+        assert teams_cache.database_role(f"Teams:{name}:react-web-client:k:u:tr-tr") == ""
+        assert name not in teams_cache.ROLE_STORES
+    source = teams_cache.TeamsCacheSource(cache_path=str(tmp_path), copy_first=False)
+    source._read_all(tmp_path, None)
+    assert THREAD_DB not in fake_reader.made[0].opened
+
+
+def test_the_read_collects_both_kinds(fake_reader, tmp_path):
     source = teams_cache.TeamsCacheSource(cache_path=str(tmp_path), copy_first=False)
     bundle = source._read_all(tmp_path, None)
     assert [item.call_id for item in bundle.calls] == ["a"]
-    assert [item.subject for item in bundle.calendar] == ["Toplantı"]
     assert bundle.names == {PERSON_ONE: "Örnek Kişi"}
-    assert [item.topic for item in bundle.threads] == ["Proje ekibi"]
 
 
 def test_the_scan_reports_how_long_the_read_took(fake_reader, tmp_path, conn):
@@ -500,11 +470,10 @@ def test_the_scan_reports_how_long_the_read_took(fake_reader, tmp_path, conn):
     cache.mkdir()
     source = teams_cache.TeamsCacheSource(cache_path=str(cache), copy_first=False)
     result = intake.scan(conn, source)
-    assert result["databases"] == 4
+    assert result["databases"] == 2
     assert result["read_ms"] >= 0
     assert result["source"] == "live"
-    # Grup sohbetinin adi sohbet kaydindan geldi.
-    assert repo.list_calls(conn)[0]["topic"] == "Proje ekibi"
+    assert repo.list_calls(conn)[0]["call_id"] == "a"
 
 
 def test_a_sibling_store_with_the_same_name_is_never_read(fake_reader, tmp_path):
@@ -696,399 +665,14 @@ def test_when_nothing_can_be_read_the_user_is_told(tmp_path, monkeypatch):
     assert caught.value.code == "calls_read_failed"
 
 
-# --- tekrarlayan toplantilar (seri kaydi) ---------------------------------
+# --- kendi kimligim -------------------------------------------------------
 #
-# Saha: sabah daily'leri eslesmiyordu. Sebep, `RecurringMaster` kayitlarinin
-# tamamen atilmasiydi; tekrarlayan toplanti takvimde cogu zaman YALNIZCA seri
-# kaydi olarak duruyor, olusumlar ayri kayit degil.
-
-
-def master(subject: str, start=None, cid: str = MEETING_THREAD, cancelled: bool = False):
-    record = event(
-        subject,
-        local_text(start or moment(200)),  # seri kaydinin tarihi: serinin ilk gunu
-        event_type="RecurringMaster",
-        cid=cid,
-    )
-    record.is_cancelled = cancelled
-    return record
-
-
-def test_a_recurring_master_matches_by_thread_id():
-    """Saat tutmasa da kimlik tutuyorsa tekrarlayan toplanti eslesir."""
-    rows = intake.normalize(
-        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)],
-        [master("Sabah daily")],
-    )
-    assert rows[0]["kind"] == intake.KIND_MEETING
-    assert rows[0]["meeting_subject"] == "Sabah daily"
-
-
-def test_a_recurring_master_still_never_matches_by_time():
-    """Seri kaydinin tarihi serinin ilk gunudur; saat yakinligi anlamsiz."""
-    started = moment(1)
-    rows = intake.normalize(
-        [call("a", started, call_type=TYPE_MULTI_PARTY)],
-        [master("Sabah daily", start=started, cid="")],
-    )
-    assert rows[0]["kind"] == intake.KIND_GROUP
-
-
-def test_a_cancelled_master_still_matches_by_thread_id():
-    """Iptal edilmis seriye ait GECMIS aramalar var; kimlik yine tutar."""
-    rows = intake.normalize(
-        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)],
-        [master("İptal edilmiş seri", cancelled=True)],
-    )
-    assert rows[0]["kind"] == intake.KIND_MEETING
-    assert rows[0]["meeting_subject"] == "İptal edilmiş seri"
-
-
-def test_a_cancelled_occurrence_still_stays_out_of_the_time_match():
-    started = moment(1)
-    cancelled = event("İptal", local_text(started))
-    cancelled.is_cancelled = True
-    rows = intake.normalize([call("a", started, call_type=TYPE_MULTI_PARTY)], [cancelled])
-    assert rows[0]["kind"] == intake.KIND_GROUP
-
-
-def test_the_group_chat_thread_is_compared_with_the_cid_too():
-    rows = intake.normalize(
-        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, group_thread_id=MEETING_THREAD)],
-        [master("Ekip toplantısı")],
-    )
-    assert rows[0]["kind"] == intake.KIND_MEETING
-    assert rows[0]["meeting_subject"] == "Ekip toplantısı"
-
-
-def test_the_scan_counts_the_recurring_matches(conn):
-    source = FakeCallSource(
-        calls=[
-            call("seri", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD),
-            call("tek", moment(2), call_type=TYPE_MULTI_PARTY, thread_id=GROUP_THREAD),
-        ],
-        calendar=[
-            master("Sabah daily"),
-            event("Tek seferlik", local_text(moment(2)), cid=GROUP_THREAD),
-        ],
-    )
-    result = intake.scan(conn, source)
-    assert result["meetings_matched"] == 2
-    assert result["recurring_matched"] == 1
-
-
-def test_the_event_type_is_not_stored_on_the_row(conn):
-    """Seri sayaci gecici bir alandir; tabloda sutunu yok."""
-    intake.scan(
-        conn,
-        FakeCallSource(
-            calls=[call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)],
-            calendar=[master("Sabah daily")],
-        ),
-    )
-    assert "matched_event_type" not in repo.get_call(conn, "a")
-
-
-# --- teshis: eslesmeyenler dokumu ----------------------------------------
-
-
-def unmatched_rows():
-    return intake.normalize(
-        [
-            # Kimligi var, takvimde karsiligi yok.
-            call("kimlikli", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD),
-            # Hic kimlik tasimiyor.
-            call("kimliksiz", moment(2), call_type=TYPE_MULTI_PARTY, participants=[PERSON_ONE]),
-            # Birebir arama teshise hic girmez.
-            call("birebir", moment(1), other=PERSON_ONE),
-        ],
-        names={PERSON_ONE: "Örnek Kişi"},
-    )
-
-
-def test_the_diagnosis_only_covers_unmatched_group_calls():
-    data = intake.diagnose_unmatched(unmatched_rows(), [], days=30, now=NOW)
-    assert [item["call_id"] for item in data["calls"]] == ["kimlikli", "kimliksiz"]
-    assert data["summary"]["unmatched"] == 2
-
-
-def test_a_call_without_a_thread_id_says_so():
-    data = intake.diagnose_unmatched(unmatched_rows(), [], days=30, now=NOW)
-    entry = next(item for item in data["calls"] if item["call_id"] == "kimliksiz")
-    assert entry["reason"] == "no_thread_id"
-    assert entry["participants"] == ["Örnek Kişi"]
-    assert data["summary"]["no_thread_id"] == 1
-
-
-def test_a_call_whose_core_is_missing_from_the_calendar_says_so():
-    data = intake.diagnose_unmatched(unmatched_rows(), [], days=30, now=NOW)
-    entry = next(item for item in data["calls"] if item["call_id"] == "kimlikli")
-    assert entry["reason"] == "no_calendar_with_core"
-    assert entry["thread_core"] == intake.thread_core(MEETING_THREAD)
-    assert data["summary"]["core_not_in_calendar"] == 1
-
-
-def test_a_near_miss_reports_the_gap_in_minutes():
-    rows = intake.normalize(
-        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)]
-    )
-    near = event("Yakın toplantı", local_text(moment(1) + timedelta(minutes=42)))
-    data = intake.diagnose_unmatched(rows, [near], days=30, now=NOW)
-    entry = data["calls"][0]
-    assert entry["reason"].startswith("only_time_gap:")
-    assert entry["reason"].endswith("42")
-    assert entry["candidates"][0]["subject"] == "Yakın toplantı"
-    assert entry["candidates"][0]["gap_minutes"] == 42
-
-
-def test_the_diagnosis_says_which_calls_a_rescan_would_fix():
-    rows = intake.normalize(
-        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)]
-    )
-    data = intake.diagnose_unmatched(rows, [master("Sabah daily")], days=30, now=NOW)
-    entry = data["calls"][0]
-    assert entry["reason"] == "matches_now"
-    assert entry["would_match"]["subject"] == "Sabah daily"
-    assert data["summary"]["matched_after_fix"] == 1
-
-
-def test_the_candidate_list_stops_at_three():
-    rows = intake.normalize(
-        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=GROUP_THREAD)]
-    )
-    events = [
-        event(f"Toplantı {index}", local_text(moment(1) + timedelta(minutes=20 + index)))
-        for index in range(6)
-    ]
-    data = intake.diagnose_unmatched(rows, events, days=30, now=NOW)
-    assert len(data["calls"][0]["candidates"]) == 3
-    # En yakindan uzaga siralanir.
-    gaps = [item["gap_minutes"] for item in data["calls"][0]["candidates"]]
-    assert gaps == sorted(gaps)
-
-
-def test_the_diagnosis_endpoint_answers(api_client, fake_calls):
-    fake_calls.calls = [
-        call("kimliksiz", moment(1), call_type=TYPE_MULTI_PARTY, participants=[PERSON_ONE]),
-        call("birebir", moment(2), other=PERSON_ONE),
-    ]
-    api_client.post("/api/calls/scan")
-    data = api_client.get("/api/calls/unmatched?days=90").json()
-    assert data["summary"]["unmatched"] == 1
-    assert data["summary"]["no_thread_id"] == 1
-    assert data["calls"][0]["reason"] == "no_thread_id"
-    assert data["calls"][0]["duration_text"]
-
-
-def test_the_diagnosis_endpoint_needs_the_cache(api_client, context, monkeypatch):
-    from app import teamscalls
-
-    monkeypatch.setattr("app.teamscalls.is_supported", lambda: False)
-    context.calls_factory = teamscalls.default_source
-    response = api_client.get("/api/calls/unmatched")
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "feature_unavailable"
-
-
-# --- takvim saat dilimi ---------------------------------------------------
-#
-# Saha: takvim adaylari uc saat geride gorunuyordu. ccl `datetime` nesnesini
-# saat dilimsiz veriyor ama degeri UTC; biz yerel saat saniyorduk.
-
-
-def test_a_naive_calendar_datetime_is_read_as_utc():
-    naive = datetime(2026, 9, 11, 7, 0)  # ccl boyle verir: saat dilimsiz UTC
-    moment = source_module.parse_local(naive)
-    assert moment == datetime(2026, 9, 11, 7, 0, tzinfo=timezone.utc)
-    # Yerel saat sanilsaydi an UTC ofseti kadar kayardi.
-    assert moment.timestamp() == naive.replace(tzinfo=timezone.utc).timestamp()
-
-
-def test_a_calendar_epoch_is_read_as_utc():
-    assert source_module.parse_local(1789000000000) == datetime.fromtimestamp(
-        1789000000, tz=timezone.utc
-    )
-
-
-def test_a_calendar_text_is_still_local():
-    """Disa aktarimlardan gelen metin bicimi yerel saattir."""
-    moment = source_module.parse_local("2026-09-11 10:00:00")
-    assert moment == datetime(2026, 9, 11, 10, 0).astimezone()
-
-
-def test_a_meeting_at_ten_matches_a_call_at_ten():
-    """Gercek hata buydu: 10:00 toplantisi 07:00 gorunup hic eslesmiyordu."""
-    started = datetime(2026, 9, 11, 10, 0).astimezone()
-    utc_naive = started.astimezone(timezone.utc).replace(tzinfo=None)
-    meeting = CalendarRecord(start_time=utc_naive, subject="Hayat Daily")
-    rows = intake.normalize(
-        [call("a", started, call_type=TYPE_MULTI_PARTY)], [meeting]
-    )
-    assert rows[0]["kind"] == intake.KIND_MEETING
-    assert rows[0]["meeting_subject"] == "Hayat Daily"
-
-
-def test_the_candidate_hour_is_reported_in_real_time():
-    started = datetime(2026, 9, 11, 10, 0).astimezone()
-    meeting = CalendarRecord(
-        start_time=started.astimezone(timezone.utc).replace(tzinfo=None),
-        subject="SurfacePlus",
-    )
-    view = intake.event_view(meeting)
-    assert view["start_time"] == started.astimezone(timezone.utc).isoformat()
-
-
-# --- grup sohbeti aramalari (takvimde karsiligi beklenmez) ---------------
-
-CHAT_THREAD = "19:67f9abee1234567890abcdef12345678@thread.v2"
-
-
-@pytest.mark.parametrize(
-    "thread_id,kind",
-    [
-        (MEETING_THREAD, "meeting"),
-        (CHAT_THREAD, "group_chat"),
-        ("19:kisa@thread.v2", "other"),
-        ("", ""),
-    ],
-)
-def test_a_thread_id_is_classified(thread_id, kind):
-    assert intake.core_kind(thread_id) == kind
-
-
-def test_a_meeting_thread_wins_over_a_chat_thread():
-    row = {"thread_id": MEETING_THREAD, "group_thread_id": CHAT_THREAD}
-    assert intake.thread_kind(row) == "meeting"
-
-
-def test_a_group_chat_call_is_not_counted_as_a_problem():
-    rows = intake.normalize(
-        [
-            call("sohbet", moment(1), call_type=TYPE_MULTI_PARTY, group_thread_id=CHAT_THREAD),
-            call("toplanti", moment(2), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD),
-        ]
-    )
-    data = intake.diagnose_unmatched(rows, [], days=30, now=NOW)
-    chat = next(item for item in data["calls"] if item["call_id"] == "sohbet")
-    assert chat["reason"] == "group_chat_thread"
-    assert chat["thread_kind"] == "group_chat"
-
-    assert data["summary"]["unmatched"] == 2
-    assert data["summary"]["group_chat"] == 1
-    # Bakilmasi gereken yalnizca toplanti cekirdekli olan.
-    assert data["summary"]["suspicious"] == 1
-    assert data["summary"]["core_not_in_calendar"] == 1
-
-
-def test_the_row_carries_its_thread_kind_to_the_screen():
-    rows = intake.normalize(
-        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, group_thread_id=CHAT_THREAD)]
-    )
-    assert intake.view(rows[0])["thread_kind"] == "group_chat"
-
-
-def test_the_badge_ignores_group_chat_calls(api_client, fake_calls):
-    fake_calls.calls = [
-        call("sohbet", moment(1), call_type=TYPE_MULTI_PARTY, group_thread_id=CHAT_THREAD),
-        call("kimliksiz", moment(2), call_type=TYPE_MULTI_PARTY),
-    ]
-    api_client.post("/api/calls/scan")
-    kinds = [item["thread_kind"] for item in api_client.get("/api/calls?days=90").json()["calls"]]
-    assert sorted(kinds) == ["", "group_chat"]
-
-    summary = api_client.get("/api/calls/unmatched?days=90").json()["summary"]
-    assert summary["group_chat"] == 1
-    assert summary["suspicious"] == 1
-
-
-# --- toplanti sohbetinden katilim ----------------------------------------
-#
-# Saha: takvimden katilinan planli toplantilar `call-history`de HIC yok.
-# Katilimin kendisi toplanti sohbetindeki `<partlist type="ended">`
-# mesajinda: kim, kac saniye kaldi.
+# Kimlik veritabani ADINDA duruyor; grup istatistiginde "ben" katilimci
+# sayilmayayim diye gerekiyor.
 
 MY_GUID = "0f8fad5b-d9cb-469f-a165-70867728950e"
 MY_MRI = "8:orgid:" + MY_GUID
 TENANT_GUID = "11111111-1111-1111-1111-111111111111"
-
-ENDED_XML = (
-    '<partlist alt="" type="ended" callId="cagri-1">'
-    '<part identity="{me}"><name>Ben</name><duration>1863</duration></part>'
-    '<part identity="{other}"><name>Örnek Kişi</name><duration>1800</duration></part>'
-    "</partlist>"
-).format(me=MY_MRI, other=PERSON_ONE)
-
-STARTED_XML = (
-    '<partlist alt="" type="started" callId="cagri-1">'
-    f'<part identity="{MY_MRI}"><name>Ben</name></part>'
-    "</partlist>"
-)
-
-
-def chain(content: str, thread: str = "19:meeting_ABC123456789@thread.v2") -> dict:
-    """`replychains` kaydinin gercekteki bicimi."""
-    return {
-        "conversationId": thread,
-        "messageMap": {
-            f"{MY_MRI}_1": {
-                "messageType": "Event/Call",
-                "content": content,
-                "originalArrivalTime": 1789000000000,
-                "isSentByCurrentUser": False,
-            }
-        },
-    }
-
-
-def test_an_ended_partlist_becomes_attendance():
-    record = attendance.attendance_of(
-        {"messageType": "Event/Call", "content": ENDED_XML, "originalArrivalTime": 1789000000000},
-        "19:meeting_ABC123456789@thread.v2",
-    )
-    assert record.call_id == "cagri-1"
-    assert [(part.mri, part.seconds) for part in record.parts] == [
-        (MY_MRI, 1863),
-        (PERSON_ONE, 1800),
-    ]
-
-
-def test_a_started_partlist_creates_no_row():
-    """`started` sure tasimaz; islenirse her toplanti iki kez sayilirdi."""
-    record = attendance.attendance_of({"messageType": "Event/Call", "content": STARTED_XML})
-    assert record.kind == "started"
-    plan = intake.plan_attendance([record], MY_MRI)
-    assert plan.rows == []
-    assert plan.decisions[0]["decision"] == "skipped:started"
-
-
-def test_a_broken_partlist_falls_back_to_the_regex():
-    broken = ENDED_XML.replace("<name>Ben</name>", "<name>A & B</name>")
-    block = attendance.parse_partlist(broken)
-    assert block.kind == "ended"
-    assert block.call_id == "cagri-1"
-    assert [part.seconds for part in block.parts] == [1863, 1800]
-
-
-def test_a_message_without_a_partlist_is_not_attendance():
-    assert attendance.attendance_of({"messageType": "Text", "content": "merhaba"}) is None
-    assert attendance.attendance_of({"messageType": "Event/Call", "content": ""}) is None
-
-
-def test_only_meeting_threads_are_opened():
-    """270 bin kayit var: toplanti olmayan sohbetin mesaj haritasi acilmaz."""
-    assert attendance.attendance_from_record(chain(ENDED_XML))
-    assert attendance.attendance_from_record(chain(ENDED_XML, thread=CHAT_THREAD)) == []
-    assert attendance.is_meeting_thread("19:meeting_x@thread.v2") is True
-    assert attendance.is_meeting_thread(CHAT_THREAD) is False
-
-
-def test_the_name_inside_the_xml_is_never_kept():
-    record = attendance.attendance_from_record(chain(ENDED_XML))[0]
-    assert "Ben" not in json.dumps([part.__dict__ for part in record.parts], ensure_ascii=False)
-
-
-# --- kendi kimligim -------------------------------------------------------
-
 
 DB_WITH_USER = f"Teams:calendar:react-web-client:{TENANT_GUID}:{MY_GUID}:tr-tr"
 DB_WITH_MRI = f"Teams:anonymoususersmanager:react-web-client:{TENANT_GUID}:{MY_MRI}:tr-tr"
@@ -1107,19 +691,6 @@ def test_a_database_name_without_an_identity_gives_nothing():
     assert source_module.mri_from_database_name("Teams:messages:react-web-client:a:b:tr") == ""
 
 
-def test_my_mri_comes_from_my_own_message():
-    """`isSentByCurrentUser` isaretli mesajin `creator` alani benim."""
-    record = {
-        "conversationId": "19:meeting_x@thread.v2",
-        "messageMap": {
-            "a": {"creator": PERSON_ONE, "isSentByCurrentUser": False},
-            "b": {"creator": MY_MRI, "isSentByCurrentUser": True},
-        },
-    }
-    assert attendance.sender_mri(record) == MY_MRI
-    assert attendance.sender_mri({"messageMap": {}}) == ""
-
-
 def test_the_setting_wins_over_the_discovered_identity():
     assert intake.my_mri(setting=MY_GUID, discovered=PERSON_ONE) == MY_MRI
     assert intake.my_mri(discovered=MY_MRI) == MY_MRI
@@ -1130,292 +701,6 @@ def test_the_call_history_participant_id_is_not_used_any_more():
     """Sahada hicbir katilimci listesinde bulunamadi: yanlis kaynakti."""
     record = teams_cache.call_from_value({"callId": "a", "userParticipantId": MY_GUID})
     assert not hasattr(record, "user_participant_id")
-
-
-def test_without_an_identity_no_attendance_row_is_made():
-    record = fake_attended()
-    assert intake.normalize_attendance([record], "") == []
-
-
-# --- katilim -> satir -----------------------------------------------------
-
-
-def fake_attended(seconds: int = 1863, mine: bool = True, call_id: str = "cagri-1"):
-    parts = [(PERSON_ONE, 1800)]
-    if mine:
-        parts.insert(0, (MY_MRI, seconds))
-    return attended(
-        "19:meeting_ABC123456789@thread.v2",
-        NOW - timedelta(days=1),
-        parts=parts,
-        call_id=call_id,
-    )
-
-
-def test_attendance_becomes_a_meeting_row():
-    rows = intake.normalize_attendance(
-        [fake_attended()], MY_MRI, names={PERSON_ONE: "Örnek Kişi"}
-    )
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["kind"] == intake.KIND_MEETING
-    assert row["source"] == "chat"
-    assert row["duration_ms"] == 1863 * 1000
-    # Anahtar `callid` + gun: ayni cagri farkli gunde ayri satir olur.
-    assert row["call_id"] == "cagri-1:" + intake.attendance_day(fake_attended())
-    assert intake.duration_text(row["duration_ms"]) == "31 dk"
-    # Baslangic, bitisten kendi surem kadar oncesi.
-    from app.teamscalls.source import parse_utc
-
-    span = parse_utc(row["ended_at"]) - parse_utc(row["started_at"])
-    assert span == timedelta(seconds=1863)
-
-
-def test_the_duration_is_my_own_not_the_meetings():
-    rows = intake.normalize_attendance([fake_attended(seconds=600)], MY_MRI)
-    assert rows[0]["duration_ms"] == 600 * 1000
-
-
-def test_no_duration_means_no_row():
-    """"En uzun part" yedegi KALDIRILDI: katilmadigim toplantiyi listeliyordu."""
-    plan = intake.plan_attendance([fake_attended(seconds=0)], MY_MRI)
-    assert plan.rows == []
-    assert plan.decisions[0]["decision"] == "skipped:no_duration"
-
-
-def test_a_meeting_i_did_not_attend_makes_no_row():
-    """"Kabul edip gitmedigim" toplanti: katilimci listesinde yokum."""
-    assert intake.normalize_attendance([fake_attended(mine=False)], MY_MRI) == []
-
-
-def test_the_participants_carry_their_seconds():
-    rows = intake.normalize_attendance([fake_attended()], MY_MRI, names={PERSON_ONE: "Örnek Kişi"})
-    people = json.loads(rows[0]["participants_json"])
-    assert people[1] == {"id": PERSON_ONE, "name": "Örnek Kişi", "seconds": 1800}
-
-
-def test_the_calendar_subject_is_attached_by_thread():
-    rows = intake.normalize_attendance(
-        [fake_attended()],
-        MY_MRI,
-        events=[event("Sabah daily", local_text(moment(5)),
-                      event_type="RecurringMaster", cid="19:meeting_ABC123456789@thread.v2")],
-    )
-    assert rows[0]["meeting_subject"] == "Sabah daily"
-
-
-def test_a_call_without_an_id_gets_one_from_the_thread_and_the_day():
-    record = fake_attended(call_id="")
-    rows = intake.normalize_attendance([record], MY_MRI)
-    assert rows[0]["call_id"] == "ABC123456789:" + intake.attendance_day(record)
-
-
-def test_a_call_already_in_the_history_is_not_added_twice():
-    rows = intake.normalize_attendance(
-        [fake_attended()], MY_MRI, known_ids={"cagri-1"}
-    )
-    assert rows == []
-
-
-def test_the_scan_merges_both_sources(conn):
-    source = FakeCallSource(
-        calls=[call("gecmis", moment(2))],
-        attendance=[fake_attended()],
-        my_mri=MY_MRI,
-    )
-    result = intake.scan(conn, source)
-    assert result["from_chat"] == 1
-    assert result["my_mri_known"] is True
-    sources = {row["call_id"]: row["source"] for row in repo.list_calls(conn)}
-    assert sources["gecmis"] == "history"
-    chat_ids = [key for key, value in sources.items() if value == "chat"]
-    assert len(chat_ids) == 1 and chat_ids[0].startswith("cagri-1:")
-
-
-def test_a_history_call_beats_the_chat_record(conn):
-    """Ayni `callId` gecmiste varsa sohbet kaydi eklenmez."""
-    history = call("cagri-1", moment(1), call_type=TYPE_MULTI_PARTY)
-    result = intake.scan(
-        conn,
-        FakeCallSource(calls=[history], attendance=[fake_attended()], my_mri=MY_MRI),
-    )
-    assert result["from_chat"] == 0
-    assert repo.get_call(conn, "cagri-1")["source"] == "history"
-    assert repo.call_count(conn) == 1
-
-
-def test_a_chat_record_survives_a_second_scan(conn):
-    source = FakeCallSource(attendance=[fake_attended()])
-    intake.scan(conn, source, my_mri_setting=MY_MRI)
-    intake.scan(conn, source, my_mri_setting=MY_MRI)
-    assert repo.call_count(conn) == 1
-
-
-def test_chat_meetings_count_in_the_statistics():
-    rows = intake.normalize_attendance([fake_attended()], MY_MRI)
-    stats = intake.build_stats(rows, days=30, now=NOW)
-    assert stats["total_ms"] == 1863 * 1000
-    slices = {item["kind"]: item for item in stats["split"]}
-    assert slices[intake.KIND_MEETING]["count"] == 1
-    # Yon kavrami yok: aradim/arandim sayimina girmez.
-    assert stats["direction"]["outgoing"]["count"] == 0
-    assert stats["direction"]["incoming"]["count"] == 0
-
-
-def test_the_row_says_where_it_came_from():
-    rows = intake.normalize_attendance([fake_attended()], MY_MRI)
-    card = intake.view(rows[0])
-    assert card["source"] == "chat"
-    assert card["source_label"] == "Sohbetten"
-
-
-def test_the_api_shows_chat_meetings(api_client, fake_calls):
-    fake_calls.calls = []
-    fake_calls.attendance = [fake_attended()]
-    api_client.put("/api/settings", json={"calls.my_mri": MY_MRI})
-    result = api_client.post("/api/calls/scan").json()
-    assert result["from_chat"] == 1
-
-    data = api_client.get("/api/calls?days=90").json()
-    assert data["calls"][0]["source"] == "chat"
-    assert data["calls"][0]["source_label"] == "Sohbetten"
-
-
-def test_attendance_older_than_the_window_is_dropped():
-    old = attended(
-        "19:meeting_ABC123456789@thread.v2",
-        NOW - timedelta(days=200),
-        parts=[(MY_MRI, 600)],
-    )
-    kept = attendance.within([old], intake.since_of(90, NOW))
-    assert kept == []
-
-
-# --- yeni partlist bicimi (gercek onbellek) ------------------------------
-#
-# Sahadaki 9.035 `Event/Call` mesajinin HICBIRINDE `type` ozniteligi yok:
-# olay turu `<calleventtype>`, toplanti bilgisi `<meetingdetails>` altinda.
-
-NEW_XML = (
-    '<partlist alt="Toplantı sona erdi">'
-    "<calleventtype>ended</calleventtype>"
-    "<callid>cagri-yeni</callid>"
-    "<ended>2026-09-11T09:31:03Z</ended>"
-    "<meetingdetails>"
-    "<icaluid>ICAL-42</icaluid>"
-    "<starttime>2026-09-11T09:00:00Z</starttime>"
-    "<endtime>2026-09-11T09:31:03Z</endtime>"
-    "<meetingtype>Scheduled</meetingtype>"
-    "<organizerupn>ornek@example.com</organizerupn>"
-    "</meetingdetails>"
-    '<part identity="{me}"><name>Ben</name><duration>1863</duration></part>'
-    "<part><identity>{other}</identity><displayname>Örnek Kişi</displayname>"
-    "<duration>1800</duration></part>"
-    "</partlist>"
-).format(me=MY_MRI, other=PERSON_ONE)
-
-NEW_STARTED_XML = (
-    '<partlist alt="Toplantı başladı">'
-    "<calleventtype>started</calleventtype>"
-    f'<part identity="{MY_MRI}"><name>Ben</name></part>'
-    "</partlist>"
-)
-
-
-def test_the_new_format_is_read_without_a_type_attribute():
-    block = attendance.parse_partlist(NEW_XML)
-    assert block.kind == "ended"
-    assert block.call_id == "cagri-yeni"
-    assert block.ical_uid == "ICAL-42"
-    assert block.meeting_type == "Scheduled"
-    assert [(part.mri, part.seconds) for part in block.parts] == [
-        (MY_MRI, 1863),
-        (PERSON_ONE, 1800),
-    ]
-
-
-def test_the_identity_can_be_a_child_element():
-    assert attendance.parse_partlist(NEW_XML).parts[1].mri == PERSON_ONE
-
-
-def test_the_new_started_message_is_ignored():
-    record = attendance.attendance_of({"messageType": "Event/Call", "content": NEW_STARTED_XML})
-    assert record.kind == "started"
-    assert intake.normalize_attendance([record], MY_MRI) == []
-
-
-def test_a_block_without_a_type_but_with_durations_counts_as_ended():
-    """Turu yazmayan bloklarda sure varsa toplanti bitmistir."""
-    bare = NEW_XML.replace("<calleventtype>ended</calleventtype>", "").replace(
-        "<ended>2026-09-11T09:31:03Z</ended>", ""
-    )
-    record = attendance.attendance_of({"messageType": "Event/Call", "content": bare})
-    assert record is not None
-    assert record.part_for(MY_MRI).seconds == 1863
-    assert intake.normalize_attendance([record], MY_MRI)[0]["duration_ms"] == 1863 * 1000
-
-
-def test_a_block_without_a_type_and_without_durations_is_skipped():
-    bare = (
-        '<partlist alt="x"><callid>c</callid>'
-        f'<part identity="{MY_MRI}"><name>Ben</name></part></partlist>'
-    )
-    record = attendance.attendance_of({"messageType": "Event/Call", "content": bare})
-    assert intake.normalize_attendance([record], MY_MRI) == []
-
-
-def test_the_old_format_still_works():
-    block = attendance.parse_partlist(ENDED_XML)
-    assert block.kind == "ended"
-    assert block.call_id == "cagri-1"
-    assert len(block.parts) == 2
-
-
-def test_the_meeting_time_comes_from_the_details():
-    record = attendance.attendance_of(
-        {"messageType": "Event/Call", "content": NEW_XML}, "19:meeting_x@thread.v2"
-    )
-    assert record.ended_at == "2026-09-11T09:31:03Z"
-    assert record.start_time == "2026-09-11T09:00:00Z"
-
-
-def test_the_names_inside_the_new_format_are_not_kept():
-    record = attendance.attendance_of({"messageType": "Event/Call", "content": NEW_XML})
-    dumped = json.dumps([part.__dict__ for part in record.parts], ensure_ascii=False)
-    for secret in ("Ben", "Örnek Kişi", "ornek@example.com"):
-        assert secret not in dumped, secret
-
-
-# --- icaluid ile takvim eslemesi -----------------------------------------
-
-
-def test_the_calendar_is_matched_by_ical_uid():
-    """En kesin yol: `meetingdetails.icaluid` <-> takvim `iCalUid`."""
-    meeting = event("Bütçe toplantısı", local_text(moment(9)))
-    meeting.ical_uid = "ICAL-42"
-    record = attendance.attendance_of(
-        {"messageType": "Event/Call", "content": NEW_XML}, "19:meeting_bilinmeyen@thread.v2"
-    )
-    rows = intake.normalize_attendance([record], MY_MRI, events=[meeting])
-    assert rows[0]["meeting_subject"] == "Bütçe toplantısı"
-
-
-def test_the_ical_uid_beats_the_thread_id():
-    by_thread = event("Yanlış toplantı", local_text(moment(1)), cid="19:meeting_x@thread.v2")
-    by_ical = event("Doğru toplantı", local_text(moment(9)))
-    by_ical.ical_uid = "ICAL-42"
-    record = attendance.attendance_of(
-        {"messageType": "Event/Call", "content": NEW_XML}, "19:meeting_x@thread.v2"
-    )
-    rows = intake.normalize_attendance([record], MY_MRI, events=[by_thread, by_ical])
-    assert rows[0]["meeting_subject"] == "Doğru toplantı"
-
-
-def test_the_calendar_record_carries_its_ical_uid():
-    record = teams_cache.calendar_from_value(
-        {"startTime": datetime(2026, 9, 11, 7, 0), "iCalUid": "ICAL-42", "subject": "Toplantı"}
-    )
-    assert record.ical_uid == "ICAL-42"
 
 
 # --- hiz: ekran yalnizca SQLite okur -------------------------------------
@@ -1431,27 +716,22 @@ def test_the_screen_endpoints_never_touch_the_cache(api_client, fake_calls):
     api_client.get("/api/calls?days=30")
     api_client.get("/api/calls/stats?days=30")
     api_client.get(f"/api/calls/person/{PERSON_ONE}?days=30")
+    api_client.get("/api/calls/export.xlsx?days=30")
     assert fake_calls.reads == before
 
-    # Teshis uclari bilerek okur; yalnizca dugmeye basinca cagrilir.
-    api_client.get("/api/calls/unmatched?days=30")
+    # Onbellegi yalnizca tarama acar.
+    api_client.post("/api/calls/scan")
     assert fake_calls.reads == before + 1
-    api_client.get("/api/calls/attendance-diagnose?days=30")
-    assert fake_calls.reads == before + 2
 
 
 def test_the_view_endpoint_answers_the_whole_screen(api_client, fake_calls):
     seed_api(api_client, fake_calls)
     data = api_client.get("/api/calls/view?days=90").json()
-    for key in ("calls", "people", "stats", "count", "unmatched", "windows", "scanned_at"):
+    for key in ("calls", "people", "groups", "stats", "count", "windows", "scanned_at"):
         assert key in data, key
     assert data["stats"]["total_ms"] > 0
-    # Rozet sayisi da burada: ayri istek gerekmez.
-    assert data["unmatched"] == sum(
-        1
-        for card in data["calls"]
-        if card["kind"] == "group_call" and card["thread_kind"] != "group_chat"
-    )
+    # Toplantiya ait alanlar yanittan tumden cikti.
+    assert "unmatched" not in data
 
 
 def test_the_list_does_not_carry_the_raw_record(api_client, fake_calls):
@@ -1537,305 +817,6 @@ def test_the_search_stays_fast_on_a_full_table(api_client, fake_calls):
     assert measure(api_client, "/api/calls/stats?days=90") < VIEW_BUDGET_MS
 
 
-# --- katilim: sert kurallar ve teshis ------------------------------------
-
-
-def ended_message(seconds: int = 1863, identity: str = MY_MRI, call_id: str = "cagri-1",
-                  kind: str = "ended", message_type: str = "Event/Call") -> dict:
-    content = (
-        f'<partlist alt="x"><calleventtype>{kind}</calleventtype>'
-        f"<callid>{call_id}</callid>"
-        f'<part identity="{identity}"><name>Ben</name><duration>{seconds}</duration></part>'
-        f'<part identity="{PERSON_ONE}"><duration>1800</duration></part>'
-        "</partlist>"
-    )
-    return {
-        "messageType": message_type,
-        "content": content,
-        "originalArrivalTime": int((NOW - timedelta(days=1)).timestamp() * 1000),
-    }
-
-
-def record_of(**kwargs):
-    return attendance.attendance_of(ended_message(**kwargs), "19:meeting_ABC123456789@thread.v2")
-
-
-def test_a_partlist_inside_another_message_type_still_counts():
-    """`messageType` her zaman Event/Call degil (Media_CallRecording gorulur)."""
-    record = record_of(message_type="RichText/Media_CallRecording")
-    assert record is not None
-    assert intake.normalize_attendance([record], MY_MRI)[0]["duration_ms"] == 1863 * 1000
-
-
-def test_my_identity_matches_without_the_orgid_prefix():
-    """Sahada `part identity` bazen `8:<guid>` geliyor; kayit dusuyordu."""
-    record = record_of(identity="8:" + MY_GUID)
-    part, how = record.match_for(MY_MRI)
-    assert how == "guid"
-    assert intake.normalize_attendance([record], MY_MRI)[0]["duration_ms"] == 1863 * 1000
-
-
-def test_my_identity_matches_in_any_case():
-    record = record_of(identity=MY_MRI.upper())
-    assert record.match_for(MY_MRI)[1] == "exact"
-
-
-def test_several_sessions_of_one_meeting_are_summed():
-    """Cok oturumlu toplanti: ayni `callid`, sureler toplanir, tek satir."""
-    plan = intake.plan_attendance(
-        [record_of(seconds=600), record_of(seconds=900), record_of(seconds=300)], MY_MRI
-    )
-    assert len(plan.rows) == 1
-    assert plan.rows[0]["duration_ms"] == 1800 * 1000
-    key = plan.rows[0]["call_id"]
-    # Anahtar gun ekini tasir: farkli gun asla birlesmez.
-    assert key.startswith("cagri-1:")
-    assert [note["decision"] for note in plan.decisions] == ["created", f"merged:{key}", f"merged:{key}"]
-
-
-def test_without_a_call_id_the_key_is_the_ical_and_the_day():
-    record = attendance.attendance_of(
-        {
-            "messageType": "Event/Call",
-            "content": (
-                '<partlist><calleventtype>ended</calleventtype>'
-                "<meetingdetails><icaluid>ICAL-7</icaluid></meetingdetails>"
-                f'<part identity="{MY_MRI}"><duration>60</duration></part></partlist>'
-            ),
-            "originalArrivalTime": int((NOW - timedelta(days=1)).timestamp() * 1000),
-        },
-        "19:meeting_x@thread.v2",
-    )
-    key = intake.attendance_key(record)
-    # Sohbet cekirdegi varsa once o kullanilir; gun her zaman eklenir.
-    assert key.startswith("x:")
-    assert key.endswith(intake.attendance_day(record))
-    assert intake.normalize_attendance([record], MY_MRI)[0]["call_id"] == key
-
-
-def test_every_decision_code_is_reported():
-    records = [
-        record_of(call_id="olusan"),
-        record_of(call_id="baskasi", identity=PERSON_TWO),
-        record_of(call_id="suresiz", seconds=0),
-        record_of(call_id="baslangic", kind="started"),
-        record_of(call_id="gecmiste"),
-    ]
-    plan = intake.plan_attendance(records, MY_MRI, known_ids={"gecmiste"})
-    assert [note["decision"] for note in plan.decisions] == [
-        "created",
-        "skipped:no_me",
-        "skipped:no_duration",
-        "skipped:started",
-        "deduped:history",
-    ]
-    assert len(plan.rows) == 1
-
-
-def test_the_diagnosis_groups_and_counts(api_client, fake_calls):
-    fake_calls.calls = []
-    fake_calls.attendance = [
-        record_of(call_id="olusan"),
-        record_of(call_id="baskasi", identity=PERSON_TWO),
-        record_of(call_id="suresiz", seconds=0),
-    ]
-    fake_calls.my_mri = MY_MRI
-    api_client.post("/api/calls/scan")
-
-    data = api_client.get("/api/calls/attendance-diagnose?days=90").json()
-    assert data["messages"] == 3
-    assert data["my_mri_known"] is True
-    assert data["summary"]["created"] == 1
-    assert data["summary"]["skipped"] == 2
-    first = data["meetings"][0]
-    for key in ("thread_core", "ended_at", "event_kind", "part_count", "me_present",
-                "my_seconds", "decision"):
-        assert key in first, key
-
-
-def test_the_diagnosis_names_the_meeting_when_the_calendar_knows_it(api_client, fake_calls):
-    fake_calls.calls = []
-    fake_calls.attendance = [record_of()]
-    fake_calls.calendar = [
-        event("Sabah daily", local_text(moment(9)), cid="19:meeting_ABC123456789@thread.v2")
-    ]
-    fake_calls.my_mri = MY_MRI
-    data = api_client.get("/api/calls/attendance-diagnose?days=90").json()
-    assert data["meetings"][0]["subject"] == "Sabah daily"
-
-
-# --- birlestirme anahtari: asla dejenere olmaz ---------------------------
-#
-# Saha: 55 mesajin 32'si "merged" cikti -- farkli thread'ler, farkli gunler.
-# `callid` okunamayinca anahtar sabitlesmis ve her sey tek kayda toplanmisti.
-
-
-def chat_record(thread: str, ended, call_id: str = "", ical: str = "", seconds: int = 600,
-                message_id: str = ""):
-    record = attended(thread, ended, parts=[(MY_MRI, seconds)], call_id=call_id)
-    record.ical_uid = ical
-    record.message_id = message_id
-    record.kind = "ended"
-    return record
-
-
-def test_two_threads_never_merge():
-    plan = intake.plan_attendance(
-        [
-            chat_record("19:meeting_AAAAAAAAAAAA@thread.v2", NOW - timedelta(days=1)),
-            chat_record("19:meeting_BBBBBBBBBBBB@thread.v2", NOW - timedelta(days=1)),
-        ],
-        MY_MRI,
-    )
-    assert len(plan.rows) == 2
-    assert [note["decision"] for note in plan.decisions] == ["created", "created"]
-
-
-def test_two_days_of_the_same_meeting_never_merge():
-    """Daily toplantisi: ayni thread, farkli gun -> her gun ayri satir."""
-    thread = "19:meeting_DAILY0123456789@thread.v2"
-    plan = intake.plan_attendance(
-        [
-            chat_record(thread, NOW - timedelta(days=1)),
-            chat_record(thread, NOW - timedelta(days=2)),
-            chat_record(thread, NOW - timedelta(days=28)),
-        ],
-        MY_MRI,
-    )
-    assert len(plan.rows) == 3
-    assert len({row["call_id"] for row in plan.rows}) == 3
-
-
-def test_the_same_call_id_on_two_days_never_merges():
-    plan = intake.plan_attendance(
-        [
-            chat_record("19:meeting_X0123456789@thread.v2", NOW - timedelta(days=1), call_id="c"),
-            chat_record("19:meeting_X0123456789@thread.v2", NOW - timedelta(days=3), call_id="c"),
-        ],
-        MY_MRI,
-    )
-    assert len(plan.rows) == 2
-
-
-def test_rejoining_the_same_meeting_on_the_same_day_is_summed():
-    """Yeniden katilma: ayni thread, ayni gun -> tek satir, sureler toplanir."""
-    thread = "19:meeting_REJOIN0123456@thread.v2"
-    day = NOW - timedelta(days=1)
-    plan = intake.plan_attendance(
-        [
-            chat_record(thread, day, seconds=600),
-            chat_record(thread, day + timedelta(minutes=30), seconds=300),
-        ],
-        MY_MRI,
-    )
-    assert len(plan.rows) == 1
-    assert plan.rows[0]["duration_ms"] == 900 * 1000
-
-
-def test_the_key_is_never_empty_or_constant():
-    """Hicbir isaret yoksa bile iki mesaj ayni anahtara dusmez."""
-    blank = [
-        chat_record("", "", message_id="m1"),
-        chat_record("", "", message_id="m2"),
-    ]
-    keys = {intake.attendance_key(record) for record in blank}
-    assert keys == {"m1", "m2"}
-    assert all(key.strip() for key in keys)
-
-    nameless = chat_record("", "")
-    assert intake.attendance_key(nameless, fallback="mesaj-7") == "mesaj-7"
-    assert intake.attendance_key(nameless).strip()
-
-
-def test_the_key_prefers_the_call_id_then_the_thread_then_the_ical():
-    day = NOW - timedelta(days=1)
-    with_call = chat_record("19:meeting_T0123456789@thread.v2", day, call_id="cagri")
-    assert intake.attendance_key(with_call).startswith("cagri:")
-    with_thread = chat_record("19:meeting_T0123456789@thread.v2", day, ical="ICAL")
-    assert intake.attendance_key(with_thread).startswith("T0123456789:")
-    only_ical = chat_record("", day, ical="ICAL")
-    assert intake.attendance_key(only_ical).startswith("ICAL:")
-
-
-def test_the_diagnosis_says_what_the_key_rests_on():
-    plan = intake.plan_attendance(
-        [chat_record("19:meeting_T0123456789@thread.v2", NOW - timedelta(days=1))], MY_MRI
-    )
-    note = plan.decisions[0]
-    assert note["has_call_id"] is False
-    assert note["has_ical_uid"] is False
-    assert note["day"] == intake.attendance_day(
-        chat_record("19:meeting_T0123456789@thread.v2", NOW - timedelta(days=1))
-    )
-
-
-def test_a_daily_gets_its_subject_from_the_recurring_master():
-    thread = "19:meeting_DAILY0123456789@thread.v2"
-    rows = intake.normalize_attendance(
-        [
-            chat_record(thread, NOW - timedelta(days=1)),
-            chat_record(thread, NOW - timedelta(days=2)),
-        ],
-        MY_MRI,
-        events=[master("Sabah daily", cid=thread)],
-    )
-    assert len(rows) == 2
-    assert {row["meeting_subject"] for row in rows} == {"Sabah daily"}
-
-
-# --- yeniden tarama eski (yanlis) kayitlari temizler ---------------------
-
-
-def test_a_rescan_removes_chat_rows_that_are_no_longer_produced(conn):
-    thread = "19:meeting_T0123456789@thread.v2"
-    first = FakeCallSource(
-        attendance=[chat_record(thread, NOW - timedelta(days=1))], my_mri=MY_MRI
-    )
-    intake.scan(conn, first)
-    assert repo.call_count(conn) == 1
-    stale = repo.list_calls(conn)[0]["call_id"]
-
-    # Ikinci taramada baska bir gun geliyor: eski satir artik uretilmiyor.
-    second = FakeCallSource(
-        attendance=[chat_record(thread, NOW - timedelta(days=2))], my_mri=MY_MRI
-    )
-    result = intake.scan(conn, second)
-    assert result["chat_removed"] == 1
-    ids = {row["call_id"] for row in repo.list_calls(conn)}
-    assert stale not in ids
-    assert len(ids) == 1
-
-
-def test_a_rescan_never_touches_the_history_rows(conn):
-    source = FakeCallSource(
-        calls=[call("gecmis", moment(1))],
-        attendance=[chat_record("19:meeting_T0123456789@thread.v2", NOW - timedelta(days=1))],
-        my_mri=MY_MRI,
-    )
-    intake.scan(conn, source)
-    source.attendance = []
-    result = intake.scan(conn, source)
-    assert result["chat_removed"] == 1
-    assert [row["call_id"] for row in repo.list_calls(conn)] == ["gecmis"]
-
-
-def test_chat_rows_outside_the_window_are_left_alone(conn):
-    """Pencerenin disinda kalan eski katilim kayitlari silinmez."""
-    old_row = dict(
-        call_id="eski-chat",
-        started_at=intake.iso_text(NOW - timedelta(days=300)),
-        duration_ms=600000,
-        kind="meeting",
-        source="chat",
-    )
-    repo.import_calls(conn, [old_row])
-    removed = repo.prune_chat_calls(
-        conn, keep_ids=set(), since=intake.iso_text(intake.since_of(90, NOW))
-    )
-    assert removed == 0
-    assert repo.get_call(conn, "eski-chat") is not None
-
-
 # --- tekillestirme --------------------------------------------------------
 
 
@@ -1857,16 +838,16 @@ def test_a_changed_call_is_updated_in_place(conn):
     assert rows[0]["duration_ms"] == 9 * 60000
 
 
-def test_the_scan_reports_how_many_meetings_matched(conn):
-    started = moment(1)
+def test_the_scan_reports_how_many_group_calls_there_are(conn):
     source = FakeCallSource(
         calls=[
-            call("a", started, call_type=TYPE_MULTI_PARTY),
-            call("b", moment(2), call_type=TYPE_MULTI_PARTY, other="kisi-b"),
-        ],
-        calendar=[event("Toplantı", local_text(started))],
+            call("a", moment(1), call_type=TYPE_MULTI_PARTY, participants=[PERSON_ONE]),
+            call("b", moment(2), other="kisi-b"),
+        ]
     )
-    assert intake.scan(conn, source)["meetings_matched"] == 1
+    result = intake.scan(conn, source)
+    assert result["groups"] == 1
+    assert "meetings_matched" not in result
 
 
 # --- istatistik -----------------------------------------------------------
@@ -1898,13 +879,16 @@ def test_missed_and_declined_calls_never_count_as_contact_time():
     assert stats["direction"]["declined"] == 1
 
 
-def test_the_three_slices_add_up_to_a_hundred_percent():
+def test_the_two_slices_add_up_to_a_hundred_percent():
+    """Dordüncü kutu: birebir / grup payi, hem sure hem adet."""
     stats = intake.build_stats(seeded_rows(), days=30, now=NOW)
     slices = {item["kind"]: item for item in stats["split"]}
+    assert set(slices) == {intake.KIND_ONE_TO_ONE, intake.KIND_GROUP}
     assert slices[intake.KIND_GROUP]["ms"] == 30 * 60000
     assert slices[intake.KIND_ONE_TO_ONE]["ms"] == 35 * 60000
-    assert slices[intake.KIND_MEETING]["ms"] == 0
     assert round(sum(item["percent"] for item in stats["split"])) == 100
+    assert round(sum(item["count_percent"] for item in stats["split"])) == 100
+    assert slices[intake.KIND_GROUP]["count"] == 1
     assert slices[intake.KIND_GROUP]["hours"] == 0.5
 
 
@@ -1928,19 +912,47 @@ def test_the_top_list_holds_only_one_to_one_calls_and_stops_at_five():
     assert all(person["counterpart_id"].startswith("kisi-") for person in stats["top"])
 
 
-def test_weekend_days_are_dropped_from_the_workday_average():
-    stats = intake.build_stats(seeded_rows(), days=7, now=NOW)
-    # 4 Eylul Cuma - 11 Eylul Cuma: sekiz gunun ikisi hafta sonu.
-    assert stats["workday"]["days"] == 6
-    assert stats["workday"]["average_ms"] == stats["total_ms"] // 6
+def test_the_group_box_credits_every_participant_with_the_whole_call():
+    """Ikinci kutu: grup aramasinin suresi katilan HERKESE yazilir."""
+    stats = intake.build_stats(group_rows(), days=30, now=NOW, me=ME)
+    people = {person["name"]: person for person in stats["group_top"]}
+    # Uclunun iki aramasi 40 dk; ucuncu grup 5 dk.
+    assert people["Örnek Kişi"]["ms"] == 45 * 60000
+    assert people["İkinci Örnek"]["ms"] == 40 * 60000
+    assert people["Üçüncü Örnek"]["ms"] == 5 * 60000
+    assert people["Örnek Kişi"]["groups"] == 2
+    # Kendim listede yokum.
+    assert "Ben" not in people
 
 
-def test_the_busiest_day_is_reported():
-    stats = intake.build_stats(seeded_rows(), days=30, now=NOW)
-    busiest = stats["workday"]["busiest"]
-    # 10 Eylul: 10 dakikalik arama + 30 dakikalik grup aramasi.
-    assert busiest["date"] == moment(1).astimezone().date().isoformat()
-    assert busiest["ms"] == 40 * 60000
+def test_the_combined_box_sums_the_one_to_one_and_the_group_time():
+    stats = intake.build_stats(group_rows(), days=30, now=NOW, me=ME)
+    first = stats["combined_top"][0]
+    assert first["name"] == "Örnek Kişi"
+    # 9 dk birebir + 45 dk grup.
+    assert first["ms"] == 54 * 60000
+    assert first["one_to_one_ms"] == 9 * 60000
+    assert first["group_ms"] == 45 * 60000
+
+
+def test_the_boxes_stop_at_five_people():
+    people = [f"8:orgid:kisi-{index}" for index in range(8)]
+    rows = intake.normalize(
+        [
+            call(
+                f"grup-{index}",
+                moment(index + 1),
+                minutes=index + 1,
+                call_type=TYPE_MULTI_PARTY,
+                participants=[ME, person, f"8:orgid:baska-{index}"],
+            )
+            for index, person in enumerate(people)
+        ],
+        me=ME,
+    )
+    stats = intake.build_stats(rows, days=30, now=NOW, me=ME)
+    assert len(stats["group_top"]) == 5
+    assert len(stats["combined_top"]) == 5
 
 
 def test_calls_outside_the_window_are_ignored():
@@ -1949,28 +961,32 @@ def test_calls_outside_the_window_are_ignored():
     assert stats["calls"] == 1
 
 
-def test_workdays_between_counts_only_monday_to_friday():
-    from datetime import date
-
-    assert intake.workdays_between(date(2026, 9, 7), date(2026, 9, 13)) == 5
-    assert intake.workdays_between(date(2026, 9, 12), date(2026, 9, 13)) == 0
+def test_the_workday_statistics_are_gone():
+    """Kullanici istedi: "Toplam Teams" ve "is gunu" kutulari kaldirildi."""
+    stats = intake.build_stats(seeded_rows(), days=30, now=NOW)
+    assert "workday" not in stats
+    assert not hasattr(intake, "workdays_between")
 
 
 # --- suzgecler ------------------------------------------------------------
 
 
-def test_the_search_box_looks_at_the_name_and_the_meeting_subject():
-    started = moment(1)
+def test_the_search_box_looks_at_the_name_and_the_participants():
     rows = intake.normalize(
         [
-            call("a", started, other=PERSON_ONE),
-            call("b", moment(2), call_type=TYPE_MULTI_PARTY, other="kisi-b"),
+            call("a", moment(1), other=PERSON_ONE),
+            call(
+                "b",
+                moment(2),
+                call_type=TYPE_MULTI_PARTY,
+                other="kisi-b",
+                participants=[PERSON_TWO],
+            ),
         ],
-        [event("Bütçe toplantısı", local_text(started - timedelta(days=1)), organizer="Toplantı Sahibi")],
-        names={PERSON_ONE: "Örnek Kişi"},
+        names={PERSON_ONE: "Örnek Kişi", PERSON_TWO: "İkinci Örnek"},
     )
-    assert [row["call_id"] for row in intake.select(rows, q="örnek", now=NOW)] == ["a"]
-    assert [row["call_id"] for row in intake.select(rows, q="bütçe", now=NOW)] == ["b"]
+    assert [row["call_id"] for row in intake.select(rows, q="örnek kişi", now=NOW)] == ["a"]
+    assert [row["call_id"] for row in intake.select(rows, q="ikinci", now=NOW)] == ["b"]
 
 
 def test_filters_narrow_by_direction_state_and_kind():
@@ -2031,14 +1047,14 @@ def test_an_unknown_person_gets_an_empty_but_valid_view():
 #
 # Asagidaki adlar ve alanlar gercek bir onbellek sondasindan alindi:
 # veritabani adlari `Teams:<ad>:react-web-client:<kiraci>:<kullanici>:<dil>`,
-# takvim saatleri `datetime`, bazi dizgeler `bytes`, katilimcilar
-# `participantList` altinda ve `displayName` hep `null`.
+# bazi dizgeler `bytes`, katilimcilar `participantList` altinda ve
+# `displayName` hep `null`.
 
-def test_the_four_databases_we_need_are_recognised():
+def test_the_two_databases_we_need_are_recognised():
     assert teams_cache.database_role(CALL_DB) == "call-history-manager"
-    assert teams_cache.database_role(CALENDAR_DB) == "calendar"
     assert teams_cache.database_role(PROFILE_DB) == "profiles"
-    assert teams_cache.database_role(THREAD_DB) == "conversation-manager"
+    # Sohbet ve takvim veritabanlarinin artik rolu yok.
+    assert teams_cache.database_role(THREAD_DB) == ""
 
 
 @pytest.mark.parametrize(
@@ -2058,7 +1074,7 @@ def test_sibling_databases_are_excluded(name):
 
 def test_the_call_database_is_recognised_by_its_segment():
     assert teams_cache.is_call_database(CALL_DB) is True
-    assert teams_cache.is_call_database(CALENDAR_DB) is False
+    assert teams_cache.is_call_database(PROFILE_DB) is False
     # Eski alt dizge eslemesi bunu da yakaliyordu; artik yakalamiyor.
     assert teams_cache.is_call_database("call-history-manager-db") is False
 
@@ -2066,11 +1082,7 @@ def test_the_call_database_is_recognised_by_its_segment():
 def test_every_wanted_database_has_exactly_one_store():
     assert teams_cache.ROLE_STORES == {
         "call-history-manager": "call-history",
-        "calendar": "calendar",
         "profiles": "profiles",
-        "conversation-manager": "conversations",
-        # Toplanti sohbetleri: katilim ("kim kac dakika kaldi") burada.
-        "replychain-manager": "replychains",
     }
 
 
@@ -2093,7 +1105,7 @@ def test_a_raw_call_record_becomes_a_call():
                 {"id": PERSON_ONE, "type": "user", "tenantId": "k", "displayName": None},
                 {"id": PERSON_TWO, "type": "user", "tenantId": "k", "displayName": None},
             ],
-            "threadId": MEETING_THREAD,
+            "threadId": GROUP_THREAD,
             "groupChatThreadId": "",
         }
     )
@@ -2102,7 +1114,8 @@ def test_a_raw_call_record_becomes_a_call():
     assert record.target_id == PERSON_ONE
     assert record.originator_name == "Ben"
     assert record.participants == [PERSON_ONE, PERSON_TWO]
-    assert record.thread_id == MEETING_THREAD
+    # Sohbet kimligi tasinmaz; yalnizca ham kayitta durur.
+    assert record.raw["threadId"] == GROUP_THREAD
 
 
 def test_the_case_of_the_enum_fields_does_not_matter():
@@ -2154,36 +1167,6 @@ def test_a_raw_record_without_an_id_is_dropped():
     assert teams_cache.call_from_value("metin") is None
 
 
-def test_a_raw_calendar_record_keeps_its_datetime():
-    """Takvim saatleri `datetime` gelir; metne cevirmek eslemeyi bozuyordu."""
-    started = datetime(2026, 9, 11, 11, 30)
-    record = teams_cache.calendar_from_value(
-        {
-            "id": "event-1",
-            "startTime": started,
-            "endTime": datetime(2026, 9, 11, 12, 0),
-            "subject": "Bütçe toplantısı".encode("utf-8"),
-            "organizerName": "Örnek Kişi",
-            "organizerAddress": "ornek@example.com",
-            "myResponseType": "Accepted",
-            "isOnlineMeeting": True,
-            "isCancelled": False,
-            "showAs": "Busy",
-            "attendees": [
-                {"name": "İkinci Örnek", "address": "ikinci@example.com",
-                 "role": "Required", "status": {"response": "Accepted"}},
-            ],
-            "skypeTeamsDataObj": {"cid": MEETING_THREAD},
-            "skypeTeamsMeetingUrl": "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x",
-        }
-    )
-    assert record.start_time == started
-    assert record.subject == "Bütçe toplantısı"
-    assert record.attendees == ["İkinci Örnek"]
-    assert record.cid == MEETING_THREAD
-    assert teams_cache.calendar_from_value({"subject": "saatsiz"}) is None
-
-
 def test_profile_records_feed_the_name_map():
     assert teams_cache.names_from_value(
         {"mri": PERSON_ONE, "displayName": "Örnek Kişi", "email": "ornek@example.com"}
@@ -2195,83 +1178,122 @@ def test_profile_records_feed_the_name_map():
     assert teams_cache.names_from_value({"displayName": "adsız"}) == {}
 
 
-def test_a_conversation_record_becomes_a_thread():
-    thread = teams_cache.thread_from_value(
-        {
-            "id": GROUP_THREAD,
-            "threadProperties": {"topic": "Proje ekibi".encode("utf-8")},
-            "members": [{"id": PERSON_ONE}, {"id": PERSON_TWO}],
-            "chatTitle": {"avatarUsersInfo": [{"displayName": "Örnek Kişi"}]},
-        }
-    )
-    assert thread.thread_id == GROUP_THREAD
-    assert thread.topic == "Proje ekibi"
-    assert thread.members == [PERSON_ONE, PERSON_TWO]
-    assert thread.member_names == ["Örnek Kişi"]
-    # Kayit anahtari da kimlik olarak kabul edilir.
-    assert teams_cache.thread_from_value({"threadProperties": {}}, GROUP_THREAD).thread_id == (
-        GROUP_THREAD
-    )
+def test_the_conversation_reader_is_gone():
+    """Grup adi onbellekten aranmiyor: sohbet okuyucusu tumden kalkti."""
+    assert not hasattr(teams_cache, "thread_from_value")
+    assert not hasattr(teams_cache, "calendar_from_value")
+    # Ham kayittaki sohbet kimligi de tasinmiyor (yalnizca `raw` icinde durur).
+    record = teams_cache.call_from_value({"callId": "a", "threadId": GROUP_THREAD})
+    assert not hasattr(record, "thread_id")
+    assert record.raw["threadId"] == GROUP_THREAD
 
 
-# --- toplanti eslemesi: once thread kimligi -------------------------------
+# --- gruplar: kimlik katilimci kumesidir ---------------------------------
 
 
-def test_a_thread_id_matches_the_calendar_without_looking_at_the_clock():
-    """Saatler tutmasa da `threadId` == `cid` ise eslesme kesindir."""
-    rows = intake.normalize(
-        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)],
-        [event("Bütçe toplantısı", local_text(moment(9)), cid=MEETING_THREAD)],
-    )
-    assert rows[0]["kind"] == intake.KIND_MEETING
-    assert rows[0]["meeting_subject"] == "Bütçe toplantısı"
-
-
-def test_the_thread_id_beats_a_closer_meeting_in_time():
-    started = moment(1)
-    rows = intake.normalize(
-        [call("a", started, call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)],
+def group_rows() -> list[dict]:
+    """Ayni uclunun iki aramasi, baska bir ikilinin bir aramasi."""
+    return intake.normalize(
         [
-            event("Yakın ama başka", local_text(started)),
-            event("Doğru toplantı", local_text(moment(20)), cid=MEETING_THREAD),
+            call(
+                "grup-1",
+                moment(1),
+                minutes=30,
+                call_type=TYPE_MULTI_PARTY,
+                participants=[ME, PERSON_ONE, PERSON_TWO],
+            ),
+            call(
+                "grup-2",
+                moment(3),
+                minutes=10,
+                call_type=TYPE_MULTI_PARTY,
+                # Ayni kisiler, baska sira: ayni grup.
+                participants=[PERSON_TWO, ME, PERSON_ONE],
+            ),
+            call(
+                "grup-3",
+                moment(2),
+                minutes=5,
+                call_type=TYPE_MULTI_PARTY,
+                participants=[ME, PERSON_ONE, PERSON_THREE],
+            ),
+            call("birebir", moment(1), minutes=9, other=PERSON_ONE),
         ],
+        names={
+            PERSON_ONE: "Örnek Kişi",
+            PERSON_TWO: "İkinci Örnek",
+            PERSON_THREE: "Üçüncü Örnek",
+            ME: "Ben",
+        },
+        me=ME,
     )
-    assert rows[0]["meeting_subject"] == "Doğru toplantı"
 
 
-def test_the_meeting_url_also_carries_the_thread():
-    """Baglantida kimlik URL kodlanmis gecer; govdesi aranir."""
-    core = intake.thread_core(MEETING_THREAD)
-    url = f"https://teams.microsoft.com/l/meetup-join/19%3ameeting_{core}%40thread.v2/0"
+def test_the_same_people_make_one_group_whatever_the_order():
+    groups = intake.group_totals(group_rows(), me=ME)
+    assert len(groups) == 2
+    first = groups[0]
+    assert first["count"] == 2
+    assert first["ms"] == 40 * 60000
+    assert first["duration_text"] == "40 dk"
+    assert first["people_count"] == 2
+    # Son arama en yeni olanindir.
+    assert first["last_at"] == max(
+        row["started_at"] for row in group_rows() if row["call_id"] in ("grup-1", "grup-2")
+    )
+
+
+def test_the_group_key_is_the_sorted_participant_set_without_me():
+    row = [item for item in group_rows() if item["call_id"] == "grup-1"][0]
+    assert intake.group_key(row, me=ME) == "|".join(sorted([PERSON_ONE, PERSON_TWO]))
+    # Birebir aramanin grup kimligi yoktur.
+    personal = [item for item in group_rows() if item["call_id"] == "birebir"][0]
+    assert intake.group_key(personal, me=ME) == ""
+
+
+def test_the_group_label_comes_from_the_participant_names():
+    groups = intake.group_totals(group_rows(), me=ME)
+    names = {group["name"] for group in groups}
+    # Adlar alfabetik: etiket hangi aramanin once geldigine gore degismez.
+    assert names == {"İkinci Örnek, Örnek Kişi", "Örnek Kişi, Üçüncü Örnek"}
+    # Tam liste ayri alanda doner (cekmece ve ipucu onu gosterir).
+    assert groups[0]["participants"] == ["İkinci Örnek", "Örnek Kişi"]
+
+
+def test_a_crowded_group_label_stops_at_three_names():
+    people = [f"8:orgid:kisi-{index}" for index in range(6)]
+    names = {person: f"Kişi {index}" for index, person in enumerate(people)}
     rows = intake.normalize(
-        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, thread_id=MEETING_THREAD)],
-        [event("Bağlantıdan eşleşen", local_text(moment(30)), meeting_url=url)],
+        [call("a", moment(1), minutes=5, call_type=TYPE_MULTI_PARTY, participants=people)],
+        names=names,
     )
-    assert rows[0]["kind"] == intake.KIND_MEETING
+    group = intake.group_totals(rows, names)[0]
+    assert group["name"].endswith("+3")
+    assert len(group["participants"]) == 6
 
 
-def test_a_short_thread_id_never_matches_by_substring():
-    assert intake.thread_matches("19:x", event("A", local_text(moment(1)), cid="19:xyz")) is False
+def test_a_group_call_without_participants_has_no_group():
+    rows = intake.normalize([call("a", moment(1), call_type=TYPE_MULTI_PARTY)])
+    assert intake.group_totals(rows) == []
 
 
-def test_a_group_chat_call_is_titled_from_the_conversation():
-    rows = intake.normalize(
-        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, group_thread_id=GROUP_THREAD)],
-        threads=[ThreadRecord(thread_id=GROUP_THREAD, topic="Proje ekibi")],
+def test_the_list_can_be_filtered_by_group():
+    rows = group_rows()
+    key = intake.group_key(
+        [item for item in rows if item["call_id"] == "grup-1"][0], me=ME
     )
-    assert rows[0]["kind"] == intake.KIND_GROUP
-    assert rows[0]["topic"] == "Proje ekibi"
-    assert intake.display_party(rows[0]) == "Proje ekibi"
+    picked = intake.select(rows, group=key, now=NOW, me=ME)
+    assert {row["call_id"] for row in picked} == {"grup-1", "grup-2"}
 
 
-def test_the_conversation_members_stand_in_for_a_missing_participant_list():
-    rows = intake.normalize(
-        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, group_thread_id=GROUP_THREAD)],
-        names={PERSON_ONE: "Örnek Kişi"},
-        threads=[ThreadRecord(thread_id=GROUP_THREAD, members=[PERSON_ONE, PERSON_TWO])],
+def test_the_card_carries_the_group_key_to_the_screen():
+    rows = group_rows()
+    card = intake.view([item for item in rows if item["call_id"] == "grup-1"][0], me=ME)
+    assert card["group_key"] == intake.group_key(
+        [item for item in rows if item["call_id"] == "grup-1"][0], me=ME
     )
-    assert intake.participants_of(rows[0]) == [PERSON_ONE, PERSON_TWO]
-    assert intake.participant_labels(rows[0])[0] == "Örnek Kişi"
+    # Kendim katilimci listesinde gorunmem.
+    assert "Ben" not in card["participant_names"]
 
 
 def test_participant_names_are_resolved_once_and_stored():
@@ -2285,32 +1307,15 @@ def test_participant_names_are_resolved_once_and_stored():
     assert intake.display_party(rows[0]) == "Örnek Kişi"
 
 
-def test_the_invitees_are_kept_apart_from_the_participants():
-    started = moment(1)
+def test_the_card_has_no_invitees_any_more():
+    """Davetliler takvimden geliyordu; takvim okumasi kalkti."""
     rows = intake.normalize(
-        [
-            call(
-                "a",
-                started,
-                call_type=TYPE_MULTI_PARTY,
-                participants=[PERSON_ONE],
-                thread_id=MEETING_THREAD,
-            )
-        ],
-        [
-            event(
-                "Bütçe toplantısı",
-                local_text(started),
-                cid=MEETING_THREAD,
-                attendees=["Örnek Kişi", "İkinci Örnek", "Üçüncü Kişi"],
-            )
-        ],
+        [call("a", moment(1), call_type=TYPE_MULTI_PARTY, participants=[PERSON_ONE])],
         names={PERSON_ONE: "Örnek Kişi"},
     )
     card = intake.view(rows[0])
-    # Katilanlar arama kaydindan, davetliler takvimden gelir.
     assert card["participant_names"] == ["Örnek Kişi"]
-    assert card["attendees"] == ["Örnek Kişi", "İkinci Örnek", "Üçüncü Kişi"]
+    assert "attendees" not in card
 
 
 def test_an_old_row_with_plain_participant_ids_still_reads():
@@ -2346,7 +1351,7 @@ def test_outside_windows_the_source_refuses(monkeypatch):
 # --- API ------------------------------------------------------------------
 
 
-def seed_api(api_client, fake_calls, calendar=()):
+def seed_api(api_client, fake_calls):
     fake_calls.calls = [
         call("bir", moment(1), minutes=10, other=PERSON_ONE),
         call("iki", moment(2), minutes=20, other=PERSON_ONE, direction=DIRECTION_IN),
@@ -2359,7 +1364,6 @@ def seed_api(api_client, fake_calls, calendar=()):
             participants=[PERSON_ONE, PERSON_TWO],
         ),
     ]
-    fake_calls.calendar = list(calendar)
     return api_client.post("/api/calls/scan").json()
 
 
@@ -2368,7 +1372,7 @@ def test_the_scan_endpoint_summarises_the_run(api_client, fake_calls):
     assert result["scanned"] == 4
     assert result["new"] == 4
     assert result["updated"] == 0
-    assert result["meetings_matched"] == 0
+    assert result["groups"] == 1
     assert result["ms"] >= 0
     assert result["scanned_at"]
     assert fake_calls.reads == 1
@@ -2390,7 +1394,7 @@ def test_the_list_endpoint_carries_labels_and_people(api_client, fake_calls):
     assert data["count"] == 4
     assert data["total"] == 4
     assert data["calls"][0]["duration_text"]
-    assert data["calls"][0]["kind_label"] in ("Birebir", "Toplantı", "Grup araması")
+    assert data["calls"][0]["kind_label"] in ("Birebir", "Grup araması")
     assert {person["name"] for person in data["people"]} == {"Örnek Kişi", "İkinci Örnek"}
 
 
@@ -2404,14 +1408,34 @@ def test_the_list_endpoint_filters(api_client, fake_calls):
     assert api_client.get("/api/calls?days=30&q=bilinmeyen").json()["count"] == 0
 
 
-def test_the_stats_endpoint_answers_the_five_cards(api_client, fake_calls):
+def test_the_stats_endpoint_answers_the_four_boxes(api_client, fake_calls):
     seed_api(api_client, fake_calls)
     stats = api_client.get("/api/calls/stats?days=90").json()
     assert stats["total_ms"] == 60 * 60000
-    assert len(stats["split"]) == 3
+    # Dagilim iki dilim: birebir ve grup. Toplanti dilimi kalmadi.
+    assert [item["kind"] for item in stats["split"]] == ["one_to_one", "group_call"]
     assert stats["direction"]["missed"] == 1
-    assert stats["workday"]["days"] > 0
     assert stats["top"][0]["name"] == "Örnek Kişi"
+    # Ust seridin dort kutusu: birebir, grup, toplam, dagilim.
+    assert stats["group_top"][0]["duration_text"] == "30 dk"
+    assert stats["combined_top"][0]["name"] == "Örnek Kişi"
+    # Kaldirilan kutular yanitta da yok.
+    assert "workday" not in stats
+
+
+def test_the_view_endpoint_lists_the_groups_and_filters_by_one(api_client, fake_calls):
+    seed_api(api_client, fake_calls)
+    data = api_client.get("/api/calls/view?days=90").json()
+    assert len(data["groups"]) == 1
+    group = data["groups"][0]
+    assert group["count"] == 1
+    assert group["duration_text"] == "30 dk"
+    assert sorted(group["participants"]) == ["Örnek Kişi", "İkinci Örnek"]
+
+    picked = api_client.get(f"/api/calls/view?days=90&group={group['key']}").json()
+    assert [card["call_id"] for card in picked["calls"]] == ["grup"]
+    # Grup suzgeci acikken bile Gruplar sekmesi butun gruplari gosterir.
+    assert len(picked["groups"]) == 1
 
 
 def test_the_person_endpoint_returns_the_drawer_payload(api_client, fake_calls):
@@ -2424,8 +1448,7 @@ def test_the_person_endpoint_returns_the_drawer_payload(api_client, fake_calls):
 
 
 def test_the_export_can_be_read_back(api_client, fake_calls):
-    started = moment(1, hours=1)
-    seed_api(api_client, fake_calls, calendar=[event("Bütçe toplantısı", local_text(started))])
+    seed_api(api_client, fake_calls)
     response = api_client.get("/api/calls/export.xlsx?days=90")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith(
@@ -2433,25 +1456,34 @@ def test_the_export_can_be_read_back(api_client, fake_calls):
     )
 
     book = load_workbook(io.BytesIO(response.content))
-    assert book.sheetnames == ["Aramalar", "Kişiler", "İstatistik"]
+    assert book.sheetnames == ["Aramalar", "Kişiler", "Gruplar", "İstatistik"]
 
     sheet = book["Aramalar"]
     headers = [cell.value for cell in sheet[1]]
     assert headers[:6] == ["Tarih", "Yön", "Karşı taraf", "Tür", "Durum", "Süre"]
-    # Katilanlar (arama kaydi) ve davetliler (takvim) ayri sutunlar.
-    assert headers[-2:] == ["Katılanlar", "Davetliler"]
+    assert headers[-1] == "Katılanlar"
     assert sheet.max_row == 5
     kinds = {sheet.cell(row=line, column=4).value for line in range(2, 6)}
-    assert "Toplantı" in kinds
+    assert kinds == {"Birebir", "Grup araması"}
+    assert "Toplantı" not in kinds
 
     people = book["Kişiler"]
     assert [cell.value for cell in people[1]][:3] == ["Kişi", "Görüşme", "Süre"]
     assert people.max_row >= 2
 
+    groups = book["Gruplar"]
+    assert [cell.value for cell in groups[1]] == [
+        "Grup", "Arama", "Süre", "Süre (dk)", "Son arama", "Kişi", "Katılımcılar"
+    ]
+    assert groups.max_row == 2
+    assert groups.cell(row=2, column=2).value == 1
+    assert "Örnek Kişi" in groups.cell(row=2, column=7).value
+
     stats = book["İstatistik"]
     labels = {stats.cell(row=line, column=1).value for line in range(1, stats.max_row + 1)}
     assert "Toplam temas" in labels
-    assert "İş günü başına" in labels
+    assert "Grupta en çok görüşülen" in labels
+    assert "İş günü başına" not in labels
 
 
 def test_the_endpoints_say_feature_unavailable_without_windows(api_client, context, monkeypatch):
@@ -2524,13 +1556,21 @@ def test_the_migration_creates_the_calls_table(conn):
         "counterpart_id",
         "counterpart_name",
         "forwarded",
-        "meeting_subject",
-        "meeting_organizer",
-        "my_response",
         "participants_json",
         "raw_json",
         "seen_at",
     } <= columns
+    # Toplantiya ve sohbete ait sutunlar gocle dustu.
+    assert columns.isdisjoint({
+        "meeting_subject",
+        "meeting_organizer",
+        "my_response",
+        "attendees_json",
+        "source",
+        "thread_id",
+        "group_thread_id",
+        "topic",
+    })
 
 
 def test_the_raw_record_is_kept_for_later(conn):

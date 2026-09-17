@@ -610,14 +610,13 @@ def test_calls_view_hooks_are_on_the_page(api_client):
         "Aramaları çek",
         'id="calls-export"',
         'id="calls-stats"',
-        'id="calls-unmatched"',
-        "Eşleşmeyenler",
-        'id="calls-attendance"',
-        "Katılım teşhisi",
+        'id="calls-filter"',
         'id="calls-tab-list"',
         'id="calls-tab-people"',
+        'id="calls-tab-groups"',
         ">Liste<",
         ">Kişiler<",
+        ">Gruplar<",
         'id="calls-table"',
         'id="calls-drawer"',
         '/static/js/calls.js',
@@ -636,17 +635,21 @@ def test_calls_script_covers_the_strip_the_tabs_and_the_drawer(api_client):
         "function renderCallStats",
         "function renderCallList",
         "function renderCallPeople",
+        "function renderCallGroups",
         "function openCallPerson",
         "function openCallDetail",
-        '"En çok görüşülen"',
+        # Serit tam olarak dort kutu: birebir, grup, toplam, dagilim.
+        '"En çok görüşülenler"',
+        '"Grupta en çok görüşülenler"',
+        '"Toplamda en çok görüşülenler"',
         '"Dağılım"',
-        '"Aradım / Arandım"',
-        '"Toplam temas"',
-        '"İş günü başına"',
         "Kaçırılan",
         "CALL_WINDOWS = [7, 30, 90]",
     ):
         assert marker in script, marker
+    # Kaldirilan kutular geri gelmesin.
+    for marker in ('"Toplam temas"', '"İş günü başına"', '"Aradım / Arandım"'):
+        assert marker not in script, marker
     # Yon ikonlari ve kisi baglantisi.
     for marker in ('"↗"', '"↙"', "call-person"):
         assert marker in script, marker
@@ -658,32 +661,21 @@ def test_calls_script_covers_the_strip_the_tabs_and_the_drawer(api_client):
     for marker in ("latest_call_at", "result.warning", "skipped_kinds", "en yeni:",
                    "read_ms", "veritabanı okundu"):
         assert marker in script, marker
-    # Katilanlar (arama kaydi) ile davetliler (takvim) ayri baslikta.
-    for marker in ('"Katılanlar"', '"Davetliler"', "call.attendees"):
-        assert marker in script, marker
+    # Katilanlar cekmecede ayri baslik.
+    assert '"Katılanlar"' in script
     # Pencere/arama degisiminde TEK istek ve 250 ms bekleme.
     assert "CALL_SEARCH_MS = 250" in script
     assert script.count('api("/api/calls/view?') == 1
     assert 'api("/api/calls?' not in script
-    # Rozet listenin yanitindan gelir, ek istek yok.
-    assert "callsState.unmatched" in script
-    # Katilim teshisi ayri dugmeye bagli.
-    for marker in ("/api/calls/attendance-diagnose", "function openAttendance",
-                   "skipped:no_duration", "skipped:no_me",
-                   "has_call_id", "has_ical_uid"):
+    # Gruplar sekmesi: tiklanan grup listeyi suzer, serit kaldirilabilir.
+    for marker in ("function filterByGroup", "function clearCallGroupFilter",
+                   'params.set("group"', "calls-filter", "group.participants"):
         assert marker in script, marker
-    # Teshis: eslesmeyenler dugmesi, nedenler ve takvim adaylari.
-    for marker in ("/api/calls/unmatched", "function openUnmatched", "function renderUnmatched",
-                   "only_time_gap:", "no_thread_id", "matches_now", "recurring_matched",
-                   "group_chat_thread"):
-        assert marker in script, marker
-    # Toplanti sohbetinden gelen kayitlar rozetle isaretlenir.
-    for marker in ('"sohbetten"', 'call.source === "chat"', "call-source"):
-        assert marker in script, marker
-    css_markers = (".unmatched", ".unmatched-why", ".unmatched-candidate")
-    css = api_client.get("/static/css/app.css").text
-    for marker in css_markers:
-        assert marker in css, marker
+    # Toplantiya ait her sey ekrandan kalkti.
+    for marker in ("/api/calls/unmatched", "/api/calls/attendance-diagnose",
+                   "openUnmatched", "openAttendance", "call.attendees",
+                   'call.source === "chat"'):
+        assert marker not in script, marker
 
 
 def test_calls_styles_are_defined(api_client):
@@ -695,25 +687,31 @@ def test_calls_styles_are_defined(api_client):
         ".stat-card",
         ".stat-figure",
         ".split-bar",
-        ".split-meeting",
         ".split-group_call",
         ".split-one_to_one",
         ".tab.on",
         ".call-dir.out",
         ".call-dir.in",
-        ".call-kind.kind-meeting",
+        ".call-kind.kind-group_call",
+        ".call-kind.kind-one_to_one",
+        ".call-filter",
         ".call-state.state-Missed",
         ".call-line",
     ):
         assert name in css, name
+    # Toplantiya ait sinif kalmadi.
+    for name in (".split-meeting", ".call-kind.kind-meeting", ".unmatched"):
+        assert name not in css, name
     # Kart basliklari Pathway Gothic One, sayilar mono.
     head = css.split(".stat-card h3 {", 1)[1].split("}", 1)[0]
     assert "font-family: var(--display);" in head
     figure = css.split(".stat-figure {", 1)[1].split("}", 1)[0]
     assert "font-family: var(--mono);" in figure
-    # 1024'te bes kart iki satira iner.
+    # Serit dort kart; 1024'te iki satira iner.
+    strip = css.split(".stats-strip {", 1)[1].split("}", 1)[0]
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in strip
     narrow = css.split("@media (max-width: 1024px) {", 1)[1]
-    assert ".stats-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }" in narrow
+    assert ".stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in narrow
 
 
 def test_the_drawer_can_be_widened_and_remembers_it(api_client):
@@ -773,7 +771,8 @@ def test_calls_texts_are_proper_turkish(api_client):
     page = api_client.get("/").text
     for marker in ("Teams Aramalar", "Aramaları çek", "Kişiler"):
         assert marker in page, marker
-    for word in ("Aramalari", "Kisiler", "Toplanti", "Sure"):
+    assert "Gruplar" in page
+    for word in ("Aramalari", "Kisiler", "Gruplarin", "Sure", "Toplantı"):
         assert word not in page, word
 
 

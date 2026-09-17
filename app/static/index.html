@@ -181,14 +181,10 @@
           <input type="search" id="calls-search" placeholder="Ara ( / )" autocomplete="off" />
           <button class="primary" id="calls-scan" title="Teams'in yerel önbelleğinden arama geçmişini çeker">Aramaları çek</button>
           <button id="calls-export" title="Aramaları Excel dosyası olarak indir">Excel'e aktar</button>
-          <button id="calls-attendance"
-            title="Toplantı sohbetlerinden hangi katılım kaydının neden alındığını gösterir">
-            Katılım teşhisi
-          </button>
-          <button id="calls-unmatched" hidden
-            title="Toplantıyla eşleşmeyen grup aramaları ve nedenleri">
-            Eşleşmeyenler <span class="badge" id="calls-unmatched-count"></span>
-          </button>
+          <span class="call-filter" id="calls-filter" hidden>
+            <span id="calls-filter-text"></span>
+            <button id="calls-filter-clear" title="Grup süzgecini kaldır">✕</button>
+          </span>
           <span class="hint" id="calls-hint"></span>
         </div>
 
@@ -197,6 +193,7 @@
         <div class="tabs" id="calls-tabs" role="tablist">
           <button class="tab on" id="calls-tab-list" role="tab" aria-selected="true">Liste</button>
           <button class="tab" id="calls-tab-people" role="tab" aria-selected="false">Kişiler</button>
+          <button class="tab" id="calls-tab-groups" role="tab" aria-selected="false">Gruplar</button>
         </div>
 
         <div class="grid-wrap">

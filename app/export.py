@@ -529,10 +529,11 @@ def build_ledger_workbook(
     return buffer.getvalue()
 
 
-# --- Teams aramalari: uc sayfa (Aramalar, Kisiler, Istatistik) -----------
+# --- Teams aramalari: dort sayfa (Aramalar, Kisiler, Gruplar, Istatistik) ---
 
 CALLS_SHEET = "Aramalar"
 CALLS_PEOPLE_SHEET = "Kişiler"
+CALLS_GROUPS_SHEET = "Gruplar"
 CALLS_STATS_SHEET = "İstatistik"
 CALLS_NAME = "Teams-Aramalar"
 
@@ -544,19 +545,17 @@ CALL_HEADERS = (
     "Durum",
     "Süre",
     "Süre (dk)",
-    "Toplantı",
-    "Organizatör",
-    "Yanıtım",
-    # Katilanlar arama kaydindan, davetliler takvimden gelir: ayni sey degil.
     "Katılanlar",
-    "Davetliler",
 )
 
 CALL_PEOPLE_HEADERS = ("Kişi", "Görüşme", "Süre", "Süre (dk)", "Giden", "Gelen", "Kaçırılan")
 
+CALL_GROUP_HEADERS = ("Grup", "Arama", "Süre", "Süre (dk)", "Son arama", "Kişi", "Katılımcılar")
+
 # Hucre tipleri; geri kalani metin.
 CALL_KINDS = {0: KIND_DATETIME, 6: KIND_DECIMAL}
 CALL_PEOPLE_KINDS = {1: KIND_NUMBER, 3: KIND_DECIMAL, 4: KIND_NUMBER, 5: KIND_NUMBER, 6: KIND_NUMBER}
+CALL_GROUP_KINDS = {1: KIND_NUMBER, 3: KIND_DECIMAL, 4: KIND_DATETIME, 5: KIND_NUMBER}
 
 
 def build_calls_workbook(
@@ -566,27 +565,40 @@ def build_calls_workbook(
     direction: str = "",
     state: str = "",
     kind: str = "",
+    group: str = "",
     tz: tzinfo | None = None,
     now: datetime | None = None,
+    me: str = "",
 ) -> bytes:
-    """Arama gecmisini uc sayfalik .xlsx olarak uretir.
+    """Arama gecmisini dort sayfalik .xlsx olarak uretir.
 
-    Sayfalar ekranin birebir karsiligidir: Liste sekmesi, Kisiler sekmesi ve
-    ustteki istatistik seridi.
+    Sayfalar ekranin birebir karsiligidir: Liste, Kisiler ve Gruplar
+    sekmeleri ile ustteki istatistik seridi.
     """
     conn = context.connection()
     rows = repository.list_calls(conn)
     names = calls_intake.names_from_rows(rows)
+    marker = me or _calls_me(context)
     picked = calls_intake.select(
-        rows, days=days, q=q, direction=direction, state=state, kind=kind, now=now, names=names
+        rows,
+        days=days,
+        q=q,
+        direction=direction,
+        state=state,
+        kind=kind,
+        group=group,
+        now=now,
+        names=names,
+        me=marker,
     )
-    stats = calls_intake.build_stats(rows, days=days, now=now, names=names)
+    stats = calls_intake.build_stats(rows, days=days, now=now, names=names, me=marker)
 
     book = Workbook()
     sheet = book.active
     sheet.title = sheet_title(CALLS_SHEET)
-    _write_call_rows(sheet, picked, tz, names)
+    _write_call_rows(sheet, picked, tz, names, marker)
     _write_call_people(book, calls_intake.people_totals(picked, names), tz)
+    _write_call_groups(book, calls_intake.group_totals(picked, names, marker), tz)
     _write_call_stats(book, stats, tz)
 
     buffer = io.BytesIO()
@@ -594,11 +606,26 @@ def build_calls_workbook(
     return buffer.getvalue()
 
 
+def _calls_me(context: Any) -> str:
+    """Kullanicinin kendi kimligi (ayar, yoksa taramanin buldugu).
+
+    Ayar deposu olmayan bir baglam (testlerdeki kucuk sahteler) bos gecer.
+    """
+    settings = getattr(context, "settings", None)
+    if settings is None:
+        return ""
+    return calls_intake.my_mri(
+        setting=settings.get("calls.my_mri", "") or "",
+        discovered=settings.get("calls.my_mri_found", "") or "",
+    )
+
+
 def _write_call_rows(
     sheet: Worksheet,
     rows: list[dict[str, Any]],
     tz: tzinfo | None,
     names: dict[str, str] | None = None,
+    me: str = "",
 ) -> None:
     sheet.append(list(CALL_HEADERS))
     for cell in sheet[1]:
@@ -606,21 +633,17 @@ def _write_call_rows(
 
     widths = [len(text) for text in CALL_HEADERS]
     for line, row in enumerate(rows, start=2):
-        card = calls_intake.view(row, names)
+        card = calls_intake.view(row, names, me)
         values = [
             card["started_at"],
             card["direction_label"],
-            # Cok kisili aramada "karsi taraf" yoktur: ekranda ne yaziyorsa o.
+            # Grup aramasinda "karsi taraf" yoktur: ekranda ne yaziyorsa o.
             card["title"],
             card["kind_label"],
             card["state_label"],
             card["duration_text"],
             round((card["duration_ms"] or 0) / 60000, 1),
-            card["meeting_subject"] or card["topic"],
-            card["meeting_organizer"],
-            card["my_response"],
             ", ".join(card["participant_names"]),
-            ", ".join(card["attendees"]),
         ]
         for index, value in enumerate(values):
             target = sheet.cell(row=line, column=index + 1)
@@ -661,6 +684,35 @@ def _write_call_people(book: Workbook, people: list[dict[str, Any]], tz: tzinfo 
     _fit_columns(sheet, widths)
 
 
+def _write_call_groups(book: Workbook, groups: list[dict[str, Any]], tz: tzinfo | None) -> None:
+    """Gruplar sayfasi: ekrandaki Gruplar sekmesinin birebir dokumu."""
+    sheet = book.create_sheet(sheet_title(CALLS_GROUPS_SHEET))
+    sheet.append(list(CALL_GROUP_HEADERS))
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+
+    widths = [len(text) for text in CALL_GROUP_HEADERS]
+    for line, group in enumerate(groups, start=2):
+        values = [
+            group["name"],
+            group["count"],
+            group["duration_text"],
+            round((group["ms"] or 0) / 60000, 1),
+            group["last_at"],
+            group["people_count"],
+            ", ".join(group["participants"]),
+        ]
+        for index, value in enumerate(values):
+            target = sheet.cell(row=line, column=index + 1)
+            width = _write_task_cell(target, value, CALL_GROUP_KINDS.get(index, KIND_TEXT), tz)
+            if width > widths[index]:
+                widths[index] = width
+
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:{get_column_letter(len(CALL_GROUP_HEADERS))}{len(groups) + 1}"
+    _fit_columns(sheet, widths)
+
+
 def _write_call_stats(book: Workbook, stats: dict[str, Any], tz: tzinfo | None) -> None:
     """Istatistik sayfasi: ekrandaki kartlarin ayni sirayla duz dokumu."""
     sheet = book.create_sheet(sheet_title(CALLS_STATS_SHEET))
@@ -670,12 +722,7 @@ def _write_call_stats(book: Workbook, stats: dict[str, Any], tz: tzinfo | None) 
         ("Görüşülen arama", stats["connected"]),
         ("Toplam temas", stats["total_text"]),
         ("Toplam temas (dk)", round((stats["total_ms"] or 0) / 60000, 1)),
-        ("İş günü", stats["workday"]["days"]),
-        ("İş günü başına", stats["workday"]["average_text"]),
     ]
-    busiest = stats["workday"].get("busiest")
-    if busiest:
-        lines.append(("En yoğun gün", f"{busiest['date']} · {busiest['duration_text']}"))
 
     lines.append(("", ""))
     for slice_ in stats["split"]:
@@ -693,10 +740,15 @@ def _write_call_stats(book: Workbook, stats: dict[str, Any], tz: tzinfo | None) 
     lines.append(("Kaçırılan", stats["direction"]["missed"]))
     lines.append(("Reddedilen", stats["direction"]["declined"]))
 
-    lines.append(("", ""))
-    lines.append(("En çok görüşülen", ""))
-    for person in stats["top"]:
-        lines.append((person["name"], f"{person['duration_text']} · {person['count']} arama"))
+    for title, key in (
+        ("En çok görüşülen", "top"),
+        ("Grupta en çok görüşülen", "group_top"),
+        ("Birebir + grup toplamı", "combined_top"),
+    ):
+        lines.append(("", ""))
+        lines.append((title, ""))
+        for person in stats.get(key) or ():
+            lines.append((person["name"], f"{person['duration_text']} · {person['count']} arama"))
 
     for line, (label, value) in enumerate(lines, start=1):
         name_cell = sheet.cell(row=line, column=1, value=label or None)

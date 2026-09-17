@@ -2120,16 +2120,8 @@ CALL_COLUMNS: tuple[str, ...] = (
     "counterpart_id",
     "counterpart_name",
     "forwarded",
-    "meeting_subject",
-    "meeting_organizer",
-    "my_response",
-    "thread_id",
-    "group_thread_id",
-    "topic",
     "participants_json",
-    "attendees_json",
     "raw_json",
-    "source",
     "seen_at",
 )
 
@@ -2137,7 +2129,6 @@ CALL_COLUMNS: tuple[str, ...] = (
 def _call_dict(row: sqlite3.Row, columns: Sequence[str] = CALL_COLUMNS) -> dict[str, Any]:
     data = {name: row[name] for name in columns}
     data["duration_ms"] = int(data.get("duration_ms") or 0)
-    data["source"] = str(data.get("source") or "history")
     for name in columns:
         if name != "duration_ms" and data[name] is None:
             data[name] = ""
@@ -2233,50 +2224,6 @@ def get_call(conn: sqlite3.Connection, call_id: str) -> dict[str, Any] | None:
         "SELECT * FROM teams_calls WHERE call_id = ?", (str(call_id or ""),)
     ).fetchone()
     return _call_dict(row) if row is not None else None
-
-
-def history_call_ids(conn: sqlite3.Connection) -> set[str]:
-    """`call-history`ten gelmis kayitlarin kimlikleri (tekillestirme icin).
-
-    Toplanti sohbetinden gelen kayit, ayni arama zaten gecmiste varsa
-    eklenmez; gecmis kaydi daha zengindir (yon, durum, karsi taraf).
-    """
-    rows = conn.execute(
-        "SELECT call_id FROM teams_calls WHERE source = 'history'"
-    ).fetchall()
-    return {str(row["call_id"]) for row in rows}
-
-
-def prune_chat_calls(
-    conn: sqlite3.Connection, keep_ids: Iterable[str], since: str = ""
-) -> int:
-    """Toplanti sohbetinden gelmis ama artik uretilmeyen satirlari siler.
-
-    Yalnizca `source='chat'` satirlarina ve yalnizca taranan PENCERE icine
-    dokunur: pencerenin disinda kalan eski katilim kayitlari durur, `history`
-    satirlarina hic dokunulmaz. Birlestirme anahtari degisince eski (yanlis)
-    kayitlarin temizlenmesi icin var.
-    """
-    keep = {str(item) for item in keep_ids}
-    marker = str(since or "").strip()
-    if marker:
-        rows = conn.execute(
-            "SELECT call_id FROM teams_calls WHERE source = 'chat' AND started_at >= ?",
-            (marker,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT call_id FROM teams_calls WHERE source = 'chat'"
-        ).fetchall()
-    stale = [str(row["call_id"]) for row in rows if str(row["call_id"]) not in keep]
-    if not stale:
-        return 0
-    with conn:
-        conn.executemany(
-            "DELETE FROM teams_calls WHERE call_id = ? AND source = 'chat'",
-            [(item,) for item in stale],
-        )
-    return len(stale)
 
 
 def call_count(conn: sqlite3.Connection) -> int:

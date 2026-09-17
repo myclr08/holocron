@@ -612,6 +612,66 @@ def _migration_0013_group_detail_fields(conn: sqlite3.Connection) -> None:
     _add_column(conn, "groups", "detail_fields_json", "TEXT")
 
 
+def _migration_0014_calls_without_meetings(conn: sqlite3.Connection) -> None:
+    """Aramalar filosundan TOPLANTI kavrami tumden cikti.
+
+    Toplanti eslemesi (takvim) ve toplanti sohbetinden turetilen katilim
+    kayitlari kaldirildi; geriye yalnizca **birebir** ve **grup** aramalari
+    kaldi. Tablo bu yuzden yeniden kuruluyor:
+
+    * toplanti satirlari (`kind='meeting'`) ve sohbetten turetilen satirlar
+      (`source='chat'`) SILINIR -- ikisi de artik uretilmiyor, durmalari
+      ekranda yanlis bir gecmis gosterirdi;
+    * yalnizca toplantiya ait sutunlar (`meeting_subject`,
+      `meeting_organizer`, `my_response`, `attendees_json`, `source`) duser;
+    * sohbet sutunlari (`thread_id`, `group_thread_id`, `topic`) da duser:
+      gruplama artik sohbet kimligiyle degil **katilimci kumesiyle** yapiliyor
+      ve grup adi onbellekten aranmiyor.
+
+    Kalan veri (aramalar) oldugu gibi tasinir; yeniden tarama gerekmez.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS teams_calls_new (
+            call_id           TEXT PRIMARY KEY,
+            started_at        TEXT,
+            ended_at          TEXT,
+            connected_at      TEXT,
+            duration_ms       INTEGER NOT NULL DEFAULT 0,
+            direction         TEXT,
+            state             TEXT,
+            kind              TEXT,
+            counterpart_id    TEXT,
+            counterpart_name  TEXT,
+            forwarded         TEXT,
+            participants_json TEXT,
+            raw_json          TEXT,
+            seen_at           TEXT
+        );
+
+        INSERT INTO teams_calls_new (
+            call_id, started_at, ended_at, connected_at, duration_ms, direction,
+            state, kind, counterpart_id, counterpart_name, forwarded,
+            participants_json, raw_json, seen_at
+        )
+        SELECT
+            call_id, started_at, ended_at, connected_at, duration_ms, direction,
+            state, kind, counterpart_id, counterpart_name, forwarded,
+            participants_json, raw_json, seen_at
+        FROM teams_calls
+        WHERE kind <> 'meeting' AND COALESCE(source, 'history') <> 'chat';
+
+        DROP TABLE teams_calls;
+        ALTER TABLE teams_calls_new RENAME TO teams_calls;
+
+        CREATE INDEX IF NOT EXISTS idx_teams_calls_started ON teams_calls(started_at);
+        CREATE INDEX IF NOT EXISTS idx_teams_calls_person
+            ON teams_calls(counterpart_id, started_at);
+        CREATE INDEX IF NOT EXISTS idx_teams_calls_kind ON teams_calls(kind, started_at);
+        """
+    )
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
@@ -627,6 +687,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (11, "teams call source", _migration_0011_call_source),
     (12, "gamify campaigns", _migration_0012_gamify),
     (13, "group Jira detail fields", _migration_0013_group_detail_fields),
+    (14, "teams calls without meetings", _migration_0014_calls_without_meetings),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

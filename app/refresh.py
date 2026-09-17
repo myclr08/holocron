@@ -366,7 +366,15 @@ class RefreshManager:
         try:
             source = context.calls_factory(config.cache_path)
             with context.db_lock:
-                summary["calls"] = calls_intake.scan(context.connection(), source)
+                result = calls_intake.scan(
+                    context.connection(),
+                    source,
+                    my_mri_setting=context.settings.get("calls.my_mri", "") or "",
+                )
+            # Kendi kimligim: grup istatistiklerinde beni elemek icin saklanir.
+            if result.get("my_mri"):
+                context.settings.set("calls.my_mri_found", str(result["my_mri"]))
+            summary["calls"] = result
         except CallsError as exc:
             summary["calls"] = {"scanned": 0, "new": 0, "errors": [
                 {"code": exc.code, "message": exc.message}

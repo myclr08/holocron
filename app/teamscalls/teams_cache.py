@@ -35,14 +35,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .. import vendor
-from .attendance import MeetingAttendance, attendance_from_record, sender_mri
 from .source import (
     SOURCE_COPY,
     SOURCE_LIVE,
-    CalendarRecord,
     CallRecord,
     CallsError,
-    ThreadRecord,
     blob_dir_for,
     canonical_direction,
     canonical_state,
@@ -61,19 +58,15 @@ from .source import (
 # gibi kardesler var, alt dizge aramasi onlari da yakalar ve bosa yuz binlerce
 # kayit okutur.
 ROLE_CALLS = "call-history-manager"
-ROLE_CALENDAR = "calendar"
 ROLE_PROFILES = "profiles"
-ROLE_THREADS = "conversation-manager"
-# Toplanti sohbetleri: katilim ("kim kac dakika kaldi") burada.
-ROLE_REPLYCHAINS = "replychain-manager"
 
 # Rol -> okunacak object store. Baska hicbir veritabani ACILMAZ.
+# (Sohbet veritabani `conversation-manager` ARTIK ACILMIYOR: gruplar sohbet
+# kimligiyle degil katilimci kumesiyle tanimlaniyor, grup adi da katilimci
+# adlarindan turuyor.)
 ROLE_STORES: dict[str, str] = {
     ROLE_CALLS: "call-history",
-    ROLE_CALENDAR: "calendar",
     ROLE_PROFILES: "profiles",
-    ROLE_THREADS: "conversations",
-    ROLE_REPLYCHAINS: "replychains",
 }
 
 # Kayitta kimligi tasiyabilecek alan adlari (sirayla denenir).
@@ -83,7 +76,7 @@ NAME_KEYS: tuple[str, ...] = ("displayName", "imDisplayName", "name", "userPrinc
 
 
 def database_segment(name: Any) -> str:
-    """`Teams:calendar:react-web-client:...` -> `calendar`."""
+    """`Teams:profiles:react-web-client:...` -> `profiles`."""
     text = clean_text(name)
     parts = text.split(":")
     return parts[1] if len(parts) > 1 else text
@@ -102,20 +95,8 @@ def is_call_database(name: Any) -> bool:
     return database_role(name) == ROLE_CALLS
 
 
-def is_calendar_database(name: Any) -> bool:
-    return database_role(name) == ROLE_CALENDAR
-
-
 def is_profile_database(name: Any) -> bool:
     return database_role(name) == ROLE_PROFILES
-
-
-def is_thread_database(name: Any) -> bool:
-    return database_role(name) == ROLE_THREADS
-
-
-def is_replychain_database(name: Any) -> bool:
-    return database_role(name) == ROLE_REPLYCHAINS
 
 
 def _pick(value: dict[str, Any], keys: Iterable[str]) -> str:
@@ -188,94 +169,10 @@ def call_from_value(value: Any) -> CallRecord | None:
         target_id=target_id,
         target_name=target_name,
         forwarded=clean_text(value.get("forwardedTargetType")),
-        thread_id=clean_text(value.get("threadId")),
-        group_thread_id=clean_text(value.get("groupChatThreadId")),
         subject=clean_text(value.get("subject")),
         participants=participants_of(value.get("participantList") or value.get("participants")),
         raw=jsonable(value),
     )
-
-
-def attendee_names(value: Any) -> list[str]:
-    """`attendees[]` -> davetli adlari (ad yoksa adres)."""
-    names: list[str] = []
-    if not isinstance(value, (list, tuple)):
-        return names
-    for item in value:
-        if not isinstance(item, dict):
-            text = clean_text(item)
-            if text and text not in names:
-                names.append(text)
-            continue
-        name = clean_text(item.get("name")) or clean_text(item.get("address"))
-        if name and name not in names:
-            names.append(name)
-    return names
-
-
-def calendar_from_value(value: Any) -> CalendarRecord | None:
-    """`calendar` store kaydi -> `CalendarRecord`.
-
-    Saat alanlari `datetime` gelir (JS `Date`); metne cevrilmeden oldugu gibi
-    tasinir, cevrimi `intake` yapar. `skypeTeamsDataObj.cid` toplanti
-    sohbetinin kimligidir ve aramayla KESIN eslesmeyi saglar.
-    """
-    if not isinstance(value, dict):
-        return None
-    start = value.get("startTime")
-    if start is None or (isinstance(start, (str, bytes)) and not clean_text(start)):
-        return None
-
-    data = value.get("skypeTeamsDataObj")
-    cid = clean_text(data.get("cid")) if isinstance(data, dict) else ""
-    organizer_id, organizer_name = person_of(value.get("organizer"))
-    return CalendarRecord(
-        event_id=clean_text(value.get("id") or value.get("iCalUid") or value.get("objectId")),
-        ical_uid=clean_text(value.get("iCalUid") or value.get("icalUid") or value.get("iCalUId")),
-        start_time=start,
-        end_time=value.get("endTime") or "",
-        subject=clean_text(value.get("subject")),
-        organizer_name=clean_text(value.get("organizerName")) or organizer_name or organizer_id,
-        organizer_address=clean_text(value.get("organizerAddress")),
-        my_response=clean_text(value.get("myResponseType")),
-        is_online_meeting=bool(value.get("isOnlineMeeting")),
-        is_cancelled=bool(value.get("isCancelled")),
-        location=clean_text(value.get("location")),
-        event_type=clean_text(value.get("eventType")),
-        show_as=clean_text(value.get("showAs")),
-        cid=cid,
-        meeting_url=clean_text(value.get("skypeTeamsMeetingUrl")),
-        attendees=attendee_names(value.get("attendees")),
-    )
-
-
-def thread_from_value(value: Any, key: Any = None) -> ThreadRecord | None:
-    """`conversations` store kaydi -> `ThreadRecord` (grup sohbetinin adi).
-
-    Kaydin anahtari thread kimligidir; kayit icinde de `id` olarak gecebilir.
-    """
-    if not isinstance(value, dict):
-        return None
-    thread_id = clean_text(value.get("id") or value.get("threadId") or key)
-    if not thread_id:
-        return None
-
-    properties = value.get("threadProperties")
-    topic = clean_text(properties.get("topic")) if isinstance(properties, dict) else ""
-    members: list[str] = []
-    for item in value.get("members") or ():
-        person_id, _ = person_of(item)
-        if person_id and person_id not in members:
-            members.append(person_id)
-
-    names: list[str] = []
-    title = value.get("chatTitle")
-    if isinstance(title, dict):
-        for item in title.get("avatarUsersInfo") or ():
-            _, name = person_of(item)
-            if name and name not in names:
-                names.append(name)
-    return ThreadRecord(thread_id=thread_id, topic=topic, members=members, member_names=names)
 
 
 def names_from_value(value: Any) -> dict[str, str]:
@@ -450,36 +347,24 @@ def missing_warning(report: CopyReport) -> str:
 class CacheBundle:
     """Bir onbellek acilisindan cikan her sey.
 
-    Dordu birlikte gelir cunku hepsi tek gecişte okunur; `read()` bunu
-    sozlesmedeki dortluye acar.
+    Ikisi birlikte gelir cunku tek gecişte okunur; `read()` bunu
+    sozlesmedeki ikiliye acar.
     """
 
     calls: list[CallRecord] = field(default_factory=list)
-    calendar: list[CalendarRecord] = field(default_factory=list)
     names: dict[str, str] = field(default_factory=dict)
-    threads: list[ThreadRecord] = field(default_factory=list)
-    attendance: list[MeetingAttendance] = field(default_factory=list)
     databases: int = 0
     read_ms: int = 0
-    # Toplanti sohbetlerinde `19:meeting_` onekiyle taranan kayit sayisi.
-    chains_seen: int = 0
-    # Kullanicinin kendi kimligi: veritabani adindan ve/veya kendi gonderdigi
-    # bir mesajin `creator` alanindan.
+    # Kullanicinin kendi kimligi: veritabani adindan okunur; grup
+    # aramalarinda "ben" katilimci sayilmasin diye gerekir.
     mri_from_name: str = ""
-    mri_from_chat: str = ""
 
     @property
     def user_mri(self) -> str:
-        return self.mri_from_name or self.mri_from_chat
+        return self.mri_from_name
 
-    def as_tuple(self) -> tuple[
-        list[CallRecord],
-        list[CalendarRecord],
-        dict[str, str],
-        list[ThreadRecord],
-        list[MeetingAttendance],
-    ]:
-        return self.calls, self.calendar, self.names, self.threads, self.attendance
+    def as_tuple(self) -> tuple[list[CallRecord], dict[str, str]]:
+        return self.calls, self.names
 
 
 def load_reader() -> Any:
@@ -505,9 +390,7 @@ class TeamsCacheSource:
         """Son taramanin teshisi: kopyalanan/atlanan dosyalar, kaynak, uyari."""
         return dict(self.report)
 
-    def read(self) -> tuple[
-        list[CallRecord], list[CalendarRecord], dict[str, str], list[ThreadRecord]
-    ]:
+    def read(self) -> tuple[list[CallRecord], dict[str, str]]:
         leveldb = Path(self.cache_path) if self.cache_path else default_cache_path()
         if not leveldb.is_dir():
             raise CallsError(
@@ -559,14 +442,11 @@ class TeamsCacheSource:
             self.report["warning"] = missing_warning(report)
         return self._finish(result, SOURCE_COPY)
 
-    def _finish(self, bundle: Any, origin: str) -> tuple[
-        list[CallRecord], list[CalendarRecord], dict[str, str], list[ThreadRecord]
-    ]:
-        """Teshisi tamamlar ve sozlesmedeki dortluyu dondurur."""
+    def _finish(self, bundle: Any, origin: str) -> tuple[list[CallRecord], dict[str, str]]:
+        """Teshisi tamamlar ve sozlesmedeki ikiliyi dondurur."""
         self.report["source"] = origin
         self.report["databases"] = getattr(bundle, "databases", 0)
         self.report["read_ms"] = getattr(bundle, "read_ms", 0)
-        self.report["attendance"] = len(getattr(bundle, "attendance", ()))
         self.report["my_mri"] = getattr(bundle, "user_mri", "")
         return bundle.as_tuple() if hasattr(bundle, "as_tuple") else tuple(bundle)
 
@@ -594,7 +474,7 @@ class TeamsCacheSource:
             ) from exc
 
     def _read_all(self, leveldb: Path, blob: Path | None) -> "CacheBundle":
-        """Yalnizca gereken DORT veritabanini acar.
+        """Yalnizca gereken IKI veritabanini acar.
 
         Onbellekte yuz kusur veritabani var ve hepsini dolasmak dakikalar
         suruyor (sonda 112 veritabaninda 596 saniye harcadi). Ad suzgeci
@@ -640,23 +520,6 @@ class TeamsCacheSource:
                     parsed = call_from_value(value)
                     if parsed is not None:
                         bundle.calls.append(parsed)
-                elif role == ROLE_CALENDAR:
-                    event = calendar_from_value(value)
-                    if event is not None:
-                        bundle.calendar.append(event)
-                elif role == ROLE_REPLYCHAINS:
-                    # 270 bin kayit var: toplanti sohbeti olmayanlar mesaj
-                    # haritasi HIC acilmadan elenir.
-                    found = attendance_from_record(value)
-                    if found:
-                        bundle.chains_seen += 1
-                        bundle.attendance.extend(found)
-                    if not bundle.mri_from_chat:
-                        bundle.mri_from_chat = sender_mri(value)
-                elif role == ROLE_THREADS:
-                    thread = thread_from_value(value, getattr(record, "key", None))
-                    if thread is not None:
-                        bundle.threads.append(thread)
                 else:
                     bundle.names.update(names_from_value(value))
         except Exception:  # pragma: no cover - bozuk kayit tum taramayi dusurmesin

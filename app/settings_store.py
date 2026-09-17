@@ -69,8 +69,10 @@ DEFAULTS: dict[str, str] = {
     # Teams aramalari: onbellek yolu (bos = varsayilan), Guncelle ile tarama.
     "calls.cache_path": "",
     "calls.scan_on_refresh": "0",
-    # Kendi Teams kimligim (MRI ya da GUID); bos = arama gecmisinden turetilir.
+    # Kendi Teams kimligim (MRI ya da GUID); bos = taramanin buldugu kullanilir.
     "calls.my_mri": "",
+    # Taramanin veritabani adindan buldugu kimlik (ayar bosken kullanilir).
+    "calls.my_mri_found": "",
     # Arama gecmisi en son ne zaman cekildi (bos = hic).
     "calls.scanned_at": "",
     # Kurum rehberi en son ne zaman cekildi (bos = hic).
