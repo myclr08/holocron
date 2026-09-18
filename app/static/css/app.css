@@ -2312,3 +2312,117 @@ html.no-motion *::after {
 
 .rule-line .rule-source { font-size: 11px; color: var(--muted); }
 .rule-line .rule-points { width: 84px; font-family: var(--mono); }
+
+/* --- Gorusme notlari ---------------------------------------------------- */
+
+/* Takip seridi: Aramalar ekraninin tepesinde, her zaman gorunur. */
+.track-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  margin-bottom: 10px;
+}
+
+.track-strip.is-off { opacity: .72; }
+.track-strip .track-gap { flex: 1; }
+.track-strip .switch { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
+
+/* Durum rozetleri: canli kayit kirmizi, isleme sarisi, kuyruk mavisi. */
+.pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 2px 9px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pill.live { color: var(--saber-red); border-color: var(--saber-red); }
+.pill.live::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--saber-red);
+  margin-right: 6px;
+  box-shadow: var(--saber-red-glow);
+}
+.pill.work { color: var(--saber-yellow); border-color: var(--saber-yellow); }
+.pill.queue { color: var(--saber-blue); border-color: var(--saber-blue); }
+.pill.state-hazir { color: var(--saber-green); border-color: var(--saber-green); }
+.pill.state-hata { color: var(--saber-red); border-color: var(--saber-red); }
+.pill.state-atlandi { color: var(--muted); }
+.pill.state-kaydediliyor { color: var(--saber-red); border-color: var(--saber-red); }
+.pill.state-kuyrukta { color: var(--saber-blue); border-color: var(--saber-blue); }
+.pill.state-birlestiriliyor,
+.pill.state-yaziya_dokuluyor,
+.pill.state-ozetleniyor { color: var(--saber-yellow); border-color: var(--saber-yellow); }
+
+/* Belirsiz ilerleme: yaziya dokme suruyor, ne kadar kaldigini bilmiyoruz. */
+.bar {
+  display: inline-block;
+  vertical-align: middle;
+  width: 90px;
+  height: 4px;
+  margin-left: 8px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  overflow: hidden;
+}
+
+.bar i { display: block; height: 100%; width: 40%; background: var(--saber-yellow); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .bar i { animation: bar-slide 1.6s ease-in-out infinite; }
+}
+
+@keyframes bar-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+.gorusme-grid .what { overflow-wrap: anywhere; }
+.gorusme-row { cursor: pointer; }
+.gorusme-row:hover { background: var(--panel-2); }
+
+.who-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.who-chips span {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.jira-key { font-family: var(--mono); color: var(--saber-blue); white-space: nowrap; }
+
+/* Not cekmecesi: bolum listeleri, aksiyon satirlari, Jira kutusu. */
+.note-list { margin: 4px 0 10px; padding-left: 18px; display: grid; gap: 4px; }
+
+.action-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px dashed var(--line);
+  padding: 6px 0;
+}
+
+.action-row small { display: block; }
+
+.drawer-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+
+.jira-box { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.jira-box input { flex: 1; min-width: 140px; font-family: var(--mono); }
+
+/* Ayarlar -> Gorusme notlari: deneme kaydi sonucu. */
+.trial-result { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+.trial-result .ok { color: var(--saber-green); }
+.trial-result .no { color: var(--saber-red); }

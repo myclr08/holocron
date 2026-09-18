@@ -187,7 +187,13 @@ function renderCallWindows() {
 
 // --- ana cizim -----------------------------------------------------------
 
-const CALL_TABS = { list: "calls-tab-list", people: "calls-tab-people", groups: "calls-tab-groups" };
+const CALL_TABS = {
+  list: "calls-tab-list",
+  people: "calls-tab-people",
+  groups: "calls-tab-groups",
+  // Dorduncu sekme ayri dosyada (gorusme.js): kayit hatti kendi durumunu tutar.
+  notes: "calls-tab-notes",
+};
 
 function renderCalls() {
   el("calls-count").textContent = `${callsState.calls.length} arama`;
@@ -198,6 +204,17 @@ function renderCalls() {
     el(id).setAttribute("aria-selected", String(callsState.tab === name));
   });
   renderCallFilter();
+  const notlarda = callsState.tab === "notes";
+  // Gorusme notlari sekmesinde arama istatistigi ve arama tablosu kalkar.
+  el("calls-stats").hidden = notlarda;
+  // Arama tablosunun kutusu da kalkar: yoksa notlarin ustunde bos bir alan kalir.
+  el("calls-grid-wrap").hidden = notlarda;
+  el("calls-table").hidden = notlarda || !callsState.calls.length;
+  if (typeof showGorusmeTab === "function") showGorusmeTab(notlarda);
+  if (notlarda) {
+    el("calls-empty").hidden = true;
+    return;
+  }
   renderCallStats();
   if (callsState.tab === "people") renderCallPeople();
   else if (callsState.tab === "groups") renderCallGroups();
@@ -581,6 +598,11 @@ function renderCallPersonBody(body, data) {
 
   body.appendChild(h("h3", { text: "Grup aramaları" }));
   body.appendChild(callListBox(data.group_calls || [], "Ortak grup araması yok."));
+
+  // O kisiyle yapilan gorusmelerin notlari (varsa) en alta eklenir.
+  if (typeof renderKisiGorusme === "function" && data.person) {
+    renderKisiGorusme(body, data.person.id);
+  }
 }
 
 function callListBox(calls, emptyText) {
@@ -694,7 +716,11 @@ function bindCalls() {
   el("calls-search").addEventListener("input", (event) => {
     callsState.query = event.target.value;
     clearTimeout(callsState.searchTimer);
-    callsState.searchTimer = setTimeout(loadCalls, CALL_SEARCH_MS);
+    callsState.searchTimer = setTimeout(() => {
+      loadCalls();
+      // Notlar sekmesi de ayni arama kutusunu kullanir.
+      if (callsState.tab === "notes" && typeof loadGorusme === "function") loadGorusme();
+    }, CALL_SEARCH_MS);
   });
 
   document.addEventListener("keydown", (event) => {

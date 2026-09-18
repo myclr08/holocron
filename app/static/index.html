@@ -188,21 +188,49 @@
           <span class="hint" id="calls-hint"></span>
         </div>
 
+        <!-- Takip şeridi: her zaman görünür, tek düğmeyle duraklat / sürdür. -->
+        <div class="track-strip" id="gorusme-track">
+          <label class="switch" title="Görüşme algılandığında kaydet">
+            <input type="checkbox" id="gorusme-takip" />
+            <span id="gorusme-takip-text">Takip açık</span>
+          </label>
+          <button class="small" id="gorusme-takip-toggle">Duraklat</button>
+          <span class="pill live" id="gorusme-live" hidden></span>
+          <span class="hint" id="gorusme-live-meta"></span>
+          <span class="track-gap"></span>
+          <span class="pill work" id="gorusme-working" hidden></span>
+          <span class="pill queue" id="gorusme-queued" hidden></span>
+          <span class="hint" id="gorusme-track-hint"></span>
+        </div>
+
         <div class="stats-strip" id="calls-stats"></div>
 
         <div class="tabs" id="calls-tabs" role="tablist">
           <button class="tab on" id="calls-tab-list" role="tab" aria-selected="true">Liste</button>
           <button class="tab" id="calls-tab-people" role="tab" aria-selected="false">Kişiler</button>
           <button class="tab" id="calls-tab-groups" role="tab" aria-selected="false">Gruplar</button>
+          <button class="tab" id="calls-tab-notes" role="tab" aria-selected="false">Görüşme notları
+            <i id="gorusme-count">0</i></button>
         </div>
 
-        <div class="grid-wrap">
+        <div class="grid-wrap" id="calls-grid-wrap">
           <table class="grid calls-grid" id="calls-table">
             <thead><tr id="calls-head"></tr></thead>
             <tbody id="calls-body"></tbody>
           </table>
           <div class="empty" id="calls-empty" hidden>
             <p id="calls-empty-text">Bu pencerede arama yok.</p>
+          </div>
+        </div>
+
+        <!-- Görüşme notları sekmesi: kendi tablosu, kendi boş durumu. -->
+        <div class="grid-wrap" id="gorusme-wrap" hidden>
+          <table class="grid gorusme-grid" id="gorusme-table">
+            <thead><tr id="gorusme-head"></tr></thead>
+            <tbody id="gorusme-body"></tbody>
+          </table>
+          <div class="empty" id="gorusme-empty" hidden>
+            <p id="gorusme-empty-text">Henüz görüşme notu yok.</p>
           </div>
         </div>
       </section>
@@ -306,6 +334,17 @@
     <div class="drawer-body" id="calls-drawer-body"></div>
   </aside>
 
+  <aside class="drawer" id="gorusme-drawer" hidden>
+    <header class="drawer-head">
+      <div class="drawer-title">
+        <strong id="gorusme-drawer-title"></strong>
+        <span class="badge" id="gorusme-drawer-state"></span>
+      </div>
+      <button id="gorusme-drawer-close" title="Kapat (Esc)">✕</button>
+    </header>
+    <div class="drawer-body" id="gorusme-drawer-body"></div>
+  </aside>
+
   <div class="modal-backdrop" id="modal" hidden>
     <div class="modal" id="modal-box" role="dialog" aria-modal="true">
       <header class="modal-head">
@@ -361,6 +400,7 @@
   <script src="/static/js/common.js"></script>
   <script src="/static/js/app.js"></script>
   <script src="/static/js/calls.js"></script>
+  <script src="/static/js/gorusme.js"></script>
   <script src="/static/js/campaign.js"></script>
   <script src="/static/js/addressbox.js"></script>
   <script src="/static/js/mailsend.js"></script>

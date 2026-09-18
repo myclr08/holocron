@@ -796,3 +796,155 @@ def test_a_note_never_leaks_raw_identities_to_the_screen(api_client, context, fa
     kart = api_client.get("/api/gorusme/view").json()["notlar"][0]
     assert PERSON_ONE not in " ".join(kart["katilimcilar"])
     assert kart["katilimcilar"][0].startswith("Bilinmeyen kişi")
+
+
+# --- arayuz ---------------------------------------------------------------
+
+
+def test_the_notes_tab_and_the_track_strip_are_on_the_page(api_client):
+    page = api_client.get("/").text
+    for marker in (
+        'id="calls-tab-notes"',
+        "Görüşme notları",
+        'id="gorusme-track"',
+        'id="gorusme-takip"',
+        'id="gorusme-takip-toggle"',
+        'id="gorusme-live"',
+        'id="gorusme-working"',
+        'id="gorusme-queued"',
+        'id="gorusme-count"',
+        'id="gorusme-wrap"',
+        'id="gorusme-table"',
+        'id="gorusme-drawer"',
+        "/static/js/gorusme.js",
+    ):
+        assert marker in page, marker
+    # Sekme Gruplar'dan sonra gelir.
+    assert page.index('id="calls-tab-groups"') < page.index('id="calls-tab-notes"')
+
+
+def test_the_notes_script_covers_the_strip_the_table_and_the_drawer(api_client):
+    script = api_client.get("/static/js/gorusme.js").text
+    for marker in (
+        "/api/gorusme/view",
+        "/api/gorusme/serit",
+        "/api/gorusme/takip",
+        "/api/gorusme/kayit/",
+        "/api/gorusme/kisi/",
+        "function renderGorusmeTrack",
+        "function renderGorusmeList",
+        "function openGorusme",
+        "function makeGorusmeTask",
+        "function bindGorusmeJira",
+        "function retryGorusme",
+        "function resummarizeGorusme",
+        "function renderDrawerGorusme",
+        "function renderKisiGorusme",
+        '"Görev yap"',
+        '"Yeniden dene"',
+        '"Yeniden özetle"',
+        '"E-posta ile gönder"',
+        "Duraklat",
+        "Sürdür",
+    ):
+        assert marker in script, marker
+    # Türkçe metne büyük harf dönüşümü uygulanmaz.
+    assert "toUpperCase()" not in script
+
+
+def test_the_calls_screen_hands_the_fourth_tab_over(api_client):
+    script = api_client.get("/static/js/calls.js").text
+    assert 'notes: "calls-tab-notes"' in script
+    assert "showGorusmeTab" in script
+    assert "renderKisiGorusme" in script
+
+
+def test_the_note_styles_are_defined(api_client):
+    css = api_client.get("/static/css/app.css").text
+    for name in (
+        ".track-strip",
+        ".pill.live",
+        ".pill.work",
+        ".pill.queue",
+        ".pill.state-hazir",
+        ".pill.state-hata",
+        ".bar",
+        ".gorusme-row",
+        ".who-chips",
+        ".action-row",
+        ".jira-box",
+        ".note-list",
+    ):
+        assert name in css, name
+    # Turkce metinde buyuk harf donusumu yasak.
+    assert "text-transform: uppercase" not in css.split(".track-strip")[1][:2000]
+
+
+def test_the_settings_card_is_on_the_settings_page(api_client):
+    page = api_client.get("/settings").text
+    for marker in (
+        'id="gorusme-card"',
+        "Görüşme notları",
+        'id="gorusme-mikrofon"',
+        'id="gorusme-hoparlor"',
+        'id="gorusme-deneme"',
+        "Deneme kaydı (10 sn)",
+        'id="gorusme-min-dakika"',
+        'id="gorusme-whisper-model"',
+        'id="gorusme-whisper-klasor"',
+        'id="gorusme-modeller"',
+        'id="gorusme-copilot-proxy"',
+        'id="gorusme-copilot-test"',
+        "Copilot'u sına",
+        'id="gorusme-sablon"',
+        'id="gorusme-klasor"',
+        'id="gorusme-transkript-sakla"',
+        'id="gorusme-bildirim-hazir"',
+        'id="gorusme-isleme-disinda"',
+        "/static/js/gorusme-settings.js",
+    ):
+        assert marker in page, marker
+    # Vekil alani ne yaptigini anlatir: Jira dogrudan kalir.
+    assert "doğrudan bağlan" in page
+
+
+def test_the_settings_script_saves_every_field(api_client):
+    script = api_client.get("/static/js/gorusme-settings.js").text
+    for marker in (
+        "/api/gorusme/ayar/aygitlar",
+        "/api/gorusme/ayar/deneme",
+        "/api/gorusme/ayar/copilot-sina",
+        "/api/gorusme/ayar/sablon",
+        '"calls.copilot_proxy"',
+        '"calls.ozet_modelleri"',
+        '"calls.min_dakika"',
+        '"calls.transkripti_sakla"',
+        '"calls.isleme_gorusme_disinda"',
+        "ses var",
+        "ses yok",
+        # Uc `{settings: {...}}` doner: sozlugu acmadan okumak butun onay
+        # kutularini bos gosteriyordu.
+        "data.settings",
+    ):
+        assert marker in script, marker
+
+
+def test_the_export_carries_a_meeting_notes_sheet(api_client, context, fake_gorusme):
+    from openpyxl import load_workbook
+    import io as stdio
+
+    not_id = akisi_kos(api_client, context, fake_gorusme)
+    depo.jira_bagla(context.conn, not_id, "PRJ-1432")
+
+    yanit = api_client.get("/api/calls/export.xlsx?days=90")
+    book = load_workbook(stdio.BytesIO(yanit.content))
+    assert "Görüşme notları" in book.sheetnames
+
+    sheet = book["Görüşme notları"]
+    basliklar = [cell.value for cell in sheet[1]]
+    assert basliklar[:3] == ["Tarih", "Başlık", "Katılımcılar"]
+    assert "Aksiyonlar" in basliklar
+    assert sheet.cell(row=2, column=2).value == sahte.ORNEK_OZET["baslik"]
+    assert sheet.cell(row=2, column=8).value == "PRJ-1432"
+    # Özet maddeleri hücre içinde satır satır durur.
+    assert sahte.ORNEK_OZET["ozet"][0] in str(sheet.cell(row=2, column=9).value)

@@ -1456,7 +1456,13 @@ def test_the_export_can_be_read_back(api_client, fake_calls):
     )
 
     book = load_workbook(io.BytesIO(response.content))
-    assert book.sheetnames == ["Aramalar", "Kişiler", "Gruplar", "İstatistik"]
+    assert book.sheetnames == [
+        "Aramalar",
+        "Kişiler",
+        "Gruplar",
+        "İstatistik",
+        "Görüşme notları",
+    ]
 
     sheet = book["Aramalar"]
     headers = [cell.value for cell in sheet[1]]

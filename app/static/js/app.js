@@ -611,6 +611,10 @@ function renderDrawerBody() {
   }
   renderDrawerLocal(body);
   renderDrawerTeams(body);
+  // Bu kayda bagli gorusme notlari (gorusme.js yuklendiyse).
+  if (typeof renderDrawerGorusme === "function" && state.drawerKey) {
+    renderDrawerGorusme(body, state.drawerKey);
+  }
   const selected = state.group && state.group.detail_fields;
   (state.drawerFields || [])
     .filter((item) => selected === null || selected === undefined || selected.includes(item.field))

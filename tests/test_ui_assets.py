@@ -207,6 +207,8 @@ SCRIPTS = (
     "mailsend-settings.js",
     "campaign.js",
     "campaign-settings.js",
+    "gorusme.js",
+    "gorusme-settings.js",
 )
 
 

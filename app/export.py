@@ -21,6 +21,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from . import __version__, fields as field_utils, grid, repository, tasks as task_utils
+from .gorusme import intake as gorusme_intake
 from .teamscalls import intake as calls_intake
 
 MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -535,6 +536,7 @@ CALLS_SHEET = "Aramalar"
 CALLS_PEOPLE_SHEET = "Kişiler"
 CALLS_GROUPS_SHEET = "Gruplar"
 CALLS_STATS_SHEET = "İstatistik"
+CALLS_NOTES_SHEET = "Görüşme notları"
 CALLS_NAME = "Teams-Aramalar"
 
 CALL_HEADERS = (
@@ -556,6 +558,24 @@ CALL_GROUP_HEADERS = ("Grup", "Arama", "Süre", "Süre (dk)", "Son arama", "Kiş
 CALL_KINDS = {0: KIND_DATETIME, 6: KIND_DECIMAL}
 CALL_PEOPLE_KINDS = {1: KIND_NUMBER, 3: KIND_DECIMAL, 4: KIND_NUMBER, 5: KIND_NUMBER, 6: KIND_NUMBER}
 CALL_GROUP_KINDS = {1: KIND_NUMBER, 3: KIND_DECIMAL, 4: KIND_DATETIME, 5: KIND_NUMBER}
+
+# Gorusme notlari sayfasi: ekrandaki sekmenin dokumu + notun govdesi.
+CALL_NOTE_HEADERS = (
+    "Tarih",
+    "Başlık",
+    "Katılımcılar",
+    "Süre",
+    "Süre (dk)",
+    "Durum",
+    "Görev",
+    "Jira",
+    "Özet",
+    "Kararlar",
+    "Aksiyonlar",
+    "Açık sorular",
+)
+
+CALL_NOTE_KINDS = {0: KIND_DATETIME, 4: KIND_DECIMAL, 6: KIND_NUMBER}
 
 
 def build_calls_workbook(
@@ -600,6 +620,7 @@ def build_calls_workbook(
     _write_call_people(book, calls_intake.people_totals(picked, names), tz)
     _write_call_groups(book, calls_intake.group_totals(picked, names, marker), tz)
     _write_call_stats(book, stats, tz)
+    _write_call_notes(book, conn, days, tz)
 
     buffer = io.BytesIO()
     book.save(buffer)
@@ -711,6 +732,65 @@ def _write_call_groups(book: Workbook, groups: list[dict[str, Any]], tz: tzinfo 
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = f"A1:{get_column_letter(len(CALL_GROUP_HEADERS))}{len(groups) + 1}"
     _fit_columns(sheet, widths)
+
+
+def _write_call_notes(book: Workbook, conn: Any, days: int, tz: tzinfo | None) -> None:
+    """Gorusme notlari sayfasi.
+
+    Notun govdesi de yazilir: ozet, kararlar, aksiyonlar ve acik sorular
+    hucre icinde satir satir durur, boylece dosya tek basina okunabilir.
+    """
+    from .gorusme import depo as gorusme_depo
+
+    sheet = book.create_sheet(sheet_title(CALLS_NOTES_SHEET))
+    sheet.append(list(CALL_NOTE_HEADERS))
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+
+    kartlar = gorusme_intake.liste(conn, days=days)
+    widths = [len(text) for text in CALL_NOTE_HEADERS]
+    for line, kart in enumerate(kartlar, start=2):
+        gruplar = gorusme_intake.bolum_gruplari(gorusme_depo.bolumler(conn, kart["id"]))
+        values = [
+            kart["baslangic"],
+            kart["baslik"],
+            ", ".join(kart["katilimcilar"]) or kart["katilimci_notu"],
+            kart["sure_text"],
+            round((kart["sure_sn"] or 0) / 60, 1),
+            kart["durum_label"],
+            kart["gorev_sayisi"],
+            kart["jira_key"],
+            _note_lines(gruplar["ozet"]),
+            _note_lines(gruplar["karar"]),
+            _note_lines(gruplar["aksiyon"], with_owner=True),
+            _note_lines(gruplar["soru"]),
+        ]
+        for index, value in enumerate(values):
+            target = sheet.cell(row=line, column=index + 1)
+            width = _write_task_cell(target, value, CALL_NOTE_KINDS.get(index, KIND_TEXT), tz)
+            if width > widths[index]:
+                widths[index] = width
+
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:{get_column_letter(len(CALL_NOTE_HEADERS))}{len(kartlar) + 1}"
+    _fit_columns(sheet, widths)
+
+
+def _note_lines(rows: Sequence[dict[str, Any]], with_owner: bool = False) -> str:
+    """Bolum satirlarini tek hucreye yazilacak metne cevirir."""
+    lines: list[str] = []
+    for row in rows:
+        text = str(row.get("metin") or "")
+        if with_owner:
+            tail = " · ".join(
+                part
+                for part in (str(row.get("kisi") or ""), str(row.get("son_tarih") or ""))
+                if part
+            )
+            if tail:
+                text = f"{text} ({tail})"
+        lines.append("• " + text)
+    return "\n".join(lines)
 
 
 def _write_call_stats(book: Workbook, stats: dict[str, Any], tz: tzinfo | None) -> None:

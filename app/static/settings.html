@@ -296,6 +296,106 @@
         <div class="status" id="teams-status" hidden></div>
       </div>
 
+      <div class="card" id="gorusme-card">
+        <h2>Görüşme notları</h2>
+        <p class="hint">
+          Teams'de görüşme başlayınca Holocron mikrofonunuzu ve duyduğunuz sesi iki ayrı
+          dosyaya kaydeder; görüşme bitince arka planda birleştirir, yazıya döker ve
+          Copilot CLI ile özetler. Ses ve transkript makinenizde kalır, not hazır olunca
+          silinir.
+        </p>
+        <p class="warn-note" id="gorusme-unsupported" hidden>
+          Görüşme kaydı yalnız Windows'ta çalışır.
+        </p>
+
+        <div class="field">
+          <span class="label-text">Algılama ve aygıtlar</span>
+          <p class="hint" id="gorusme-paketler"></p>
+          <label for="gorusme-mikrofon">Mikrofon (boş = otomatik)</label>
+          <select id="gorusme-mikrofon"><option value="">Otomatik</option></select>
+          <label for="gorusme-hoparlor">Duyduğum ses (boş = otomatik)</label>
+          <select id="gorusme-hoparlor"><option value="">Otomatik</option></select>
+          <p class="hint">
+            Otomatikte Teams'in ses oturumunun açık olduğu aygıt kullanılır; görüşme
+            içinde aygıt değişirse kayıt yeni aygıtta yeni parça olarak sürer.
+          </p>
+          <div class="actions">
+            <button id="gorusme-deneme">Deneme kaydı (10 sn)</button>
+          </div>
+          <div class="trial-result" id="gorusme-deneme-sonuc"></div>
+        </div>
+
+        <div class="field">
+          <label for="gorusme-min-dakika">Asgari görüşme süresi (dakika)</label>
+          <input type="number" id="gorusme-min-dakika" min="0" max="120" step="1" />
+          <p class="hint">Bu sürenin altındaki görüşmeler işlenmez, listede "atlandı" satırı kalır.</p>
+        </div>
+
+        <div class="field">
+          <label for="gorusme-whisper-model">Yazıya dökme modeli (faster-whisper)</label>
+          <input type="text" id="gorusme-whisper-model" placeholder="small" />
+          <label for="gorusme-whisper-klasor">Model klasörü (boş = indirilsin)</label>
+          <input type="text" id="gorusme-whisper-klasor" placeholder="D:\modeller\faster-whisper" />
+          <p class="hint">
+            Vekil sunucu Hugging Face'i kesiyorsa model klasörünü elle kopyalayıp yolunu
+            buraya yazın.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="gorusme-modeller">Özet modelleri (sırayla denenir, virgülle ayırın)</label>
+          <input type="text" id="gorusme-modeller" placeholder="gpt-5, claude-sonnet-4.5, gpt-4.1" />
+          <p class="hint" id="gorusme-son-model"></p>
+          <label for="gorusme-copilot-proxy">Copilot vekil sunucusu (boş = sistem ortamı)</label>
+          <input type="text" id="gorusme-copilot-proxy" placeholder="http://vekil.kurum.local:8080" />
+          <p class="hint">
+            Terminalde <code>set HTTPS_PROXY=...</code> ile yazdığınız adresi buraya yazın.
+            Bu değer YALNIZCA Copilot alt sürecine verilir: Holocron'un Jira bağlantısı
+            "doğrudan bağlan" kipinde kalır, Jira sunucusu alt sürecin muafiyet listesine
+            eklenir.
+          </p>
+          <div class="actions">
+            <button id="gorusme-copilot-test">Copilot'u sına</button>
+          </div>
+          <label for="gorusme-sablon">Özet şablonu (boş = varsayılan)</label>
+          <textarea id="gorusme-sablon" rows="4" placeholder="Varsayılan şablon kullanılır"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="gorusme-klasor">Çalışma klasörü (boş = varsayılan)</label>
+          <input type="text" id="gorusme-klasor" placeholder="%LOCALAPPDATA%\Holocron\gorusme" />
+          <label class="checkbox">
+            <input type="checkbox" id="gorusme-takip-acilista" />
+            Takip açılışta açık gelsin
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="gorusme-transkript-sakla" />
+            Transkripti sakla (yeniden özetleyebilmek için)
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="gorusme-ses-sakla" />
+            Ses dosyalarını sakla (varsayılan: not hazır olunca sil)
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="gorusme-bildirim-baslangic" />
+            Kayıt başlayınca bildirim göster
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="gorusme-bildirim-hazir" />
+            Not hazır olunca bildirim göster
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="gorusme-isleme-disinda" />
+            İşleme yalnız görüşme dışında çalışsın
+          </label>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="gorusme-save">Kaydet</button>
+        </div>
+        <div class="status" id="gorusme-status" hidden></div>
+      </div>
+
       <div class="card" id="mailsend-card">
         <h2>E-posta şablonları</h2>
         <p class="hint">
@@ -410,5 +510,6 @@
   <script src="/static/js/settings.js"></script>
   <script src="/static/js/mailsend-settings.js"></script>
   <script src="/static/js/campaign-settings.js"></script>
+  <script src="/static/js/gorusme-settings.js"></script>
 </body>
 </html>
