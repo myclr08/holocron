@@ -243,6 +243,13 @@ class Kuyruk:
         self.uyandir()
         return depo.require_not(conn, not_id)
 
+    def eksik_paket_islerini_kuyruga_al(self) -> int:
+        """Yaziya dokme paketi kurulunca bekleyen hatali satirlari surdurur."""
+        sayi = depo.eksik_paket_hatalarini_kuyruga_al(self._baglanti())
+        if sayi:
+            self.uyandir()
+        return sayi
+
     def yeniden_ozetle(self, not_id: int) -> dict[str, Any]:
         """Saklanmis transkriptten ozeti yeniden uretir (ses gerekmez)."""
         conn = self._baglanti()

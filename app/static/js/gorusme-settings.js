@@ -41,6 +41,34 @@ function renderGorusmePackages() {
   gorusmeField("gorusme-paketler").textContent = eksik.length
     ? "Eksik paketler: " + eksik.join(", ") + ". Kurulum README'de anlatılıyor."
     : "Ses yakalama ve yazıya dökme paketleri kurulu.";
+  // Yazıya dökme paketi buradan kurulabilir; ses yakalama paketi kurulumla
+  // gelir, o eksikse paketi yenilemek gerekir.
+  gorusmeField("gorusme-whisper-kur").hidden = paketler.faster_whisper !== false;
+}
+
+/** "Yazıya dökme paketini kur": pip alt süreçte, vekil ayarı onun ortamında. */
+async function installWhisperPackage() {
+  const dugme = gorusmeField("gorusme-whisper-kur");
+  const kutu = gorusmeField("gorusme-whisper-kur-sonuc");
+  dugme.disabled = true;
+  kutu.textContent = "Kuruluyor... paket birkaç yüz megabayt, bu birkaç dakika sürebilir.";
+  try {
+    const sonuc = await api("/api/gorusme/ayar/whisper-kur", { method: "POST" });
+    const kuyruk = sonuc.yeniden_kuyruga
+      ? ` Bekleyen ${sonuc.yeniden_kuyruga} not yeniden kuyruğa alındı.`
+      : "";
+    kutu.textContent = (sonuc.mesaj || "") + kuyruk;
+    setStatus(gorusmeStatusBox(), sonuc.mesaj || "", sonuc.kuruldu ? "ok" : "error");
+    gorusmeSettings.paketler = Object.assign({}, gorusmeSettings.paketler, {
+      faster_whisper: sonuc.whisper_var,
+    });
+    renderGorusmePackages();
+  } catch (err) {
+    kutu.textContent = err.message;
+    setStatus(gorusmeStatusBox(), err.message, "error");
+  } finally {
+    dugme.disabled = false;
+  }
 }
 
 async function loadGorusmeSettings(settings) {
@@ -154,6 +182,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("gorusme-save").addEventListener("click", saveGorusmeSettings);
   document.getElementById("gorusme-deneme").addEventListener("click", runGorusmeTrial);
   document.getElementById("gorusme-copilot-test").addEventListener("click", testGorusmeCopilot);
+  document.getElementById("gorusme-whisper-kur").addEventListener("click", installWhisperPackage);
   api("/api/settings")
     // Uc `{settings: {...}}` doner: kart yalnizca ayar sozlugunu okur.
     .then((data) => loadGorusmeSettings(data.settings || {}))

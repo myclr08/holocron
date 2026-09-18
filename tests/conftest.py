@@ -90,6 +90,7 @@ def fake_gorusme():
         "dokucu": gorusme_sahte.SahteYaziyaDokucu(),
         "ozetleyici": gorusme_sahte.SahteOzetleyici(),
         "bildirimci": gorusme_sahte.SahteBildirimci(),
+        "kurucu": gorusme_sahte.SahteKurucu(),
     }
 
 
@@ -107,6 +108,7 @@ def context(conn, store, client_factory, fake_mail, fake_calls, fake_gorusme):
         gorusme_dokucu_factory=lambda ayarlar: fake_gorusme["dokucu"],
         gorusme_ozetleyici_factory=lambda ayarlar: fake_gorusme["ozetleyici"],
         gorusme_bildirimci=fake_gorusme["bildirimci"],
+        gorusme_kurucu=fake_gorusme["kurucu"],
     )
 
 

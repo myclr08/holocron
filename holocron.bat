@@ -49,6 +49,7 @@ rem Tam yol: start ile acilan surec goreli yolu baska bir klasorde arayabilir.
 set "RUN_PY=%~dp0python-embed\python.exe"
 set "RUN_PYW=%~dp0python-embed\pythonw.exe"
 if not exist "python-embed\pythonw.exe" set "RUN_PYW=%RUN_PY%"
+call :sync_deps "%RUN_PY%" "python-embed\holocron-req.sha"
 goto launch
 
 :create_venv
@@ -67,26 +68,36 @@ if not exist "%VENV_PY%" goto venv_failed
 "%VENV_PY%" -m pip install --upgrade pip >nul
 
 rem Cevrimdisi kurulum: paketler yanimizda geldiyse agi hic kullanma.
-if exist "wheels\*" goto offline_install
+rem wheels/ tam listedir, whisper-wheels/ yaziya dokme zip'inden gelir.
+call :find_links
+if defined PIP_LINKS goto offline_install
 echo [holocron] Bagimliliklar indiriliyor...
 "%VENV_PY%" -m pip install -r requirements.txt
 if errorlevel 1 goto deps_failed
-goto run_venv
+goto stamp_venv
 
 :offline_install
-echo [holocron] Bagimliliklar wheels klasorunden kuruluyor...
-"%VENV_PY%" -m pip install --no-index --find-links wheels -r requirements.txt
+echo [holocron] Bagimliliklar yerel tekerleklerden kuruluyor...
+"%VENV_PY%" -m pip install %PIP_LINKS% -r requirements.txt
 if errorlevel 1 goto online_install
-goto run_venv
+goto stamp_venv
 
 :online_install
 rem Tekerlekler baska bir Python surumu icin olabilir; agdan denenir.
 echo [holocron] Cevrimdisi kurulum olmadi, agdan deneniyor...
 "%VENV_PY%" -m pip install -r requirements.txt
 if errorlevel 1 goto deps_failed
+goto stamp_venv
+
+:stamp_venv
+rem Kurulan liste iste buydu: bir sonraki acilis ozete bakip bosuna kosmaz.
+call :req_hash
+if not defined REQ_HASH goto run_venv
+> ".venv\holocron-req.sha" echo %REQ_HASH%
 goto run_venv
 
 :run_venv
+call :sync_deps "%VENV_PY%" ".venv\holocron-req.sha"
 set "RUN_PY=%~dp0%VENV_PY%"
 set "RUN_PYW=%~dp0%VENV_PYW%"
 if not exist "%VENV_PYW%" set "RUN_PYW=%RUN_PY%"
@@ -176,6 +187,60 @@ exit /b 1
 echo [holocron] Bagimliliklar kurulamadi.
 pause
 exit /b 1
+
+rem --- alt yordam: requirements.txt ozeti --------------------------------
+rem Donus: REQ_HASH (SHA256). certutil her Windows'ta var; yoksa PowerShell.
+:req_hash
+set "REQ_HASH="
+for /f "skip=1 delims=" %%H in ('certutil -hashfile "requirements.txt" SHA256 2^>nul') do if not defined REQ_HASH set "REQ_HASH=%%H"
+if defined REQ_HASH set "REQ_HASH=%REQ_HASH: =%"
+if defined REQ_HASH exit /b 0
+for /f "usebackq delims=" %%H in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath 'requirements.txt').Hash" 2^>nul`) do set "REQ_HASH=%%H"
+exit /b 0
+
+rem --- alt yordam: yanimizdaki tekerlek klasorleri -----------------------
+rem Donus: PIP_LINKS. Bos ise yerel tekerlek yok, kurulum agdan gider.
+:find_links
+set "PIP_LINKS="
+if exist "wheels\*" set "PIP_LINKS=--find-links wheels"
+if exist "whisper-wheels\*" set "PIP_LINKS=%PIP_LINKS% --find-links whisper-wheels"
+if defined PIP_LINKS set "PIP_LINKS=--no-index %PIP_LINKS%"
+exit /b 0
+
+rem --- alt yordam: bagimliliklari requirements.txt ile esitle ------------
+rem Cagri: call :sync_deps <python.exe> <ozet dosyasi>.
+rem Eski surumun uzerine yeni paket acildiginda (v0.10.1'de faster-whisper)
+rem pip yalnizca .venv ILK yaratilirken kosuyordu, yeni bagimlilik hic
+rem kurulmuyordu. Artik her acilista requirements.txt'in ozeti kayitli
+rem ozetle karsilastirilir. Kurulum dusse bile uygulama ACILIR: eksik paket
+rem yalnizca ilgili ozelligi kapatir.
+:sync_deps
+set "SYNC_PY=%~1"
+set "SYNC_SHA=%~2"
+call :req_hash
+if not defined REQ_HASH exit /b 0
+set "OLD_HASH="
+if exist "%SYNC_SHA%" set /p OLD_HASH=<"%SYNC_SHA%"
+if /i "%OLD_HASH%"=="%REQ_HASH%" exit /b 0
+rem Embed dagitiminda pip yoktur: paketler pakete gomulu gelir, is yok.
+"%SYNC_PY%" -m pip --version >nul 2>&1
+if errorlevel 1 exit /b 0
+echo [holocron] Bagimliliklar guncelleniyor...
+call :find_links
+if not defined PIP_LINKS goto sync_online
+"%SYNC_PY%" -m pip install %PIP_LINKS% -r requirements.txt
+if not errorlevel 1 goto sync_ok
+echo [holocron] Yerel tekerlekler yetmedi, agdan deneniyor...
+:sync_online
+"%SYNC_PY%" -m pip install -r requirements.txt
+if not errorlevel 1 goto sync_ok
+echo [holocron] UYARI: bagimliliklar guncellenemedi. Uygulama aciliyor;
+echo [holocron] eksik paket yalnizca ilgili ozelligi kapatir.
+exit /b 0
+
+:sync_ok
+> "%SYNC_SHA%" echo %REQ_HASH%
+exit /b 0
 
 rem --- alt yordam: /api/health yoklamasi ---------------------------------
 rem Cagri: call :probe_health <port>. Donus: errorlevel 0 ise ayakta.

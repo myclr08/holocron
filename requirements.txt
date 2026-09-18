@@ -10,3 +10,7 @@ pywin32==312; sys_platform == "win32"
 pyaudiowpatch==0.2.12.7; sys_platform == "win32"
 # Windows bildirimi (istege bagli; yoksa bildirim sessizce atlanir).
 winotify==1.1.0; sys_platform == "win32"
+# Gorusme notlarinin yaziya dokme katmani (Asama 12). Yalnizca Windows'ta
+# kurulur: gorusme kaydi zaten Windows'a bagli, paket ise (ctranslate2 ile
+# birlikte) birkac yuz megabayt tutuyor ve Linux paketini bosuna sisirirdi.
+faster-whisper==1.2.1; sys_platform == "win32"

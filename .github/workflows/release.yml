@@ -55,16 +55,28 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      # requirements.txt artik faster-whisper'i da tasiyor: tekerlekleri
+      # pakete girsin diye burada iniyor. O surum icin cp313 tekerlegi yoksa
+      # is DUSMESIN: whisper satiri cikarilip cekirdek liste ile devam edilir
+      # (yaziya dokme paketi ayri zip ve uygulama ici kurulumla da gelebilir).
       - name: Tekerlekleri indir (win_amd64 / cp313)
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           pip download --only-binary=:all: --python-version ${{ env.PYTHON_VERSION }} --platform win_amd64 --implementation cp -r requirements.txt -d wheels
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "[release] Tam liste inmedi; faster-whisper cikarilip yeniden deneniyor."
+            Get-Content requirements.txt | Where-Object { $_ -notmatch 'faster-whisper' } | Set-Content requirements-core.txt
+            pip download --only-binary=:all: --python-version ${{ env.PYTHON_VERSION }} --platform win_amd64 --implementation cp -r requirements-core.txt -d wheels
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
           dir wheels
 
-      # Gorusme notlarinin yaziya dokme katmani: `faster-whisper` ve
-      # `ctranslate2` birkac yuz megabayt tutuyor, uygulama paketine girmez.
-      # Ayri bir zip olarak release'e eklenir; cp313 tekerlegi yoksa is
-      # dusmesin diye adim hatayi yutar (README elle kurulumu anlatiyor).
+      # Yaziya dokme tekerlekleri ayrica kendi zip'iyle de cikar: lite paketi
+      # alip vekil yuzunden PyPI'ye ulasamayanlar zip'i Holocron klasorune
+      # acar ve `whisper-wheels/` klasoru olusur -- baslaticilar ve uygulama
+      # ici kurulum o klasoru `--find-links` olarak kullanir. cp313 tekerlegi
+      # yoksa is dusmesin diye adim hatayi yutar (README elle kurulumu anlatir).
       - name: Yaziya dokme tekerlekleri (istege bagli)
         continue-on-error: true
         run: |
@@ -77,7 +89,9 @@ jobs:
         run: |
           if (Test-Path whisper-wheels) {
             New-Item -ItemType Directory -Force -Path dist | Out-Null
-            Compress-Archive -Path whisper-wheels\* -DestinationPath dist\holocron-windows-whisper.zip -Force
+            # Klasorun KENDISI zip'e girer: kullanici zip'i Holocron
+            # klasorune acinca dogrudan `whisper-wheels/` olusur.
+            Compress-Archive -Path whisper-wheels -DestinationPath dist\holocron-windows-whisper.zip -Force
           }
 
       - name: Embed dagitimini indir

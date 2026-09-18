@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from . import depo
+from . import depo, yaziyadok
 from .intake import load_config
 from .kuyruk import Kuyruk
 from .takipci import Takipci
@@ -76,6 +76,14 @@ def kur(context: Any) -> Servis:
         depo.yarim_isleri_kuyruga_al(context.connection())
     except Exception:  # noqa: BLE001 - bozuk veritabani acilisi engellemesin
         log.warning("Yarım kalmış görüşme işleri kuyruğa alınamadı", exc_info=True)
+
+    # Paket araya kurulduysa "faster-whisper yok" diye dusmus satirlar
+    # acilista kendiliginden yeniden denenir (ses hala diskte).
+    try:
+        if yaziyadok.kurulu_mu():
+            depo.eksik_paket_hatalarini_kuyruga_al(context.connection())
+    except Exception:  # noqa: BLE001 - acilis bu yuzden durmasin
+        log.warning("Yazıya dökme hataları kuyruğa alınamadı", exc_info=True)
 
     if ayarlar.takip_acilista and is_supported():
         context.settings.set("calls.takip", "1")

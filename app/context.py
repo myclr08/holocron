@@ -55,6 +55,10 @@ class AppContext:
     gorusme_dokucu_factory: GorusmeFactory | None = None
     gorusme_ozetleyici_factory: GorusmeFactory | None = None
     gorusme_bildirimci: Any = None
+    # Yaziya dokme paketini kuran alt surec ("Yazıya dökme paketini kur").
+    # Uretimde `gorusme.yaziyadok.kur`, testlerde sahte: hicbir test pip
+    # calistirmaz.
+    gorusme_kurucu: GorusmeFactory | None = None
     # Kurulumda baglanan servis (takipci + kuyruk); `gorusme.servis.kur` yazar.
     gorusme: Any = None
     # Yazma islemleri bu kilitle sirayla girer (okumalar paralel kalabilir).

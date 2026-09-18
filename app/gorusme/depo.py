@@ -239,6 +239,26 @@ def hataya_dus(conn: sqlite3.Connection, not_id: int, mesaj: str) -> None:
     durum_yaz(conn, not_id, DURUM_HATA, mesaj)
 
 
+# Yaziya dokme paketi yokken dusen satirlarin hata metnindeki iz.
+EKSIK_PAKET_IZI = "faster-whisper"
+
+
+def eksik_paket_hatalarini_kuyruga_al(conn: sqlite3.Connection) -> int:
+    """Yaziya dokme paketi yok diye dusmus satirlari kuyruga geri koyar.
+
+    Paket sonradan kurulunca (Ayarlar'daki dugme ya da elle `pip install`)
+    kullanicidan "Yeniden dene" beklemeyiz: ses hala diskte durur, is kaldigi
+    yerden surer. Acilista ve kurulum bitiminde cagrilir; paket gercekten
+    kuruluysa cagrilmasi beklenir, yoksa satirlar ayni hataya geri duser.
+    """
+    with conn:
+        imlec = conn.execute(
+            "UPDATE gorusme_notu SET durum = ?, hata = '' WHERE durum = ? AND hata LIKE ?",
+            (DURUM_KUYRUKTA, DURUM_HATA, f"%{EKSIK_PAKET_IZI}%"),
+        )
+    return int(imlec.rowcount or 0)
+
+
 # --- bolumler ------------------------------------------------------------
 
 

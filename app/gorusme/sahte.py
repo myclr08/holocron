@@ -187,3 +187,27 @@ class SahteBildirimci:
     def gonder(self, baslik: str, metin: str) -> bool:
         self.mesajlar.append((baslik, metin))
         return True
+
+
+class SahteKurucu:
+    """`yaziyadok.kur`un sahtesi: hicbir test gercekten pip calistirmaz."""
+
+    def __init__(self, kuruldu: bool = True) -> None:
+        self.kuruldu = kuruldu
+        self.cagrilar: list[str] = []
+
+    def __call__(self, proxy: str = "") -> dict[str, Any]:
+        self.cagrilar.append(proxy)
+        if self.kuruldu:
+            return {
+                "kuruldu": True,
+                "kaynak": "yerel",
+                "mesaj": "faster-whisper kuruldu (yanınızdaki tekerleklerden).",
+                "cikti": "",
+            }
+        return {
+            "kuruldu": False,
+            "kaynak": "",
+            "mesaj": "Kurulum yapılamadı: paket sunucusuna ulaşılamadı.",
+            "cikti": "",
+        }

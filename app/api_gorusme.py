@@ -307,6 +307,28 @@ def trial_record(request: Request, payload: dict[str, Any] = Body(default_factor
     return sonuc
 
 
+@router.post("/ayar/whisper-kur")
+def install_whisper(request: Request) -> dict[str, Any]:
+    """Yaziya dokme paketini kurar (Ayarlar -> Görüşme notları dugmesi).
+
+    Kurulum alt surecte gider ve vekil ayari YALNIZCA o surecin ortamina
+    yazilir; Holocron'un kendi baglantisi degismez. Paket gelirse bekleyen
+    "hata: faster-whisper yok" satirlari kendiliginden kuyruga doner.
+    """
+    context = get_context(request)
+    ayarlar = _ayarlar(context)
+    kurucu = getattr(context, "gorusme_kurucu", None) or yaziyadok.kur
+    sonuc = dict(kurucu(proxy=ayarlar.copilot_proxy))
+    servis = _servis(context)
+    sonuc["yeniden_kuyruga"] = 0
+    if sonuc.get("kuruldu") and servis is not None:
+        with context.db_lock:
+            sonuc["yeniden_kuyruga"] = servis.kuyruk.eksik_paket_islerini_kuyruga_al()
+    sonuc["whisper_var"] = yaziyadok.kurulu_mu()
+    sonuc["supported"] = gorusme_supported()
+    return sonuc
+
+
 @router.post("/ayar/copilot-sina")
 def test_copilot(request: Request) -> dict[str, Any]:
     """Copilot CLI kisa bir istekle sinanir (secili model ve vekil ile)."""

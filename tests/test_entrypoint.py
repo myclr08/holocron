@@ -85,8 +85,12 @@ def test_windows_launcher_uses_pythonw_to_hide_the_console():
 
 def test_windows_launcher_installs_offline_when_wheels_are_present():
     text = BAT.read_text(encoding="utf-8")
-    assert 'if exist "wheels\\*" goto offline_install' in text
-    assert "pip install --no-index --find-links wheels -r requirements.txt" in text
+    assert ":find_links" in text
+    assert 'if exist "wheels\\*" set "PIP_LINKS=--find-links wheels"' in text
+    # Yaziya dokme zip'i `whisper-wheels/` olarak acilir: o klasor de gorulur.
+    assert 'if exist "whisper-wheels\\*" set "PIP_LINKS=%PIP_LINKS% --find-links whisper-wheels"' in text
+    assert 'set "PIP_LINKS=--no-index %PIP_LINKS%"' in text
+    assert '"%VENV_PY%" -m pip install %PIP_LINKS% -r requirements.txt' in text
     # Tekerlekler hedef Python surumune uymazsa agdan denenir.
     assert "if errorlevel 1 goto online_install" in text
 
@@ -113,8 +117,73 @@ def test_windows_launcher_explains_a_missing_venv_module():
 
 def test_shell_launcher_also_falls_back_to_the_network():
     text = SH.read_text(encoding="utf-8")
-    assert "--no-index --find-links wheels" in text
+    assert '--find-links wheels' in text
+    assert '--find-links whisper-wheels' in text
+    assert '"--no-index$links"' in text
     assert "Cevrimdisi kurulum olmadi" in text
+
+
+# --- bagimlilik esitlemesi: sonradan eklenen paket de kurulsun ----------
+#
+# Saha hatasi (19 Eylul 2026): lite kurulumun uzerine yeni surum acilinca
+# `faster-whisper` hic kurulmuyordu, cunku pip yalnizca `.venv` ILK
+# yaratilirken kosuyordu. Artik her acilista requirements.txt'in ozeti
+# karsilastiriliyor.
+
+SYNC_BASI = "\n:sync_deps"
+SYNC_SONU = "\nrem --- alt yordam: /api/health"
+
+
+def _bat_sync_block() -> str:
+    text = BAT.read_text(encoding="utf-8")
+    return text.split(SYNC_BASI, 1)[1].split(SYNC_SONU, 1)[0]
+
+
+def test_windows_launcher_reinstalls_when_requirements_change():
+    text = BAT.read_text(encoding="utf-8")
+    assert ":req_hash" in text and ":sync_deps" in text
+    assert "certutil -hashfile" in text
+    assert "Get-FileHash" in text  # certutil yoksa PowerShell yedegi
+    # Iki Python yolu da esitlenir: .venv ve tasinabilir python-embed.
+    assert 'call :sync_deps "%VENV_PY%" ".venv\\holocron-req.sha"' in text
+    assert 'call :sync_deps "%RUN_PY%" "python-embed\\holocron-req.sha"' in text
+    text.encode("ascii")
+
+
+def test_windows_sync_compares_the_hash_and_skips_when_equal():
+    sync = _bat_sync_block()
+    assert 'if /i "%OLD_HASH%"=="%REQ_HASH%" exit /b 0' in sync
+    assert "Bagimliliklar guncelleniyor" in sync
+    # Once yanimizdaki tekerlekler, olmazsa ag.
+    assert "call :find_links" in sync
+    assert "%SYNC_PY%" in sync and "-m pip install %PIP_LINKS% -r requirements.txt" in sync
+    assert "goto sync_online" in sync
+    # Ozet YALNIZCA kurulum basariliysa yazilir.
+    assert ':sync_ok' in sync
+    assert '> "%SYNC_SHA%" echo %REQ_HASH%' in sync
+
+
+def test_windows_sync_never_blocks_the_application():
+    """Eksik paket yalnizca kendi ozelligini kapatir: uygulama yine acilir."""
+    sync = _bat_sync_block()
+    assert "UYARI" in sync
+    assert "exit /b 1" not in sync
+    assert "pause" not in sync
+    # Embed dagitiminda pip yok: sessizce vazgecilir.
+    assert "-m pip --version" in sync
+
+
+def test_shell_launcher_reinstalls_when_requirements_change():
+    text = SH.read_text(encoding="utf-8")
+    assert "sync_deps()" in text and "req_hash()" in text
+    assert "sha256sum" in text
+    assert "shasum -a 256" in text  # macOS yedegi
+    assert 'REQ_STAMP="$VENV_DIR/holocron-req.sha"' in text
+    assert 'if [ "$hash_now" = "$hash_old" ]; then return 0; fi' in text
+    # Yeni kurulumda da damga atilir, yoksa ilk acilis bosuna pip kosardi.
+    assert text.count("write_stamp") >= 3
+    # Kurulum dusse bile uygulama acilir.
+    assert "UYARI: bagimliliklar guncellenemedi" in text
 
 
 def test_console_flag_exists_for_troubleshooting():
@@ -239,6 +308,17 @@ def test_readme_documents_the_self_shutdown_reason():
     assert "### Uygulama bir süre sonra kendiliğinden kapandı" in text
     assert "nabiz ... sn'dir yok" in text
     assert "Kapat dugmesi: kapaniliyor" in text
+
+
+def test_readme_documents_the_whisper_package_install():
+    """Saha sorusu: "ilk kurulumda bu paketi kurmuyor mu?" -- cevabi belgede."""
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "Yazıya dökme paketini kur" in text
+    assert "whisper-wheels" in text
+    assert "holocron-req.sha" in text
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    assert 'faster-whisper==' in requirements
+    assert 'sys_platform == "win32"' in requirements.split("faster-whisper==", 1)[1]
 
 
 def test_readme_documents_the_troubleshooting_path():

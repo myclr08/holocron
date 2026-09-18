@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.10.0** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.10.1** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -39,8 +39,9 @@ Güncel sürüm: **v0.10.0** (bkz. [Sürüm notları](#sürüm-notları)).
 - Python 3.11 veya üstü (Windows tam paketi kendi Python'ını getirir, lite paket getirmez)
 - Jira Server / Data Center (kişisel erişim anahtarı destekleyen sürümler) veya Jira Cloud
 - Outlook ve Teams özellikleri yalnız **Windows**'ta çalışır; diğer her şey her yerde çalışır
-- Görüşme notları için ayrıca **faster-whisper** (elle kurulur) ve özet üretmek
-  isteniyorsa **Copilot CLI** gerekir; bkz.
+- Görüşme notlarının yazıya dökme paketi (**faster-whisper**) `requirements.txt`
+  içindedir, kurulumla birlikte gelir; özet üretmek isteniyorsa ayrıca
+  **Copilot CLI** gerekir; bkz.
   [Görüşme notları](#görüşme-notları-yalnız-windows)
 
 ## Kurulum
@@ -76,6 +77,13 @@ Zip'i boş bir klasöre açın, sonra:
 
 Veritabanı (`holocron.db`) ve şifreleme anahtarı (`holocron.key`) bu klasörde
 oluşur. Klasörü taşırsanız verileriniz de gelir.
+
+**Yükseltme.** Yeni sürümü eski klasörün üstüne açtığınızda başlatıcılar
+`requirements.txt`in özetini yanlarında tuttukları özetle (`.venv/holocron-req.sha`)
+karşılaştırır; liste değiştiyse "Bagimliliklar guncelleniyor..." der ve eksik
+paketleri kurar — önce yanınızdaki `wheels/` (ve varsa `whisper-wheels/`)
+klasöründen, olmazsa ağdan. Kurulum düşse bile uygulama yine açılır: eksik
+paket yalnızca kendi özelliğini kapatır ve bir uyarı satırı yazılır.
 
 ### 2. Kaynaktan, Python kuruluysa
 
@@ -731,15 +739,35 @@ bir sonraki açılışta kuyruğa geri alınır.
 | `pyaudiowpatch` | WASAPI kaydı ve hoparlör döngüsü | Windows paketiyle birlikte (`requirements.txt`) |
 | `winotify` | Windows bildirimi | Windows paketiyle birlikte; yoksa bildirim sessizce atlanır |
 | `pycaw` | Teams'in ses oturumundan aygıt bulma | İsteğe bağlı; yoksa Windows varsayılan aygıtları kullanılır |
-| `faster-whisper` | Yazıya dökme | **Elle kurulur** (aşağıya bakın) |
+| `faster-whisper` | Yazıya dökme | `requirements.txt` ile birlikte (Windows); gelmezse Ayarlar'daki düğme kurar |
 | Copilot CLI | Özet | Zaten kuruluysa kullanılır |
 
-**faster-whisper kurulumu.** Paketin kendisi ve `ctranslate2` büyük olduğu için
-uygulama paketine girmez:
+**faster-whisper kurulumu.** v0.10.1'den beri paket `requirements.txt`
+içindedir (`sys_platform == "win32"` işaretiyle): tam pakette hazır gelir, lite
+pakette ilk çalıştırmada `wheels/` klasöründen kurulur ve eski bir kurulumun
+üstüne açtığınızda başlatıcı onu kendiliğinden ekler.
+
+Yine de eksik kalabilir: kurumsal vekil PyPI'yi kesiyorsa ya da pakete
+v0.10.1'den önce girmiş bir `.venv` kullanıyorsanız. O durumda üç yol var:
+
+1. **Ayarlar → Görüşme notları → Yazıya dökme paketini kur.** Düğme `pip`i alt
+   süreçte çalıştırır: önce yanınızdaki `wheels/` ve `whisper-wheels/`
+   klasörlerini dener, olmazsa ağa çıkar. Vekil adresi (aynı karttaki *Copilot
+   vekil sunucusu* alanı) yalnızca o alt sürecin ortamına yazılır, Holocron'un
+   Jira bağlantısı "doğrudan bağlan" kipinde kalır. Paket gelince kuyrukta
+   "hata: faster-whisper yok" diye bekleyen satırlar kendiliğinden yeniden
+   denenir (ses silinmemiştir).
+2. **Vekil PyPI'yi kesiyorsa** release sayfasındaki
+   `holocron-windows-whisper.zip` dosyasını indirin ve Holocron klasörüne
+   açın: yanında `whisper-wheels/` klasörü oluşur. Bundan sonra hem başlatıcı
+   hem de yukarıdaki düğme paketi o klasörden, ağa hiç çıkmadan kurar.
+3. **Elle:**
 
 ```bat
-rem Holocron klasorunde, tasinabilir pakette python-embed ile:
-python -m pip install faster-whisper
+rem Holocron klasorunde:
+.venv\Scripts\python -m pip install --no-index --find-links whisper-wheels faster-whisper
+rem ya da ag aciksa:
+.venv\Scripts\python -m pip install faster-whisper
 ```
 
 Model dosyası (ör. `small`, ~250 MB) ilk çalıştırmada Hugging Face'ten iner.
@@ -776,7 +804,8 @@ dolar, bilerek açın).
 | --- | --- |
 | Şeritte "Görüşme kaydı yalnız Windows'ta çalışır" | Windows dışındasınız; ekran çalışır, kayıt yapılmaz |
 | Kayıt hiç başlamıyor | Takip duraklatılmış olabilir; Teams mikrofon izni kapalıysa defter güncellenmez — Ayarlar'da aygıtı sabitleyip **Deneme kaydı** ile sınayın |
-| Satır "hata: faster-whisper yok" | Paket kurulu değil; kurup **Yeniden dene** deyin (ses silinmemiştir) |
+| Satır "hata: faster-whisper yok" | Paket kurulu değil: **Ayarlar → Görüşme notları → Yazıya dökme paketini kur** (ya da başlatıcıyı yeniden çalıştırın). Paket gelince bekleyen satırlar kendiliğinden yeniden denenir; ses silinmemiştir |
+| Sekmenin tepesinde "Yazıya dökme paketi eksik" şeridi | Aynı sebep; şerit kapatılabilir, paket gelince kendiliğinden kalkar |
 | Satır "hata: Özet alınamadı" | Copilot CLI oturumu kapalı ya da vekil yanlış; **Copilot'u sına** ile bakın |
 | "katılımcı bekleniyor" kalıyor | Arama geçmişi henüz çekilmemiş: **Aramaları çek** |
 | Hoparlör kanalı sessiz | Döngü aygıtı yanlış seçilmiş: Ayarlar'da "Duyduğum ses" aygıtını sabitleyin |
@@ -1130,14 +1159,18 @@ pip download --only-binary=:all: --python-version 3.13 \
 
 Linux paketinde `pywin32` tekerlekleri `wheels/` klasörüne kopyalanmaz.
 
-`pyaudiowpatch` ve `winotify` (görüşme kaydı ve bildirimi) `requirements.txt`
-içinde `sys_platform == "win32"` işaretiyle durur, yani Windows paketine
-kendiliğinden girer. `faster-whisper` ve `ctranslate2` birkaç yüz megabayt
-tuttuğu için uygulama paketine **girmez**: release iş akışı bunları ayrı bir
-`holocron-windows-whisper.zip` dosyası olarak üretir (o sürüm için cp313
-tekerleği yoksa adım sessizce atlanır). İndirip `python -m pip install
---no-index --find-links whisper-wheels faster-whisper` ile kurabilir ya da
-doğrudan `pip install faster-whisper` diyebilirsiniz.
+`pyaudiowpatch`, `winotify` ve `faster-whisper` (görüşme kaydı, bildirimi ve
+yazıya dökme) `requirements.txt` içinde `sys_platform == "win32"` işaretiyle
+durur, yani Windows paketine kendiliğinden girer, Linux paketini şişirmez.
+`faster-whisper` ile `ctranslate2` birkaç yüz megabayt tuttuğu için Windows
+zip'leri v0.10.1 ile belirgin biçimde büyümüştür.
+
+Aynı tekerlekler ayrıca `holocron-windows-whisper.zip` olarak da yayımlanır:
+zip'in içinde `whisper-wheels/` klasörü vardır, kullanıcı onu Holocron
+klasörüne açar ve başlatıcılar (`--find-links whisper-wheels`) ile uygulama
+içindeki kurulum düğmesi o klasörden, ağa çıkmadan kurar. O sürüm için cp313
+tekerleği yoksa hem bu adım hem de ana indirmenin whisper kısmı sessizce
+atlanır: iş düşmez, paket whisper'sız çıkar ve README elle kurulumu anlatır.
 
 ### Sürüm çıkarma
 
@@ -1215,6 +1248,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.10.1** | 19 Eylül 2026 | Sahadan gelen "faster-whisper kurulu değil" hatası: paket `requirements.txt`e girdi (Windows işaretiyle), yani artık ilk kurulumda gelir. Başlatıcılar (`holocron.bat`, `holocron.sh`) her açılışta `requirements.txt`in SHA256 özetini `.venv` içinde tuttukları özetle karşılaştırıyor; liste değiştiyse eksik paketleri kuruyor (önce `wheels/` ve `whisper-wheels/`, olmazsa ağdan) — eski sürümün üstüne açılan kurulumlarda sonradan eklenen bağımlılık hiç kurulmuyordu. Kurulum düşse bile uygulama açılıyor. Ayarlar → Görüşme notları'na **Yazıya dökme paketini kur** düğmesi eklendi (pip alt süreçte, vekil yalnızca o sürecin ortamında, çıktı maskelenir); Görüşme notları sekmesinde paket yokken kapatılabilir uyarı şeridi duruyor. Paket gelince kuyrukta "hata: faster-whisper yok" diye bekleyen satırlar hem açılışta hem kurulumdan sonra kendiliğinden yeniden deneniyor. `holocron-windows-whisper.zip` artık `whisper-wheels/` klasörü olarak açılıyor |
 | **v0.10.0** | 19 Eylül 2026 | **Görüşme notları**: Teams görüşmesi başlayınca mikrofon ve duyulan ses iki ayrı kanal olarak kaydedilir, görüşme bitince kuyrukta sırayla birleştirilir, faster-whisper ile yazıya dökülür ("Sen" / "Karşı taraf"), Copilot CLI ile özetlenir; not hazır olunca ses ve transkript silinir. Aramalar filosuna "Görüşme notları" sekmesi ve takip şeridi (duraklat/sürdür, canlı kayıt rozeti, işleniyor/kuyrukta sayaçları), not çekmecesi (Özet, Kararlar, Aksiyonlar, Açık sorular), aksiyondan tek tıkla görev, tek Jira kaydına bağ, Jira detayında ve Kişiler çekmecesinde "Görüşme notları (n)", Excel'e yeni sayfa. Ayarlar'da aygıt seçimi ve 10 saniyelik deneme kaydı, asgari süre, Whisper modeli/klasörü, özet modeli yedek sırası, özet şablonu, saklama ve bildirim seçenekleri. Copilot CLI'nin vekil sunucusu ayrı bir ayarda durur ve yalnızca alt sürecin ortamına yazılır: Jira "doğrudan bağlan" kipinde kalır |
 | **v0.9.0** | 17 Eylül 2026 | **Teams Aramalar sadeleşti: toplantı kavramı tümden kaldırıldı** (takvim eşleşmesi, toplantı sohbetinden katılım türetme, toplantı satırları/sütunları, "Eşleşmeyenler" ve "Katılım teşhisi" ekranları; göç eski toplantı satırlarını siler). Geriye **birebir** ve **grup** aramaları kaldı. Grup artık **katılımcı kümesidir** (sohbet kimliği değil): aynı kişilerle yapılan bütün aramalar tek satırda toplanır, etiket katılımcı adlarından türer. Yeni **Gruplar** sekmesi (arama sayısı, toplam süre, son arama, katılımcılar; tıklayınca liste süzülür, Excel'de ayrı sayfa). İstatistik şeridi dört kutu oldu: birebir / grupta / toplamda en çok görüşülenler ve birebir-grup dağılımı ("Toplam Teams" ile "iş günü" kutuları kalktı). Önbellekte artık yalnız iki veritabanı açılıyor |
 | **v0.8.3** | 17 Eylül 2026 | Uygulama bir süre sonra kendiliğinden kapanıyordu: tarayıcı arka plandaki sekmenin zamanlayıcılarını dondurunca (Edge uyuyan sekmeler, ekran kilidi) nabız kesiliyor, beş dakikalık zaman aşımı dolup süreç kapanıyordu. Zaman aşımı 12 saat oldu, nabız `setInterval` yerine zincirleme `setTimeout` ile atılıyor ve sekme görünür olunca / pencere odaklanınca anında bir nabız gidiyor. Sunucuya iki kez ulaşılamazsa sayfanın tepesinde kapatılabilir bir şerit çıkar, sunucu dönünce kendiliğinden kalkar. Başlatıcılar çalışan örneği bulup yalnızca tarayıcıyı açar; kapanma sebebi loga ayırt edilebilir yazılır |

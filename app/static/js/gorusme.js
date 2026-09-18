@@ -5,6 +5,9 @@
 // Canlı rozet: kaydederken saniyede bir, boştayken seyrek yenilenir.
 const GORUSME_TICK_MS = 1000;
 const GORUSME_IDLE_MS = 5000;
+// "Yazıya dökme paketi eksik" şeridini kapatan kullanıcının kararı tarayıcıda
+// kalır; paket gelince işaret silinir, paket yine giderse şerit geri döner.
+const GORUSME_UYARI_KEY = "holocron.gorusme.whisper-uyari";
 
 const gorusmeState = {
   notlar: [],
@@ -30,7 +33,9 @@ async function loadGorusme() {
     gorusmeState.serit = data.serit || null;
     gorusmeState.supported = data.supported !== false;
     gorusmeState.whisperVar = data.whisper_var !== false;
+    if (gorusmeState.whisperVar) forgetWhisperWarning();
     renderGorusmeTrack();
+    renderGorusmeWhisperWarning();
     renderGorusmeList();
   } catch (err) {
     fail(err);
@@ -116,6 +121,41 @@ function gorusmeTrackHint() {
   const serit = gorusmeState.serit || {};
   if (!serit.takip) return "Duraklatılmışken hiçbir şey kaydedilmez.";
   return "";
+}
+
+// --- yazıya dökme paketi şeridi -----------------------------------------
+
+function whisperWarningDismissed() {
+  try {
+    return localStorage.getItem(GORUSME_UYARI_KEY) === "1";
+  } catch (err) {
+    // Gizli sekmede depolama kapalı olabilir: şerit o zaman hep görünür.
+    return false;
+  }
+}
+
+function dismissWhisperWarning() {
+  try {
+    localStorage.setItem(GORUSME_UYARI_KEY, "1");
+  } catch (err) {
+    // Kaydedilemedi: şerit bu oturumda gizlenir, sonra yine çıkar.
+  }
+  el("gorusme-whisper-uyari").hidden = true;
+}
+
+function forgetWhisperWarning() {
+  try {
+    localStorage.removeItem(GORUSME_UYARI_KEY);
+  } catch (err) {
+    // Depolama yoksa yapacak bir şey yok.
+  }
+}
+
+/** Paket eksikken kalıcı şerit: Ayarlar'a bağlantı verir, kapatılabilir. */
+function renderGorusmeWhisperWarning() {
+  const serit = el("gorusme-whisper-uyari");
+  const eksik = gorusmeState.supported && !gorusmeState.whisperVar;
+  serit.hidden = !eksik || whisperWarningDismissed();
 }
 
 async function toggleGorusmeTakip(acik) {
@@ -494,6 +534,7 @@ function bindGorusme() {
     toggleGorusmeTakip(!(gorusmeState.serit || {}).takip)
   );
   el("gorusme-drawer-close").addEventListener("click", closeGorusmeDrawer);
+  el("gorusme-whisper-uyari-kapat").addEventListener("click", dismissWhisperWarning);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !el("gorusme-drawer").hidden) closeGorusmeDrawer();
   });

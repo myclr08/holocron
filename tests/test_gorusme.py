@@ -539,6 +539,161 @@ def test_error_text_masks_anything_that_looks_like_a_secret():
     assert ozet.temizle("") == ""
 
 
+# --- yaziya dokme paketinin kurulumu --------------------------------------
+#
+# Saha hatasi (19 Eylul 2026): lite kurulumda paket hic gelmemisti. Artik
+# `requirements.txt` icinde, ayrica Ayarlar'dan da kurulabiliyor. Hicbir test
+# gercekten pip calistirmaz: kosucu disaridan verilir.
+
+
+class PipCiktisi:
+    def __init__(self, kod: int, metin: str) -> None:
+        self.returncode = kod
+        self.stdout = metin
+        self.stderr = ""
+
+
+class SahtePip:
+    """pip yerine gecen kosucu: cagrilari ve ortamlari toplar."""
+
+    def __init__(self, kodlar, cikti: str = "tamam") -> None:
+        self.kodlar = list(kodlar)
+        self.cikti = cikti
+        self.cagrilar: list[list[str]] = []
+        self.ortamlar: list[dict[str, str]] = []
+
+    def __call__(self, komut, **kwargs):
+        self.cagrilar.append(list(komut))
+        self.ortamlar.append(dict(kwargs.get("env") or {}))
+        kod = self.kodlar.pop(0) if self.kodlar else 0
+        return PipCiktisi(kod, self.cikti)
+
+
+def tekerlek_koy(kok: Path, klasor: str, ad: str) -> None:
+    (kok / klasor).mkdir(parents=True, exist_ok=True)
+    (kok / klasor / ad).write_bytes(b"")
+
+
+def test_installing_the_transcription_package_prefers_the_local_wheels(tmp_path, monkeypatch):
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    tekerlek_koy(tmp_path, "wheels", "faster_whisper-1.2.1-py3-none-any.whl")
+    tekerlek_koy(tmp_path, "whisper-wheels", "ctranslate2-4.8.2-cp313-cp313-win_amd64.whl")
+    pip = SahtePip([0])
+
+    sonuc = yaziyadok.kur(
+        proxy="http://vekil.ornek.local:8080", kok=tmp_path, calistirici=pip
+    )
+
+    assert sonuc["kuruldu"] is True
+    assert sonuc["kaynak"] == "yerel"
+    komut = pip.cagrilar[0]
+    assert "--no-index" in komut
+    assert str(tmp_path / "wheels") in komut
+    assert str(tmp_path / "whisper-wheels") in komut
+    assert komut[-1] == yaziyadok.PAKET
+    # Vekil YALNIZCA alt surecin ortamina yazilir (ozet.alt_surec_ortami kalibi).
+    assert pip.ortamlar[0]["HTTPS_PROXY"] == "http://vekil.ornek.local:8080"
+    assert "HTTPS_PROXY" not in os.environ
+    # Yerel kurulum tuttu: ag hic denenmedi.
+    assert len(pip.cagrilar) == 1
+
+
+def test_installing_falls_back_to_the_network_when_the_wheels_do_not_fit(tmp_path):
+    tekerlek_koy(tmp_path, "wheels", "fastapi-0.115.6-py3-none-any.whl")
+    pip = SahtePip([1, 0])
+
+    sonuc = yaziyadok.kur(kok=tmp_path, calistirici=pip)
+
+    assert sonuc["kuruldu"] is True
+    assert sonuc["kaynak"] == "ağ"
+    assert "--no-index" not in pip.cagrilar[1]
+
+
+def test_installing_without_local_wheels_goes_straight_to_the_network(tmp_path):
+    pip = SahtePip([0])
+    sonuc = yaziyadok.kur(kok=tmp_path, calistirici=pip)
+    assert len(pip.cagrilar) == 1
+    assert "--find-links" not in pip.cagrilar[0]
+    assert sonuc["kaynak"] == "ağ"
+
+
+def test_a_failed_installation_never_leaks_a_secret_to_the_screen(tmp_path):
+    pip = SahtePip([1], cikti="pip hatasi: token=cok-gizli-bir-deger")
+    sonuc = yaziyadok.kur(kok=tmp_path, calistirici=pip)
+    assert sonuc["kuruldu"] is False
+    assert "[gizlendi]" in sonuc["cikti"]
+    assert "cok-gizli-bir-deger" not in sonuc["mesaj"]
+    assert "cok-gizli-bir-deger" not in sonuc["cikti"]
+
+
+def test_a_missing_pip_is_explained_instead_of_dumped(tmp_path):
+    """Tasinabilir tam pakette pip yok: kullaniciya ne yapacagi soylenir."""
+    pip = SahtePip([1], cikti="C:\\python-embed\\python.exe: No module named pip")
+    sonuc = yaziyadok.kur(kok=tmp_path, calistirici=pip)
+    assert sonuc["kuruldu"] is False
+    assert "pip" in sonuc["mesaj"]
+    assert "paketle birlikte gelir" in sonuc["mesaj"]
+
+
+# --- paket gelince bekleyen satirlar --------------------------------------
+
+
+def test_notes_that_failed_without_the_package_return_to_the_queue(context, fake_gorusme):
+    not_id = hazirla_not(context, fake_gorusme, Saat())
+    depo.hataya_dus(context.conn, not_id, str(yaziyadok.eksik_paket()))
+    baska = hazirla_not(context, fake_gorusme, Saat(NOW + timedelta(hours=2)))
+    depo.hataya_dus(context.conn, baska, "Özet alınamadı: model yok")
+
+    assert depo.eksik_paket_hatalarini_kuyruga_al(context.conn) == 1
+
+    kayit = depo.require_not(context.conn, not_id)
+    assert kayit["durum"] == DURUM_KUYRUKTA
+    assert kayit["hata"] == ""
+    # Baska sebeple dusen satira dokunulmaz.
+    assert depo.require_not(context.conn, baska)["durum"] == DURUM_HATA
+
+
+def test_the_queue_finishes_those_notes_once_the_package_is_there(context, fake_gorusme):
+    not_id = hazirla_not(context, fake_gorusme, Saat())
+    klasor = Path(depo.require_not(context.conn, not_id)["klasor"])
+
+    class Yok:
+        def cevir(self, yol, dil="tr"):
+            raise yaziyadok.eksik_paket()
+
+    eksik = Kuyruk(
+        context,
+        dokucu_factory=lambda ayarlar: Yok(),
+        ozetleyici_factory=lambda ayarlar: fake_gorusme["ozetleyici"],
+    )
+    eksik.sirayi_isle()
+    assert depo.require_not(context.conn, not_id)["durum"] == DURUM_HATA
+    # Ses SILINMEZ: is kaldigi yerden surecek.
+    assert klasor.exists()
+
+    kuyruk = kur_kuyruk(context, fake_gorusme)
+    assert kuyruk.eksik_paket_islerini_kuyruga_al() == 1
+    kuyruk.sirayi_isle()
+    assert depo.require_not(context.conn, not_id)["durum"] == DURUM_HAZIR
+
+
+def test_startup_resumes_package_errors_only_when_the_package_is_installed(
+    context, fake_gorusme, monkeypatch
+):
+    from app.gorusme import servis as gorusme_servis
+
+    not_id = hazirla_not(context, fake_gorusme, Saat())
+    depo.hataya_dus(context.conn, not_id, str(yaziyadok.eksik_paket()))
+
+    monkeypatch.setattr(gorusme_servis.yaziyadok, "kurulu_mu", lambda: False)
+    gorusme_servis.kur(context)
+    assert depo.require_not(context.conn, not_id)["durum"] == DURUM_HATA
+
+    monkeypatch.setattr(gorusme_servis.yaziyadok, "kurulu_mu", lambda: True)
+    gorusme_servis.kur(context)
+    assert depo.require_not(context.conn, not_id)["durum"] == DURUM_KUYRUKTA
+
+
 # --- katilimci eslemesi ---------------------------------------------------
 
 
@@ -790,6 +945,39 @@ def test_copilot_can_be_tested_from_the_settings_page(api_client, context, fake_
     assert "proxy" not in yanit["mesaj"].lower()
 
 
+def test_the_transcription_package_can_be_installed_from_the_settings_page(
+    api_client, context, fake_gorusme
+):
+    not_id = akisi_kos(api_client, context, fake_gorusme)
+    depo.hataya_dus(context.conn, not_id, str(yaziyadok.eksik_paket()))
+    context.settings.set("calls.copilot_proxy", "http://vekil.ornek.local:8080")
+
+    yanit = api_client.post("/api/gorusme/ayar/whisper-kur").json()
+
+    assert yanit["kuruldu"] is True
+    assert yanit["mesaj"]
+    # Bekleyen satir kullanicidan "Yeniden dene" beklemeden kuyruga dondu.
+    # (Arka plan iscisi onu hemen alip yeniden isleyebilir; kesin olan sey
+    # satirin artik "paket yok" hatasinda BEKLEMEDIGI.)
+    assert yanit["yeniden_kuyruga"] == 1
+    assert "faster-whisper" not in depo.require_not(context.conn, not_id)["hata"]
+    # Vekil kurucuya verildi; Holocron'un kendi ortami degismedi.
+    assert fake_gorusme["kurucu"].cagrilar == ["http://vekil.ornek.local:8080"]
+    assert "HTTPS_PROXY" not in os.environ
+
+
+def test_a_failed_installation_leaves_the_queue_alone(api_client, context, fake_gorusme):
+    not_id = akisi_kos(api_client, context, fake_gorusme)
+    depo.hataya_dus(context.conn, not_id, str(yaziyadok.eksik_paket()))
+    fake_gorusme["kurucu"].kuruldu = False
+
+    yanit = api_client.post("/api/gorusme/ayar/whisper-kur").json()
+
+    assert yanit["kuruldu"] is False
+    assert yanit["yeniden_kuyruga"] == 0
+    assert depo.require_not(context.conn, not_id)["durum"] == DURUM_HATA
+
+
 def test_a_note_never_leaks_raw_identities_to_the_screen(api_client, context, fake_gorusme):
     not_id = akisi_kos(api_client, context, fake_gorusme)
     depo.katilimcilari_yaz(context.conn, not_id, [{"kimlik": PERSON_ONE, "ad": ""}])
@@ -814,6 +1002,10 @@ def test_the_notes_tab_and_the_track_strip_are_on_the_page(api_client):
         'id="gorusme-queued"',
         'id="gorusme-count"',
         'id="gorusme-wrap"',
+        'id="gorusme-whisper-uyari"',
+        "Yazıya dökme paketi eksik",
+        "Ayarlar'dan kur",
+        'id="gorusme-whisper-uyari-kapat"',
         'id="gorusme-table"',
         'id="gorusme-drawer"',
         "/static/js/gorusme.js",
@@ -839,6 +1031,8 @@ def test_the_notes_script_covers_the_strip_the_table_and_the_drawer(api_client):
         "function retryGorusme",
         "function resummarizeGorusme",
         "function renderDrawerGorusme",
+        "function renderGorusmeWhisperWarning",
+        "function dismissWhisperWarning",
         "function renderKisiGorusme",
         '"Görev yap"',
         '"Yeniden dene"',
@@ -892,6 +1086,9 @@ def test_the_settings_card_is_on_the_settings_page(api_client):
         'id="gorusme-min-dakika"',
         'id="gorusme-whisper-model"',
         'id="gorusme-whisper-klasor"',
+        'id="gorusme-whisper-kur"',
+        "Yazıya dökme paketini kur",
+        'id="gorusme-whisper-kur-sonuc"',
         'id="gorusme-modeller"',
         'id="gorusme-copilot-proxy"',
         'id="gorusme-copilot-test"',

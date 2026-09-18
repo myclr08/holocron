@@ -548,6 +548,18 @@ button.ghost-accent:hover:not(:disabled) { border-color: var(--accent); backgrou
   padding: 3px 9px;
 }
 
+/* Sekmenin tepesinde duran kapatilabilir uyari seridi. */
+.warn-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding: 6px 10px;
+}
+
+.warn-strip a { color: var(--accent); }
+
 /* Excel penceresi: sutun onay kutulari */
 .export-columns {
   border: 1px solid var(--line);

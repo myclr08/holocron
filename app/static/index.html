@@ -225,6 +225,14 @@
 
         <!-- Görüşme notları sekmesi: kendi tablosu, kendi boş durumu. -->
         <div class="grid-wrap" id="gorusme-wrap" hidden>
+          <!-- Paket eksikken kalıcı uyarı: kapatılabilir, paket gelince kalkar. -->
+          <div class="warn-note warn-strip" id="gorusme-whisper-uyari" hidden>
+            <span>
+              Yazıya dökme paketi eksik —
+              <a href="/settings#gorusme-card">Ayarlar'dan kur</a>
+            </span>
+            <button class="small" id="gorusme-whisper-uyari-kapat" title="Uyarıyı kapat">✕</button>
+          </div>
           <table class="grid gorusme-grid" id="gorusme-table">
             <thead><tr id="gorusme-head"></tr></thead>
             <tbody id="gorusme-body"></tbody>
