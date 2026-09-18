@@ -362,9 +362,20 @@
             "doğrudan bağlan" kipinde kalır, Jira sunucusu alt sürecin muafiyet listesine
             eklenir.
           </p>
+          <label for="gorusme-copilot-yol">Copilot yolu (boş = otomatik bul)</label>
+          <input type="text" id="gorusme-copilot-yol" placeholder="%APPDATA%\npm\copilot.cmd" />
+          <p class="hint">
+            "Copilot CLI bulunamadı" diyorsa komut istemine <code>where copilot</code>
+            yazıp çıkan <strong>tam yolu</strong> (<code>.cmd</code> ya da
+            <code>.exe</code> uzantısıyla) buraya kopyalayın. Holocron
+            <code>pythonw.exe</code> ile açıldığı için terminalinizin PATH'ini
+            görmeyebilir; alan boşken PATH, npm klasörü ve kayıt defterindeki
+            PATH sırayla denenir.
+          </p>
           <div class="actions">
             <button id="gorusme-copilot-test">Copilot'u sına</button>
           </div>
+          <p class="hint" id="gorusme-copilot-sonuc"></p>
           <label for="gorusme-sablon">Özet şablonu (boş = varsayılan)</label>
           <textarea id="gorusme-sablon" rows="4" placeholder="Varsayılan şablon kullanılır"></textarea>
         </div>

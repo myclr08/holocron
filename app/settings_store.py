@@ -97,6 +97,11 @@ DEFAULTS: dict[str, str] = {
     # dogrudan goruluyor: bu deger YALNIZCA alt surecin ortamina yazilir,
     # Holocron'un kendi Jira istekleri ondan etkilenmez.
     "calls.copilot_proxy": "",
+    # Copilot CLI'nin tam yolu (bos = otomatik ara). `holocron.bat` uygulamayi
+    # pythonw ile actigi icin surec, terminaldeki PATH'i gormeyebilir: "where
+    # copilot" ciktisi buraya yazilir. "son" alani otomatik bulunani saklar.
+    "calls.copilot_yolu": "",
+    "calls.copilot_yolu_son": "",
     # Ses ve ara dosyalarin klasoru (bos = %LOCALAPPDATA%\\Holocron\\gorusme).
     "calls.calisma_klasoru": "",
     # Saklama: varsayilan olarak ikisi de silinir.

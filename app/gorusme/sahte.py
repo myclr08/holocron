@@ -190,6 +190,9 @@ class SahteOzetleyici:
         self.reddedilen = set(reddedilen)
         self.kabuk = kabuk
         self.cagrilar: list[tuple[str, Path]] = []
+        # Gercek ozetleyici bulunan Copilot yolunu burada tasir; sinama
+        # ekrani onu okur. Sahtede bos, test isterse doldurur.
+        self.son_yol = ""
 
     def ozetle(self, transkript: Path, model: str, istem: str) -> OzetCikti:
         self.cagrilar.append((model, transkript))

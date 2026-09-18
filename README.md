@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.10.3** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.10.4** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -207,7 +207,8 @@ verebilir, Güncelle sonunda otomatik çekmeyi açabilirsiniz. Ayrıntı:
 
 **Ayarlar → Görüşme notları** kartında aygıtları sınayın (**Deneme kaydı**),
 asgari süreyi ve özet modelini seçin, kurum vekili varsa **Copilot vekil
-sunucusu** alanını doldurun. Ayrıntı:
+sunucusu** alanını doldurun. Özet adımı "Copilot CLI bulunamadı" diyorsa
+**Copilot yolu** alanına `where copilot` çıktısını yazın. Ayrıntı:
 [Görüşme notları](#görüşme-notları-yalnız-windows).
 
 ### 7. E-posta şablonları (gönderim)
@@ -740,7 +741,7 @@ bir sonraki açılışta kuyruğa geri alınır.
 | `winotify` | Windows bildirimi | Windows paketiyle birlikte; yoksa bildirim sessizce atlanır |
 | `pycaw` | Teams'in ses oturumundan aygıt bulma | İsteğe bağlı; yoksa Windows varsayılan aygıtları kullanılır |
 | `faster-whisper` | Yazıya dökme | `requirements.txt` ile birlikte (Windows); gelmezse Ayarlar'daki düğme kurar |
-| Copilot CLI | Özet | Zaten kuruluysa kullanılır |
+| Copilot CLI | Özet | Zaten kuruluysa kullanılır; bulunamazsa **Copilot yolu** alanı |
 
 **faster-whisper kurulumu.** v0.10.1'den beri paket `requirements.txt`
 içindedir (`sys_platform == "win32"` işaretiyle): tam pakette hazır gelir, lite
@@ -804,6 +805,26 @@ istemcisinin davranışı hiç değişmez. **Copilot'u sına** düğmesi seçili
 ve vekille kısa bir istek atar; model reddedilirse yedek sıradaki denenir ve
 çalışan model "son çalışan" olarak saklanır.
 
+**Copilot nerede aranır?** Holocron `pythonw.exe` ile açıldığı için
+terminalinizin PATH'ini görmeyebilir: npm'in global klasörü çoğu kez yalnızca
+kullanıcı PATH'indedir ve o PATH oturum açıldıktan sonra değişmiş olabilir.
+Bu yüzden Copilot sırayla aranır:
+
+1. **Ayarlar → Görüşme notları → Copilot yolu** alanı (boş = otomatik),
+2. sürecin `PATH`i (`PATHEXT` ile `.cmd`/`.exe` çözülür),
+3. Windows'un bilinen yerleri: `%APPDATA%\npm\copilot.cmd`, WinGet bağlantıları,
+   `%ProgramFiles%\GitHub Copilot CLI\copilot.exe`, `%USERPROFILE%\.local\bin`,
+4. kayıt defterinden **taze okunan** kullanıcı ve makine PATH'i.
+
+Hiçbiri tutmazsa hata metni denenen yerleri tek tek sayar. Çözüm: komut
+isteminde `where copilot` yazıp çıkan tam yolu (`.cmd` ya da `.exe`
+uzantısıyla) **Copilot yolu** alanına yapıştırın; **Copilot'u sına** o alanı da
+kullanır ve başarıda bulunan yolu gösterir. npm kurulumunun bıraktığı
+`copilot.cmd` Windows'ta doğrudan çalıştırılamaz (`CreateProcess` `.cmd`
+açamaz), Holocron onu `cmd.exe /c` ile çağırır ve istem metnini komut satırına
+koymaz — transkriptin yanına dosya olarak yazıp modele okutur, böylece
+istemdeki tırnak veya `%` komutu bölemez.
+
 **Aygıt kuralı.** Varsayılan **otomatik**tir: Teams'in ses oturumunun açık
 olduğu mikrofon ve çıkış kullanılır, bulunamazsa Windows'un varsayılan
 iletişim aygıtları. Ayarlardan sabitleyebilirsiniz. VDI'da sanal aygıtların
@@ -840,6 +861,7 @@ dolar, bilerek açın).
 | Satır "hata: faster-whisper yok" | Paket kurulu değil: **Ayarlar → Görüşme notları → Yazıya dökme paketini kur** (ya da başlatıcıyı yeniden çalıştırın). Paket gelince bekleyen satırlar kendiliğinden yeniden denenir; ses silinmemiştir |
 | Sekmenin tepesinde "Yazıya dökme paketi eksik" şeridi | Aynı sebep; şerit kapatılabilir, paket gelince kendiliğinden kalkar |
 | Satır "hata: Özet alınamadı" | Copilot CLI oturumu kapalı ya da vekil yanlış; **Copilot'u sına** ile bakın |
+| Satır "hata: Özet alınamadı: Copilot CLI bulunamadı" | Uygulama `pythonw.exe` ile açıldığı için terminalinizin PATH'ini görmüyor: komut isteminde `where copilot` yazın ve çıkan tam yolu (`.cmd`/`.exe`) **Ayarlar → Görüşme notları → Copilot yolu** alanına yapıştırıp **Copilot'u sına** deyin. Hata metni nerelere bakıldığını sayar |
 | "katılımcı bekleniyor" kalıyor | Arama geçmişi henüz çekilmemiş: **Aramaları çek** |
 | Hoparlör kanalı sessiz | Döngü aygıtı yanlış seçilmiş: Ayarlar'da "Duyduğum ses" aygıtını sabitleyin |
 | Deneme kaydında "veri gelmedi" | Aygıt açıldı ama tek çerçeve göndermedi (VDI'nın sanal aygıtı, ses çalınmayan döngü): aygıtı Ayarlar'da sabitleyin, döngü için kayıt sırasında bir ses çalın |
@@ -1283,6 +1305,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.10.4** | 19 Eylül 2026 | Sahadan gelen dördüncü hata: VDI'da özet adımı "Özet alınamadı: Copilot CLI bulunamadı (copilot)" diyordu, oysa kullanıcı aynı makinede terminalde `copilot` çalıştırabiliyordu. Sebep PATH: `holocron.bat` uygulamayı `start "" pythonw.exe` ile açar, o süreç kullanıcının **güncel** PATH'ini görmez (npm'in global klasörü çoğu kez yalnızca kullanıcı PATH'indedir ve o PATH oturum açıldıktan sonra değişmiştir). Copilot artık sırayla aranıyor: **Ayarlar → Görüşme notları → Copilot yolu** alanı, `PATH` (`PATHEXT` ile `.cmd`/`.exe` çözülür), Windows'un bilinen yerleri (`%APPDATA%\npm\copilot.cmd` başta olmak üzere npm, WinGet, Program Files, `%USERPROFILE%\.local\bin`) ve **kayıt defterinden taze okunan** kullanıcı/makine PATH'i. Bulunan tam yol loga yazılır, **Copilot'u sına** onu ekranda gösterir ("çalışıyor · `<yol>` · model X · N sn") ve ayara "son bulunan" olarak saklar; hiçbiri yoksa hata metni **denenen yerleri tek tek sayar** ve ne yapılacağını söyler. npm kurulumunun bıraktığı `copilot.cmd` dosyasını Windows doğrudan çalıştıramadığı için (`CreateProcess` `.cmd` açamaz) bu dosyalar `cmd.exe /c` ile çağrılıyor; cmd komut satırını yeniden ayrıştırdığından istem metni **argüman olarak geçmiyor**, transkriptin yanına dosya olarak yazılıp modele okutuluyor (tırnak, `%` ve `&` komutu bölemez). Vekil ve `NO_PROXY` mantığı aynen duruyor |
 | **v0.10.3** | 19 Eylül 2026 | Sahadan gelen üçüncü hata: VDI'da model zip'i açılıp yolu **Model klasörü** alanına yazılınca yazıya dökme `ConnectTimeout ... cannot find the appropriate snapshot folder` diye düşüyordu — klasör Hugging Face **önbellek kökü** sanılıp `download_root`a veriliyordu, oysa faster-whisper açılmış model klasörünü DOĞRUDAN kabul eder. Klasör artık sırayla çözümleniyor: klasörün kendisi (`model.bin` içeriyorsa), `<klasör>/<model adı>` ya da `<klasör>/faster-whisper-<model adı>` alt klasörü, ya da HF önbellek düzeni (`models--Systran--faster-whisper-<ad>/snapshots/*`, `local_files_only` ile). **Klasör yazılıysa ağa hiç çıkılmıyor**: model bulunamazsa dakikalarca zaman aşımı yerine anında "Model klasöründe model.bin bulunamadı: `<yol>`; beklenen düzen ..." deniyor. Model yükleme hataları tek satırlık Türkçeye iniyor ("Model yüklenemedi: ...", ilk 200 karakter), satır kesin olarak **hata** durumuna geçiyor ve takip şeridindeki "işleniyor" sayacı sıfırlanıyor; yarım kalan satırlar açılışta kuyruğa dönüyor. Ayarlar'a **Modeli sına** düğmesi geldi: modeli yüklemeyi dener, `hazır: <yol>, N sn` ya da temiz hata yazar, kuyruğu bloklamaz |
 | **v0.10.2** | 19 Eylül 2026 | Sahadan gelen ikinci hata: VDI'da **Deneme kaydı** HTTP 500 veriyordu — döngü aygıtı 10 saniye boyunca tek çerçeve vermemiş, WAV 0 bayt kalmış, okuma `EOFError` atmıştı. Kayıt artık bloklayan `read` yerine **geri çağrı (callback)** kipinde çalışıyor: susan bir aygıt kayıt iş parçacığını kilitleyemiyor, dosya her durumda geçerli başlıkla kapanıyor. Deneme kaydı hiçbir durumda 500 dönmüyor; kanal başına aygıt adı, açıldı mı, kaç çerçeve geldi, ses var mı ve hata metni gösteriliyor, altında öneri duruyor. Döngü kanalını beslemek için deneme boyunca hoparlöre duyulmayan (-60 dB) bir sinyal çalınıyor. Akış açılamazsa 44100/2 ile yeniden deneniyor; döngü aygıtı kendi kanal sayısı ve hızıyla açılıyor. Gerçek kayıtta veri gelmeyen parça "boş" işaretlenip birleştirmede atlanıyor, not "hata: Ses alınamadı (mikrofon: veri gelmedi)" diye düşüyor ve ses klasörü silinmiyor. Boş, eksik ya da bozuk WAV artık istisna yerine 0 çerçeve dönüyor |
 | **v0.10.1** | 19 Eylül 2026 | Sahadan gelen "faster-whisper kurulu değil" hatası: paket `requirements.txt`e girdi (Windows işaretiyle), yani artık ilk kurulumda gelir. Başlatıcılar (`holocron.bat`, `holocron.sh`) her açılışta `requirements.txt`in SHA256 özetini `.venv` içinde tuttukları özetle karşılaştırıyor; liste değiştiyse eksik paketleri kuruyor (önce `wheels/` ve `whisper-wheels/`, olmazsa ağdan) — eski sürümün üstüne açılan kurulumlarda sonradan eklenen bağımlılık hiç kurulmuyordu. Kurulum düşse bile uygulama açılıyor. Ayarlar → Görüşme notları'na **Yazıya dökme paketini kur** düğmesi eklendi (pip alt süreçte, vekil yalnızca o sürecin ortamında, çıktı maskelenir); Görüşme notları sekmesinde paket yokken kapatılabilir uyarı şeridi duruyor. Paket gelince kuyrukta "hata: faster-whisper yok" diye bekleyen satırlar hem açılışta hem kurulumdan sonra kendiliğinden yeniden deneniyor. `holocron-windows-whisper.zip` artık `whisper-wheels/` klasörü olarak açılıyor |

@@ -706,6 +706,157 @@ def test_error_text_masks_anything_that_looks_like_a_secret():
     assert ozet.temizle("") == ""
 
 
+# --- Copilot'u bulmak -----------------------------------------------------
+#
+# Saha hatasi (19 Eylul 2026, Windows VDI): kullanici terminalde `copilot`
+# calistirabiliyor ama Holocron "Copilot CLI bulunamadi" diyor. Sebep:
+# `holocron.bat` uygulamayi `start "" pythonw.exe` ile aciyor, o surec
+# kullanicinin guncel PATH'ini gormuyor (npm'in global klasoru cogu kez
+# yalnizca kullanici PATH'inde ve o PATH oturumdan sonra degismis).
+
+
+def _sahte_copilot(klasor: Path, ad: str = "copilot") -> Path:
+    klasor.mkdir(parents=True, exist_ok=True)
+    yol = klasor / ad
+    yol.write_text("@echo off\n", encoding="utf-8")
+    yol.chmod(0o755)
+    return yol
+
+
+def test_the_configured_path_wins_over_the_search(tmp_path):
+    hedef = _sahte_copilot(tmp_path / "elle", "copilot.exe")
+    bulunan = ozet.copilot_bul(str(hedef), ortam={"PATH": str(tmp_path / "bos")})
+    assert bulunan == hedef
+    # Tirnakli yapistirma da kabul edilir ("where copilot" ciktisi kopyalanir).
+    assert ozet.copilot_bul(f'"{hedef}"', ortam={"PATH": str(tmp_path / "bos")}) == hedef
+
+
+def test_copilot_is_found_in_the_npm_folder_when_the_process_path_is_stale(tmp_path):
+    """Ayar bos, PATH'te yok, `%APPDATA%\\npm\\copilot.cmd` var: bulunmali."""
+    appdata = tmp_path / "AppData" / "Roaming"
+    hedef = _sahte_copilot(appdata / "npm", "copilot.cmd")
+    # Uzantisiz node betigi de yaninda durur; Windows'ta calistirilamaz,
+    # o yuzden `.cmd` once gelmeli.
+    _sahte_copilot(appdata / "npm", "copilot")
+    ortam = {"PATH": str(tmp_path / "bos"), "APPDATA": str(appdata)}
+
+    yol, denenen = ozet.copilot_coz("", ortam=ortam, platform="win32")
+
+    assert yol == hedef
+    assert "PATH" in denenen
+
+
+def test_the_user_path_is_read_back_from_the_registry(tmp_path, monkeypatch):
+    """Surecin PATH'i bayat: kayit defterindeki kullanici PATH'i taze okunur."""
+    hedef = _sahte_copilot(tmp_path / "kayit")
+    monkeypatch.setattr(
+        ozet, "kayit_defteri_path", lambda platform="": [str(tmp_path / "kayit")]
+    )
+
+    yol, denenen = ozet.copilot_coz(
+        "", ortam={"PATH": str(tmp_path / "bos")}, platform="win32"
+    )
+
+    assert yol == hedef
+    assert "kayıt defteri PATH" in denenen
+
+
+def test_the_error_says_where_it_looked_and_what_to_do(tmp_path):
+    yol, denenen = ozet.copilot_coz(
+        "", ortam={"PATH": str(tmp_path / "bos")}, platform="win32"
+    )
+    assert yol is None
+    mesaj = ozet.bulunamadi_mesaji(denenen)
+    assert "Copilot CLI bulunamadı" in mesaj
+    assert "Denenen: PATH" in mesaj
+    assert "Copilot yolu" in mesaj and "where copilot" in mesaj
+
+
+def test_a_cmd_file_is_run_through_cmd_exe_and_the_prompt_stays_off_the_command_line(
+    tmp_path,
+):
+    """`.cmd` dosyasini CreateProcess dogrudan acamaz; cmd.exe araya girer.
+
+    Araya cmd.exe girince komut satiri YENIDEN ayristirilir: istemdeki tirnak,
+    `%` ya da `&` komutu parcalar. Bu yuzden istem argüman olarak degil dosya
+    olarak gecer.
+    """
+    yol = _sahte_copilot(tmp_path / "npm", "copilot.cmd")
+    istem = 'Oku: {"aksiyonlar": []} & %PATH% | "tırnak"'
+
+    argumanlar, dosya = ozet.komut_kur(yol, "gpt-5", istem, tmp_path, platform="win32")
+
+    assert argumanlar[:5] == ["cmd.exe", "/c", str(yol), "--model", "gpt-5"]
+    assert argumanlar[-1] == "--allow-tool=read"
+    assert istem not in " ".join(argumanlar)
+    assert dosya is not None and dosya.read_text(encoding="utf-8") == istem
+    kisa = argumanlar[argumanlar.index("-p") + 1]
+    assert ozet.ISTEM_DOSYASI in kisa
+    # Kisa yonlendirmede cmd.exe'nin ozel gordugu tek karakter bile yok.
+    assert not set('"%&|<>^') & set(kisa)
+
+
+def test_an_exe_is_run_directly_with_the_prompt_as_an_argument(tmp_path):
+    yol = _sahte_copilot(tmp_path / "npm", "copilot.exe")
+    argumanlar, dosya = ozet.komut_kur(yol, "gpt-5", "kısa istem", tmp_path, platform="win32")
+    assert argumanlar == [
+        str(yol),
+        "--model",
+        "gpt-5",
+        "-p",
+        "kısa istem",
+        "--allow-tool=read",
+    ]
+    assert dosya is None
+    # Windows disinda `.cmd` diye bir sey yok: kabuk dalina hic girilmez.
+    assert ozet.kabukla_mi(Path("/usr/bin/copilot.cmd"), platform="linux") is False
+
+
+def test_the_summariser_resolves_the_path_and_remembers_it(tmp_path, monkeypatch):
+    hedef = _sahte_copilot(tmp_path / "npm", "copilot.exe")
+    ozetleyici = ozet.CopilotOzetleyici(yol=str(hedef))
+    cagrilar: list[list[str]] = []
+
+    class SahteSonuc:
+        returncode = 0
+        stdout = '{"baslik": "Deneme", "ozet": ["bir"]}'
+        stderr = ""
+
+    def calistir(self, argumanlar, klasor):
+        cagrilar.append(list(argumanlar))
+        return SahteSonuc()
+
+    monkeypatch.setattr(ozet.CopilotOzetleyici, "calistir", calistir)
+    transkript = tmp_path / "is" / "transkript.txt"
+    transkript.parent.mkdir(parents=True)
+    transkript.write_text("metin", encoding="utf-8")
+
+    cikti = ozetleyici.ozetle(transkript, "gpt-5", "istem")
+
+    assert cikti.kod == 0
+    assert ozetleyici.son_yol == str(hedef)
+    assert cagrilar[0][0] == str(hedef)
+    # Istem dosyasi (varsa) geride kalmaz.
+    assert not (transkript.parent / ozet.ISTEM_DOSYASI).exists()
+
+
+def test_a_missing_copilot_tells_the_user_where_to_look(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path / "bos"))
+    cikti = ozet.CopilotOzetleyici().ozetle(tmp_path / "transkript.txt", "gpt-5", "istem")
+    assert cikti.kod == 127
+    assert "Copilot CLI bulunamadı" in cikti.hata
+    assert "Denenen" in cikti.hata
+
+
+def test_the_summary_setting_carries_the_path_into_the_subprocess(store):
+    store.set("calls.copilot_yolu", r"C:\Users\ornek\AppData\Roaming\npm\copilot.cmd")
+    ayarlar = gorusme_intake.load_config(store)
+    assert ayarlar.copilot_yolu.endswith("copilot.cmd")
+    ozetleyici = ozet.default_ozetleyici(yol=ayarlar.copilot_yolu)
+    assert ozetleyici.yol == ayarlar.copilot_yolu
+
+
+
 # --- yaziya dokme paketinin kurulumu --------------------------------------
 #
 # Saha hatasi (19 Eylul 2026): lite kurulumda paket hic gelmemisti. Artik
@@ -1394,6 +1545,31 @@ def test_copilot_can_be_tested_from_the_settings_page(api_client, context, fake_
     assert "proxy" not in yanit["mesaj"].lower()
 
 
+def test_the_copilot_path_can_be_tested_and_is_remembered(
+    api_client, context, fake_gorusme
+):
+    """"Copilot'u sına" ekrandaki yolu kullanir, bulunan yolu gosterir ve saklar."""
+    yol = r"C:\Users\ornek\AppData\Roaming\npm\copilot.cmd"
+    gorulen: dict[str, str] = {}
+
+    def fabrika(ayarlar):
+        gorulen["yol"] = ayarlar.copilot_yolu
+        fake_gorusme["ozetleyici"].son_yol = yol
+        return fake_gorusme["ozetleyici"]
+
+    context.gorusme_ozetleyici_factory = fabrika
+
+    yanit = api_client.post("/api/gorusme/ayar/copilot-sina", json={"yol": yol}).json()
+
+    assert yanit["calisiyor"] is True
+    # Alan kaydedilmeden denenebilir: deger uca ekrandan gitti.
+    assert gorulen["yol"] == yol
+    # Basarida bulunan tam yol ekranda durur ve ayara "son bulunan" yazilir.
+    assert yanit["yol"] == yol
+    assert yanit["mesaj"].startswith("çalışıyor · " + yol + " · model ")
+    assert context.settings.get("calls.copilot_yolu_son") == yol
+
+
 def test_the_transcription_package_can_be_installed_from_the_settings_page(
     api_client, context, fake_gorusme
 ):
@@ -1544,8 +1720,11 @@ def test_the_settings_card_is_on_the_settings_page(api_client):
         "model.bin",
         'id="gorusme-modeller"',
         'id="gorusme-copilot-proxy"',
+        'id="gorusme-copilot-yol"',
+        'id="gorusme-copilot-sonuc"',
         'id="gorusme-copilot-test"',
         "Copilot'u sına",
+        "where copilot",
         'id="gorusme-sablon"',
         'id="gorusme-klasor"',
         'id="gorusme-transkript-sakla"',
@@ -1566,6 +1745,7 @@ def test_the_settings_script_saves_every_field(api_client):
         "/api/gorusme/ayar/copilot-sina",
         "/api/gorusme/ayar/sablon",
         '"calls.copilot_proxy"',
+        '"calls.copilot_yolu"',
         '"calls.ozet_modelleri"',
         '"calls.min_dakika"',
         '"calls.transkripti_sakla"',

@@ -14,18 +14,28 @@ yazilir, bir sonraki gorusme oradan baslar.
 
 Cikti serbest metin icinde gelebilir ("Işte not: ```json {...}```"): JSON
 metnin icinden cekilir, olmazsa hata verilir ve ses SILINMEZ.
+
+Copilot'un KENDISI de aranir: `holocron.bat` uygulamayi `start "" pythonw.exe`
+ile actigi icin surec, kullanicinin terminaldeki PATH'ini gormeyebilir (npm'in
+global klasoru cogu kez yalnizca kullanici PATH'inde durur ve o PATH oturum
+acildiktan sonra degistiyse surece hic ulasmaz). Bu yuzden `copilot_bul`
+sirayla ayardaki yolu, `PATH`i, Windows'un bilinen kurulum yerlerini ve
+kayit defterinden TAZE okunan kullanici/makine PATH'ini dener.
 """
 
 from __future__ import annotations
 
+import glob
 import json
 import logging
 import os
 import re
+import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
 from .source import BOLUM_AKSIYON, OzetCikti
@@ -137,6 +147,236 @@ def alt_surec_ortami(
     return ortam
 
 
+# --- Copilot'u bulmak ----------------------------------------------------
+
+# Windows'ta sirayla bakilan yerler. npm'in global kurulumu `copilot.cmd`
+# uretir: sahadan gelen hata tam buradan cikti, o yuzden ilk aday odur.
+# Uzantisiz `copilot` node betigidir, Windows'ta dogrudan calismaz; listede
+# yalnizca son care olarak durur.
+WINDOWS_ADAYLARI: tuple[str, ...] = (
+    r"%APPDATA%\npm\copilot.cmd",
+    r"%APPDATA%\npm\copilot.exe",
+    r"%LOCALAPPDATA%\Microsoft\WinGet\Links\copilot.exe",
+    r"%ProgramFiles%\GitHub Copilot CLI\copilot.exe",
+    r"%LOCALAPPDATA%\Programs\*copilot*\copilot.exe",
+    r"%USERPROFILE%\.local\bin\copilot.exe",
+    r"%APPDATA%\npm\node_modules\@github\copilot\copilot.exe",
+    r"%APPDATA%\npm\node_modules\@github\copilot\bin\copilot*.exe",
+    r"%APPDATA%\npm\copilot",
+)
+
+# Kayit defterindeki PATH degerleri (kullanici + makine).
+KAYIT_YOLLARI: tuple[tuple[str, str], ...] = (
+    ("HKCU", r"Environment"),
+    ("HKLM", r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+)
+
+_DEGISKEN = re.compile(r"%([A-Za-z_][A-Za-z0-9_()]*)%")
+
+
+def _windows_mu(platform: str = "") -> bool:
+    """Platform kontrolu cagri aninda okunur (test `sys.platform` degistirir)."""
+    return str(platform or sys.platform).startswith("win")
+
+
+def _genislet(sablon: str, ortam: Mapping[str, str]) -> str:
+    """`%APPDATA%` gibi yer tutuculari verilen ortamdan doldurur.
+
+    `os.path.expandvars` KULLANILMAZ: o her zaman `os.environ`a bakar, oysa
+    burada testin verdigi sahte ortam da genisletilebilmeli.
+    """
+
+    def degistir(esleme: "re.Match[str]") -> str:
+        ad = esleme.group(1).lower()
+        for anahtar, deger in ortam.items():
+            if str(anahtar).lower() == ad:
+                return str(deger)
+        return esleme.group(0)
+
+    return _DEGISKEN.sub(degistir, str(sablon or ""))
+
+
+def kayit_defteri_path(platform: str = "") -> list[str]:
+    """Kullanici ve makine PATH'i, kayit defterinden TAZE okunur.
+
+    `pythonw.exe` ortamini kendisini acan sureçten devralir. Kullanici PATH'i
+    oturum acildiktan sonra degistiyse (npm global klasoru sonradan eklenmis)
+    surecin PATH'i eski kalir; terminaldeki `copilot` calisirken Holocron'un
+    bulamamasinin sebebi tam budur. Kayit defteri her zaman gunceldir.
+    """
+    if not _windows_mu(platform):
+        return []
+    try:
+        import winreg  # noqa: PLC0415 - yalnizca Windows'ta var
+    except ImportError:  # pragma: no cover - Windows disinda hic calismaz
+        return []
+    koklar = {"HKCU": winreg.HKEY_CURRENT_USER, "HKLM": winreg.HKEY_LOCAL_MACHINE}
+    parcalar: list[str] = []
+    for kok_adi, alt in KAYIT_YOLLARI:  # pragma: no cover - Windows'a ozel
+        try:
+            with winreg.OpenKey(koklar[kok_adi], alt) as anahtar:
+                ham, _tur = winreg.QueryValueEx(anahtar, "Path")
+        except OSError:
+            continue
+        parcalar.extend(parca.strip() for parca in str(ham or "").split(";") if parca.strip())
+    return list(dict.fromkeys(parcalar))  # pragma: no cover - Windows'a ozel
+
+
+def _aday_yolu(sablon: str, ortam: Mapping[str, str]) -> str:
+    """Gomulu aday: degiskenler doldurulur, ayrac isletim sistemine cevrilir.
+
+    Adaylar Windows yaziliyla (`\\`) durur. Windows'ta bu degisiklik bir sey
+    yapmaz; Windows disinda (yalnizca testte) yol gercekten cozulebilir olur.
+    """
+    return _genislet(sablon, ortam).replace("\\", os.sep)
+
+
+def _eslesenler(desen: str) -> list[str]:
+    """Yildiz varsa glob, yoksa yolun kendisi (sirali, kararli)."""
+    if "*" in desen:
+        return sorted(glob.glob(desen))
+    return [desen]
+
+
+def copilot_coz(
+    ayar_yolu: str = "",
+    ad: str = KOMUT,
+    ortam: Mapping[str, str] | None = None,
+    platform: str = "",
+) -> tuple[Path | None, list[str]]:
+    """Copilot CLI'yi bulur; bulunan yol ve DENENEN yerlerin listesi doner.
+
+    Denenen liste hata metnine girer: kullanici "nereye baktin" diye sormadan
+    gorur ve gerekirse ayara elle yol yazar.
+    """
+    cevre = dict(os.environ if ortam is None else ortam)
+    denenen: list[str] = []
+
+    ham = str(ayar_yolu or "").strip().strip('"')
+    if ham:
+        aday = Path(_genislet(ham, cevre))
+        denenen.append(f"ayar: {aday}")
+        if aday.is_file():
+            return aday, denenen
+        # Ayardaki yol klasorse icindeki calistirilabiliri ara.
+        if aday.is_dir():
+            bulunan = shutil.which(ad, path=str(aday))
+            if bulunan:
+                return Path(bulunan), denenen
+
+    denenen.append("PATH")
+    bulunan = shutil.which(ad, path=cevre.get("PATH"))
+    if bulunan:
+        return Path(bulunan), denenen
+
+    if _windows_mu(platform):
+        for sablon in WINDOWS_ADAYLARI:
+            desen = _aday_yolu(sablon, cevre)
+            if "%" in desen:
+                continue  # degisken tanimli degil, bu adayin anlami yok
+            # Hata metnine dosya degil KLASOR girer: liste okunabilir kalsin.
+            klasor = str(Path(desen).parent)
+            if klasor not in denenen:
+                denenen.append(klasor)
+            for eslesen in _eslesenler(desen):
+                if Path(eslesen).is_file():
+                    return Path(eslesen), denenen
+        kayit = kayit_defteri_path(platform)
+        if kayit:
+            denenen.append("kayıt defteri PATH")
+            bulunan = shutil.which(ad, path=os.pathsep.join(kayit))
+            if bulunan:
+                return Path(bulunan), denenen
+    return None, denenen
+
+
+def copilot_bul(
+    ayar_yolu: str = "",
+    ad: str = KOMUT,
+    ortam: Mapping[str, str] | None = None,
+    platform: str = "",
+) -> Path | None:
+    """Copilot CLI'nin tam yolu ya da `None`."""
+    return copilot_coz(ayar_yolu, ad, ortam, platform)[0]
+
+
+# Hata metnindeki "denenen yerler" listesinin karakter butcesi. Metin ekranda
+# kirpiliyor (`HATA_SINIRI`): liste uzarsa asil yonerge kesilir, o yuzden once
+# liste kisalir.
+DENENEN_SINIRI = 200
+
+
+def bulunamadi_mesaji(denenen: Sequence[str]) -> str:
+    """Kullaniciya nereye bakildigini ve ne yapacagini soyleyen hata metni."""
+    yerler: list[str] = []
+    uzunluk = 0
+    for parca in denenen:
+        adres = str(parca).strip()
+        if not adres:
+            continue
+        if uzunluk + len(adres) > DENENEN_SINIRI:
+            yerler.append("…")
+            break
+        yerler.append(adres)
+        uzunluk += len(adres) + 2
+    return (
+        "Copilot CLI bulunamadı. Denenen: "
+        + (", ".join(yerler) or "PATH")
+        + ". Ayarlar → Görüşme notları → Copilot yolu alanına `where copilot` "
+        "çıktısını yazın."
+    )
+
+
+# Kabuk betigi olan adaylar: Windows bunlari dogrudan CALISTIRAMAZ.
+KABUK_UZANTILARI: frozenset[str] = frozenset({".cmd", ".bat"})
+# Istem dosyasi: `.cmd` yolunda istem argüman olarak degil, dosyadan gecer.
+ISTEM_DOSYASI = "copilot-istem.txt"
+# `.cmd` yolunda verilen kisa yonlendirme. Icinde cmd.exe'nin ozel gordugu
+# hicbir karakter YOK (`%`, `"`, `&`, `|`, `<`, `>`): tirnaklama guvenli.
+KISA_ISTEM = (
+    "Yonergeler " + ISTEM_DOSYASI + " dosyasinda. O dosyayi oku ve harfiyen uygula."
+)
+
+
+def kabukla_mi(yol: Path, platform: str = "") -> bool:
+    """Bu yol `cmd.exe` uzerinden mi calistirilmali?"""
+    return _windows_mu(platform) and yol.suffix.lower() in KABUK_UZANTILARI
+
+
+def komut_kur(
+    yol: Path,
+    model: str,
+    istem: str,
+    klasor: Path,
+    platform: str = "",
+) -> tuple[list[str], Path | None]:
+    """Alt surece verilecek arguman listesi (ve varsa yazilan istem dosyasi).
+
+    Windows'ta `CreateProcess` bir `.cmd` dosyasini DOGRUDAN acamaz
+    ("%1 is not a valid Win32 application"); npm'in global kurulumu tam da
+    `copilot.cmd` birakir. O yuzden bu dosyalar `cmd.exe /c` ile calistirilir.
+    Ama cmd komut satirini yeniden ayristirir: istem metninde tirnak, `%` ya
+    da `&` varsa komut parcalanir. Bu yuzden `.cmd` yolunda istem ARGÜMAN
+    olarak gecmez, transkriptin yanina dosya olarak yazilir ve modele "o
+    dosyayi oku" denir (`--allow-tool=read` zaten acik).
+    """
+    if kabukla_mi(yol, platform):
+        dosya = Path(klasor) / ISTEM_DOSYASI
+        dosya.write_text(str(istem), encoding="utf-8")
+        argumanlar = [
+            "cmd.exe",
+            "/c",
+            str(yol),
+            "--model",
+            model,
+            "-p",
+            KISA_ISTEM,
+            "--allow-tool=read",
+        ]
+        return argumanlar, dosya
+    return [str(yol), "--model", model, "-p", istem, "--allow-tool=read"], None
+
+
 class CopilotOzetleyici:
     """`OzetleyiciProtokolu`nun gercek uygulamasi (alt surec)."""
 
@@ -146,32 +386,54 @@ class CopilotOzetleyici:
         zaman_asimi: int = ZAMAN_ASIMI,
         proxy: str = "",
         jira_base_url: str = "",
+        yol: str = "",
     ) -> None:
         self.komut = komut
         self.zaman_asimi = zaman_asimi
         self.proxy = str(proxy or "").strip()
         self.jira_base_url = str(jira_base_url or "").strip()
+        # Ayardaki "Copilot yolu" (bos = otomatik ara).
+        self.yol = str(yol or "").strip()
+        # Son calisan cozumleme: arayuz bunu "calisiyor · <yol>" diye gosterir.
+        self.son_yol = ""
 
     def ortam(self) -> dict[str, str]:
         return alt_surec_ortami(self.proxy, self.jira_base_url)
 
+    def calistir(self, argumanlar: Sequence[str], klasor: Path) -> Any:
+        """Alt surec (testler bunu degistirir, gercek Copilot hic kosmaz)."""
+        return subprocess.run(  # noqa: S603 - yol cozumlenmis, istem arguman olarak guvenli
+            list(argumanlar),
+            capture_output=True,
+            text=True,
+            timeout=self.zaman_asimi,
+            cwd=str(klasor),
+            env=self.ortam(),
+        )
+
     def ozetle(self, transkript: Path, model: str, istem: str) -> OzetCikti:
-        argumanlar = [self.komut, "--model", model, "-p", istem, "--allow-tool=read"]
+        bulunan, denenen = copilot_coz(self.yol, self.komut)
+        if bulunan is None:
+            self.son_yol = ""
+            return OzetCikti(kod=127, metin="", hata=bulunamadi_mesaji(denenen))
+        self.son_yol = str(bulunan)
+        log.info("Copilot CLI bulundu: %s", bulunan)
+        klasor = transkript.parent
+        argumanlar, istem_dosyasi = komut_kur(bulunan, model, istem, klasor)
         try:
-            sonuc = subprocess.run(  # noqa: S603 - sabit komut, kullanici girdisi arguman degil
-                argumanlar,
-                capture_output=True,
-                text=True,
-                timeout=self.zaman_asimi,
-                cwd=str(transkript.parent),
-                env=self.ortam(),
-            )
+            sonuc = self.calistir(argumanlar, klasor)
         except FileNotFoundError:
-            return OzetCikti(kod=127, metin="", hata="Copilot CLI bulunamadı (copilot).")
+            return OzetCikti(kod=127, metin="", hata=bulunamadi_mesaji(denenen))
         except subprocess.TimeoutExpired:
             return OzetCikti(kod=124, metin="", hata="Copilot CLI zaman aşımına uğradı.")
         except OSError as hata:  # pragma: no cover - isletim sistemi hatasi
             return OzetCikti(kod=1, metin="", hata=str(hata))
+        finally:
+            if istem_dosyasi is not None:
+                try:
+                    istem_dosyasi.unlink()
+                except OSError:  # pragma: no cover - dosya zaten yok
+                    pass
         return OzetCikti(
             kod=int(sonuc.returncode or 0),
             metin=str(sonuc.stdout or ""),
@@ -415,12 +677,20 @@ def sina(ozetleyici: Any, modeller: Sequence[str], klasor: Path) -> dict[str, An
             if reddedildi_mi(cikti):
                 son_hata = temizle(cikti.hata or cikti.metin or "model reddedildi")
                 continue
+            # Bulunan tam yol ekranda durur: kullanici hangi Copilot'un
+            # calistigini gorur, ayara yazacagi degeri de oradan kopyalar.
+            bulunan_yol = str(getattr(ozetleyici, "son_yol", "") or "")
+            parcalar = ["çalışıyor"]
+            if bulunan_yol:
+                parcalar.append(bulunan_yol)
+            parcalar.extend([f"model {model}", f"{gecen:.1f} sn"])
             return {
                 "calisiyor": True,
                 "model": model,
+                "yol": bulunan_yol,
                 "sn": round(gecen, 1),
                 "denenen": denenen,
-                "mesaj": f"çalışıyor · model {model} · {gecen:.1f} sn",
+                "mesaj": " · ".join(parcalar),
             }
     finally:
         try:
@@ -430,11 +700,14 @@ def sina(ozetleyici: Any, modeller: Sequence[str], klasor: Path) -> dict[str, An
     return {
         "calisiyor": False,
         "model": "",
+        "yol": str(getattr(ozetleyici, "son_yol", "") or ""),
         "sn": 0.0,
         "denenen": denenen,
         "mesaj": son_hata or "Copilot CLI yanıt vermedi.",
     }
 
 
-def default_ozetleyici(proxy: str = "", jira_base_url: str = "") -> CopilotOzetleyici:
-    return CopilotOzetleyici(proxy=proxy, jira_base_url=jira_base_url)
+def default_ozetleyici(
+    proxy: str = "", jira_base_url: str = "", yol: str = ""
+) -> CopilotOzetleyici:
+    return CopilotOzetleyici(proxy=proxy, jira_base_url=jira_base_url, yol=yol)

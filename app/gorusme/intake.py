@@ -68,6 +68,7 @@ class Ayarlar:
     bildirim_hazir: bool = True
     isleme_gorusme_disinda: bool = True
     copilot_proxy: str = ""
+    copilot_yolu: str = ""
     jira_base_url: str = ""
 
     @property
@@ -125,6 +126,7 @@ def load_config(settings: Any) -> Ayarlar:
         bildirim_hazir=_bool(settings.get("calls.bildirim_hazir", "1"), True),
         isleme_gorusme_disinda=_bool(settings.get("calls.isleme_gorusme_disinda", "1"), True),
         copilot_proxy=str(settings.get("calls.copilot_proxy", "") or "").strip(),
+        copilot_yolu=str(settings.get("calls.copilot_yolu", "") or "").strip(),
         jira_base_url=str(settings.get("jira.base_url", "") or "").strip(),
     )
 

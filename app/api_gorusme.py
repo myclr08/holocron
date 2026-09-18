@@ -391,22 +391,33 @@ def test_whisper_model(request: Request, payload: dict[str, Any] = Body(default_
 
 
 @router.post("/ayar/copilot-sina")
-def test_copilot(request: Request) -> dict[str, Any]:
-    """Copilot CLI kisa bir istekle sinanir (secili model ve vekil ile)."""
+def test_copilot(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
+    """Copilot CLI kisa bir istekle sinanir (secili model, yol ve vekil ile).
+
+    "Copilot yolu" alani KAYDEDILMEDEN denenebilsin diye ekrandan gelen deger
+    ayarin onune gecer. Calisan cozumleme "son bulunan" olarak saklanir:
+    kullanici bir dahaki sefere ne bulundugunu ayarda gorur.
+    """
     context = get_context(request)
     ayarlar = _ayarlar(context)
+    if "yol" in payload:
+        ayarlar = replace(ayarlar, copilot_yolu=str(payload.get("yol") or "").strip())
     fabrika = context.gorusme_ozetleyici_factory
     ozetleyici = (
         fabrika(ayarlar)
         if fabrika is not None
         else gorusme_ozet.default_ozetleyici(
-            proxy=ayarlar.copilot_proxy, jira_base_url=ayarlar.jira_base_url
+            proxy=ayarlar.copilot_proxy,
+            jira_base_url=ayarlar.jira_base_url,
+            yol=ayarlar.copilot_yolu,
         )
     )
     sonuc = gorusme_ozet.sina(ozetleyici, ayarlar.model_sirasi(), ayarlar.kok())
     if sonuc["calisiyor"]:
         # Calisan model bir sonraki gorusmede basa alinir.
         context.settings.set("calls.ozet_model_son", str(sonuc["model"]))
+        if sonuc.get("yol"):
+            context.settings.set("calls.copilot_yolu_son", str(sonuc["yol"]))
     # Vekil adresi ekrana geri yazilmaz: yalnizca "ayarli mi" bilgisi doner.
     sonuc["proxy_ayarli"] = bool(ayarlar.copilot_proxy)
     return sonuc

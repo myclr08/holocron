@@ -288,7 +288,9 @@ def _varsayilan_dokucu(ayarlar: Ayarlar) -> Any:
 
 def _varsayilan_ozetleyici(ayarlar: Ayarlar) -> Any:
     return ozet_modulu.default_ozetleyici(
-        proxy=ayarlar.copilot_proxy, jira_base_url=ayarlar.jira_base_url
+        proxy=ayarlar.copilot_proxy,
+        jira_base_url=ayarlar.jira_base_url,
+        yol=ayarlar.copilot_yolu,
     )
 
 

@@ -76,6 +76,12 @@ async function loadGorusmeSettings(settings) {
   gorusmeField("gorusme-whisper-model").value = settings["calls.whisper_model"] || "";
   gorusmeField("gorusme-whisper-klasor").value = settings["calls.whisper_klasor"] || "";
   gorusmeField("gorusme-copilot-proxy").value = settings["calls.copilot_proxy"] || "";
+  gorusmeField("gorusme-copilot-yol").value = settings["calls.copilot_yolu"] || "";
+  // Otomatik bulunan yol ipucu olarak durur: kullanıcı ne çalıştığını görür.
+  const sonYol = settings["calls.copilot_yolu_son"] || "";
+  gorusmeField("gorusme-copilot-sonuc").textContent = sonYol
+    ? "Son bulunan: " + sonYol
+    : "";
   gorusmeField("gorusme-klasor").value = settings["calls.calisma_klasoru"] || "";
   gorusmeField("gorusme-sablon").value = settings["calls.ozet_sablon"] || "";
   gorusmeField("gorusme-takip-acilista").checked = settings["calls.takip_acilista"] === "1";
@@ -118,6 +124,7 @@ async function saveGorusmeSettings() {
     "calls.whisper_klasor": gorusmeField("gorusme-whisper-klasor").value.trim(),
     "calls.ozet_modelleri": JSON.stringify(modeller),
     "calls.copilot_proxy": gorusmeField("gorusme-copilot-proxy").value.trim(),
+    "calls.copilot_yolu": gorusmeField("gorusme-copilot-yol").value.trim(),
     "calls.ozet_sablon": gorusmeField("gorusme-sablon").value,
     "calls.calisma_klasoru": gorusmeField("gorusme-klasor").value.trim(),
     "calls.takip_acilista": gorusmeField("gorusme-takip-acilista").checked ? "1" : "0",
@@ -208,16 +215,26 @@ async function testWhisperModel() {
   }
 }
 
-/** Copilot sınaması: seçili model ve vekil ile kısa bir istek. */
+/** Copilot sınaması: seçili model, yol ve vekil ile kısa bir istek.
+ *
+ * "Copilot yolu" alanı kaydedilmemiş olabilir: uca alandaki değer yollanır,
+ * başarıda bulunan tam yol ekrana yazılır. */
 async function testGorusmeCopilot() {
+  const kutu = gorusmeField("gorusme-copilot-sonuc");
   setStatus(gorusmeStatusBox(), "Copilot CLI sınanıyor...", "");
+  kutu.textContent = "Sınanıyor...";
   try {
-    const sonuc = await api("/api/gorusme/ayar/copilot-sina", { method: "POST" });
+    const sonuc = await api("/api/gorusme/ayar/copilot-sina", {
+      method: "POST",
+      body: JSON.stringify({ yol: gorusmeField("gorusme-copilot-yol").value.trim() }),
+    });
     setStatus(gorusmeStatusBox(), sonuc.mesaj, sonuc.calisiyor ? "ok" : "error");
+    kutu.textContent = sonuc.mesaj || "";
     if (sonuc.calisiyor) {
       gorusmeField("gorusme-son-model").textContent = "Son çalışan model: " + sonuc.model;
     }
   } catch (err) {
+    kutu.textContent = err.message;
     setStatus(gorusmeStatusBox(), err.message, "error");
   }
 }
