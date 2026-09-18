@@ -17,6 +17,7 @@ Gercek ses karti, faster-whisper ve Copilot CLI hicbir testte calismaz:
 
 from __future__ import annotations
 
+import json
 import os
 import wave
 from datetime import datetime, timedelta, timezone
@@ -24,13 +25,17 @@ from pathlib import Path
 
 import pytest
 
-from app import db
+from app import db, repository as repo
 from app.gorusme import algilayici as algilayici_modulu
 from app.gorusme import birlestir, depo, intake as gorusme_intake, ozet, sahte, yaziyadok
 from app.gorusme.algilayici import DefterSatiri, KayitDefteriAlgilayici, mikrofon_acik, teams_mi
+from app.gorusme.kuyruk import Kuyruk
 from app.gorusme.source import (
     DURUM_ATLANDI,
+    DURUM_HATA,
+    DURUM_HAZIR,
     DURUM_KUYRUKTA,
+    DURUM_YAZIYA_DOKULUYOR,
     KANAL_HOP,
     KANAL_MIK,
     GorusmeHatasi,
@@ -38,6 +43,7 @@ from app.gorusme.source import (
     calisma_koku,
 )
 from app.gorusme.takipci import Takipci
+from app.teamscalls.fake import ME, PERSON_ONE, call
 
 NOW = datetime(2026, 9, 18, 14, 10, tzinfo=timezone.utc)
 
@@ -63,6 +69,16 @@ def kur_takipci(context, fake_gorusme, saat: Saat, kuyruk=None) -> Takipci:
         kuyruk=kuyruk,
         bildirimci=fake_gorusme["bildirimci"],
         saat=saat,
+    )
+
+
+def kur_kuyruk(context, fake_gorusme, gorusme_suruyor=None) -> Kuyruk:
+    return Kuyruk(
+        context,
+        dokucu_factory=lambda ayarlar: fake_gorusme["dokucu"],
+        ozetleyici_factory=lambda ayarlar: fake_gorusme["ozetleyici"],
+        bildirimci=fake_gorusme["bildirimci"],
+        gorusme_suruyor=gorusme_suruyor,
     )
 
 
@@ -260,6 +276,159 @@ def test_channels_are_labelled_you_and_the_other_side():
 # --- Asama B: kuyruk ve hat ----------------------------------------------
 
 
+def hazirla_not(context, fake_gorusme, saat: Saat, dakika: int = 27) -> int:
+    """Kuyruga girmis bir not uretir (kayit basla -> bitir)."""
+    takipci = kur_takipci(context, fake_gorusme, saat)
+    takibi_ac(context)
+    fake_gorusme["algilayici"].basla()
+    not_id = takipci.yokla()["id"]
+    saat.ilerle(dakika * 60)
+    fake_gorusme["algilayici"].bitir()
+    takipci.yokla()
+    return not_id
+
+
+def test_the_pipeline_produces_a_ready_note_and_cleans_the_audio(context, fake_gorusme):
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+    klasor = Path(depo.require_not(context.conn, not_id)["klasor"])
+
+    kuyruk = kur_kuyruk(context, fake_gorusme)
+    assert kuyruk.sirayi_isle() == 1
+
+    kayit = depo.require_not(context.conn, not_id)
+    assert kayit["durum"] == DURUM_HAZIR
+    assert kayit["baslik"] == sahte.ORNEK_OZET["baslik"]
+    assert kayit["model"] == "gpt-5"
+    # Ses ve ara dosyalar silindi.
+    assert not klasor.exists()
+
+    gruplar = gorusme_intake.bolum_gruplari(depo.bolumler(context.conn, not_id))
+    assert [satir["metin"] for satir in gruplar["ozet"]] == sahte.ORNEK_OZET["ozet"]
+    assert gruplar["aksiyon"][0]["kisi"] == "Ben"
+    assert gruplar["aksiyon"][0]["son_tarih"] == "2026-09-25"
+    assert [satir["metin"] for satir in gruplar["soru"]] == sahte.ORNEK_OZET["sorular"]
+    # Hazir bildirimi notun basligini tasir.
+    assert fake_gorusme["bildirimci"].mesajlar[-1] == (
+        "Görüşme notu hazır",
+        sahte.ORNEK_OZET["baslik"],
+    )
+
+
+def test_the_queue_runs_one_job_at_a_time_in_order(context, fake_gorusme):
+    saat = Saat()
+    birinci = hazirla_not(context, fake_gorusme, saat)
+    saat.ilerle(60)
+    ikinci = hazirla_not(context, fake_gorusme, saat)
+
+    kuyruk = kur_kuyruk(context, fake_gorusme)
+    assert kuyruk.sirayi_isle(sinir=1) == 1
+    assert depo.require_not(context.conn, birinci)["durum"] == DURUM_HAZIR
+    assert depo.require_not(context.conn, ikinci)["durum"] == DURUM_KUYRUKTA
+
+    assert kuyruk.sirayi_isle() == 1
+    assert depo.require_not(context.conn, ikinci)["durum"] == DURUM_HAZIR
+
+
+def test_processing_waits_while_a_call_is_running(context, fake_gorusme):
+    saat = Saat()
+    hazirla_not(context, fake_gorusme, saat)
+    context.settings.set("calls.isleme_gorusme_disinda", "1")
+
+    kuyruk = kur_kuyruk(context, fake_gorusme, gorusme_suruyor=lambda: True)
+    assert kuyruk.sirayi_isle() == 0
+
+    # Gorusme bitti: is hemen alinir.
+    bosta = kur_kuyruk(context, fake_gorusme, gorusme_suruyor=lambda: False)
+    assert bosta.sirayi_isle() == 1
+
+
+def test_half_finished_work_returns_to_the_queue_on_startup(context, fake_gorusme):
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+    depo.durum_yaz(context.conn, not_id, DURUM_YAZIYA_DOKULUYOR)
+
+    assert depo.yarim_isleri_kuyruga_al(context.conn) == 1
+    assert depo.require_not(context.conn, not_id)["durum"] == DURUM_KUYRUKTA
+
+
+def test_a_rejected_model_falls_through_to_the_next_one(context, fake_gorusme):
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+    fake_gorusme["ozetleyici"] = sahte.SahteOzetleyici(reddedilen=["gpt-5"])
+
+    kuyruk = kur_kuyruk(context, fake_gorusme)
+    kuyruk.sirayi_isle()
+
+    kayit = depo.require_not(context.conn, not_id)
+    assert kayit["durum"] == DURUM_HAZIR
+    assert kayit["model"] == "claude-sonnet-4.5"
+    # Son calisan ayara yazildi: sonraki gorusme oradan baslar.
+    assert context.settings.get("calls.ozet_model_son") == "claude-sonnet-4.5"
+    assert gorusme_intake.load_config(context.settings).model_sirasi()[0] == "claude-sonnet-4.5"
+
+
+def test_a_failed_stage_keeps_the_audio_and_can_be_retried(context, fake_gorusme):
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+    klasor = Path(depo.require_not(context.conn, not_id)["klasor"])
+
+    class Yok:
+        def cevir(self, yol, dil="tr"):
+            raise yaziyadok.eksik_paket()
+
+    kuyruk = Kuyruk(
+        context,
+        dokucu_factory=lambda ayarlar: Yok(),
+        ozetleyici_factory=lambda ayarlar: fake_gorusme["ozetleyici"],
+        bildirimci=fake_gorusme["bildirimci"],
+    )
+    kuyruk.sirayi_isle()
+
+    kayit = depo.require_not(context.conn, not_id)
+    assert kayit["durum"] == DURUM_HATA
+    assert "faster-whisper" in kayit["hata"]
+    # Ses SILINMEZ: yeniden denenebilsin.
+    assert klasor.exists()
+
+    calisan = kur_kuyruk(context, fake_gorusme)
+    calisan.yeniden_dene(not_id)
+    assert depo.require_not(context.conn, not_id)["durum"] == DURUM_KUYRUKTA
+    calisan.sirayi_isle()
+    assert depo.require_not(context.conn, not_id)["durum"] == DURUM_HAZIR
+
+
+def test_the_transcript_is_only_stored_when_asked(context, fake_gorusme):
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+    kur_kuyruk(context, fake_gorusme).sirayi_isle()
+    assert depo.transkript(context.conn, not_id) == ""
+
+    context.settings.set("calls.transkripti_sakla", "1")
+    saat.ilerle(3600)
+    ikinci = hazirla_not(context, fake_gorusme, saat)
+    kur_kuyruk(context, fake_gorusme).sirayi_isle()
+    metin = depo.transkript(context.conn, ikinci)
+    assert "Sen:" in metin and "Karşı taraf:" in metin
+
+
+def test_resummarising_needs_a_stored_transcript(context, fake_gorusme):
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+    kuyruk = kur_kuyruk(context, fake_gorusme)
+    kuyruk.sirayi_isle()
+
+    with pytest.raises(GorusmeHatasi):
+        kuyruk.yeniden_ozetle(not_id)
+
+    depo.transkript_yaz(context.conn, not_id, "[00:00:01] Sen: Deneme")
+    fake_gorusme["ozetleyici"] = sahte.SahteOzetleyici(
+        cikti={**sahte.ORNEK_OZET, "baslik": "İkinci deneme"}
+    )
+    kur_kuyruk(context, fake_gorusme).yeniden_ozetle(not_id)
+    assert depo.require_not(context.conn, not_id)["baslik"] == "İkinci deneme"
+
+
 # --- ozet ciktisi ---------------------------------------------------------
 
 
@@ -373,6 +542,34 @@ def test_error_text_masks_anything_that_looks_like_a_secret():
 # --- katilimci eslemesi ---------------------------------------------------
 
 
+def test_a_note_is_matched_to_the_call_that_overlaps_it(context, fake_gorusme):
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+
+    repo.import_calls(
+        context.conn,
+        [
+            {
+                "call_id": "arama-1",
+                # Bir dakika kayma: uc dakikalik payin icinde.
+                "started_at": (NOW + timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
+                "duration_ms": 27 * 60 * 1000,
+                "kind": "one_to_one",
+                "counterpart_id": PERSON_ONE,
+                "counterpart_name": "Örnek Kişi",
+                "participants_json": json.dumps([ME, PERSON_ONE]),
+            }
+        ],
+    )
+    aramalar = repo.list_calls(context.conn)
+    arama = gorusme_intake.esle_ve_yaz(context.conn, not_id, aramalar, me=ME)
+
+    assert arama is not None
+    assert depo.require_not(context.conn, not_id)["call_id"] == "arama-1"
+    kisiler = depo.katilimcilar(context.conn, not_id)
+    assert [kisi["ad"] for kisi in kisiler] == ["Örnek Kişi"]
+
+
 def test_a_call_far_away_in_time_or_length_never_matches():
     aramalar = [
         {
@@ -390,6 +587,15 @@ def test_a_call_far_away_in_time_or_length_never_matches():
     assert gorusme_intake.eslesen_arama(aramalar, hedef, 27 * 60) is None
 
 
+def test_a_note_without_participants_says_it_is_waiting(context, fake_gorusme):
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+    kartlar = gorusme_intake.liste(context.conn)
+    kart = next(satir for satir in kartlar if satir["id"] == not_id)
+    assert kart["katilimcilar"] == []
+    assert kart["katilimci_notu"] == "katılımcı bekleniyor"
+
+
 # --- depo, arama ve gorevler ----------------------------------------------
 
 
@@ -404,7 +610,189 @@ def test_the_migration_creates_the_meeting_note_tables(conn):
     assert db.SCHEMA_VERSION == 15
 
 
+def test_notes_can_be_searched_by_their_summary(context, fake_gorusme):
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+    kur_kuyruk(context, fake_gorusme).sirayi_isle()
+
+    bulunan = gorusme_intake.liste(context.conn, q="raporlama")
+    assert [kart["id"] for kart in bulunan] == [not_id]
+    assert gorusme_intake.liste(context.conn, q="kesinlikle-yok") == []
+
+
+def test_an_action_becomes_a_task_bound_to_the_note(context, fake_gorusme):
+    from app.gorusme.kuyruk import gorev_uret
+
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+    kur_kuyruk(context, fake_gorusme).sirayi_isle()
+    depo.jira_bagla(context.conn, not_id, "PRJ-1432")
+
+    aksiyon = gorusme_intake.bolum_gruplari(depo.bolumler(context.conn, not_id))["aksiyon"][0]
+    gorev = gorev_uret(context, not_id, aksiyon["id"])
+
+    assert gorev["title"] == "Geri dönüş planını yaz"
+    assert gorev["due_date"] == "2026-09-25"
+    assert gorev["issue_key"] == "PRJ-1432"
+    assert depo.gorev_kimlikleri(context.conn, not_id) == [gorev["id"]]
+    assert depo.gorev_sayilari(context.conn)[not_id] == 1
+
+
+def test_a_note_is_bound_to_a_single_jira_issue(context, fake_gorusme):
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+    depo.jira_bagla(context.conn, not_id, "PRJ-1")
+    depo.jira_bagla(context.conn, not_id, "PRJ-2")
+    assert depo.jira_key(context.conn, not_id) == "PRJ-2"
+    assert depo.kayit_notlari(context.conn, "PRJ-2") == [not_id]
+
+    depo.jira_bagla(context.conn, not_id, "")
+    assert depo.jira_key(context.conn, not_id) == ""
+
+
+def test_deleting_a_note_takes_its_sections_with_it(context, fake_gorusme):
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+    kur_kuyruk(context, fake_gorusme).sirayi_isle()
+
+    depo.sil(context.conn, not_id)
+    assert depo.get_not(context.conn, not_id) is None
+    assert depo.bolumler(context.conn, not_id) == []
+    assert gorusme_intake.liste(context.conn, q="raporlama") == []
+
+
+def test_the_strip_counts_what_the_pipeline_is_doing(context, fake_gorusme):
+    saat = Saat()
+    hazirla_not(context, fake_gorusme, saat)
+    ayarlar = gorusme_intake.load_config(context.settings)
+    serit = gorusme_intake.serit(context.conn, ayarlar)
+    assert serit["kuyrukta"] == 1
+    assert serit["takip"] is True
+    assert serit["kaydediliyor"] is False
+    assert serit["min_dakika"] == 4.0
+
 
 def test_the_working_folder_never_leaves_the_data_directory(isolated_home):
     assert calisma_koku("") == isolated_home / "gorusme"
     assert calisma_koku(str(isolated_home / "baska")) == isolated_home / "baska"
+
+
+# --- uctan uca API --------------------------------------------------------
+
+
+def akisi_kos(api_client, context, fake_gorusme) -> int:
+    """Gorusme basla -> bitir -> kuyruk -> not hazir (gercek uygulama uzerinde).
+
+    Asgari sure sifira cekilir: testin gercek saati beklemesi gerekmesin.
+    """
+    context.settings.set("calls.takip", "1")
+    context.settings.set("calls.min_dakika", "0")
+    servis = context.gorusme
+    fake_gorusme["algilayici"].basla()
+    not_id = servis.takipci.yokla()["id"]
+    fake_gorusme["algilayici"].bitir()
+    servis.takipci.yokla()
+    servis.kuyruk.sirayi_isle()
+    return not_id
+
+
+def test_the_whole_flow_runs_through_the_api(api_client, context, fake_gorusme):
+    not_id = akisi_kos(api_client, context, fake_gorusme)
+
+    view = api_client.get("/api/gorusme/view").json()
+    kart = next(satir for satir in view["notlar"] if satir["id"] == not_id)
+    assert kart["durum"] == DURUM_HAZIR
+    assert kart["durum_label"] == "hazır"
+    assert kart["baslik"] == sahte.ORNEK_OZET["baslik"]
+    assert view["serit"]["takip"] is True
+    assert view["serit"]["kuyrukta"] == 0
+
+    detay = api_client.get(f"/api/gorusme/{not_id}").json()
+    assert [satir["metin"] for satir in detay["bolumler"]["ozet"]] == sahte.ORNEK_OZET["ozet"]
+    assert detay["bolum_basliklari"]["aksiyon"] == "Aksiyonlar"
+    assert detay["transkript_var"] is False
+
+    # Aksiyondan gorev: Gorevlerim'de gorunur ve nota baglidir.
+    aksiyon = detay["bolumler"]["aksiyon"][0]
+    uretilen = api_client.post(
+        f"/api/gorusme/{not_id}/gorev", json={"bolum_id": aksiyon["id"]}
+    ).json()
+    assert uretilen["gorev"]["title"] == "Geri dönüş planını yaz"
+    pano = api_client.get("/api/tasks").json()
+    kartlar = [kart for sutun in pano["columns"] for kart in sutun["tasks"]]
+    assert any(kart["title"] == "Geri dönüş planını yaz" for kart in kartlar)
+
+    # Jira bagi: kayit detayindaki "Görüşme notları" bolumu bunu okur.
+    baglandi = api_client.put(f"/api/gorusme/{not_id}/jira", json={"jira_key": "PRJ-1432"}).json()
+    assert baglandi["jira_key"] == "PRJ-1432"
+    kayit = api_client.get("/api/gorusme/kayit/PRJ-1432").json()
+    assert kayit["count"] == 1
+
+    silindi = api_client.delete(f"/api/gorusme/{not_id}")
+    assert silindi.json()["ok"] is True
+    assert api_client.get("/api/gorusme/view").json()["notlar"] == []
+
+
+def test_the_tracking_switch_can_be_paused_from_the_api(api_client, context):
+    context.settings.set("calls.takip", "1")
+    serit = api_client.post("/api/gorusme/takip", json={"acik": False}).json()
+    assert serit["takip"] is False
+    assert context.settings.get("calls.takip") == "0"
+
+    serit = api_client.post("/api/gorusme/takip", json={"acik": True}).json()
+    assert serit["takip"] is True
+
+
+def test_a_failed_note_can_be_retried_from_the_api(api_client, context, fake_gorusme):
+    not_id = akisi_kos(api_client, context, fake_gorusme)
+    depo.hataya_dus(context.conn, not_id, "yazıya dökülemedi")
+
+    yanit = api_client.post(f"/api/gorusme/{not_id}/yeniden-dene").json()
+    assert yanit["not"]["durum"] == DURUM_KUYRUKTA
+
+
+def test_resummarising_over_the_api_needs_the_transcript(api_client, context, fake_gorusme):
+    not_id = akisi_kos(api_client, context, fake_gorusme)
+    yanit = api_client.post(f"/api/gorusme/{not_id}/yeniden-ozetle")
+    assert yanit.status_code == 400
+    assert yanit.json()["error"]["code"] == "transkript_yok"
+
+
+def test_the_person_drawer_lists_the_notes_of_that_person(api_client, context, fake_gorusme):
+    not_id = akisi_kos(api_client, context, fake_gorusme)
+    depo.katilimcilari_yaz(context.conn, not_id, [{"kimlik": PERSON_ONE, "ad": "Örnek Kişi"}])
+
+    yanit = api_client.get(f"/api/gorusme/kisi/{PERSON_ONE}").json()
+    assert yanit["count"] == 1
+    assert yanit["notlar"][0]["katilimcilar"] == ["Örnek Kişi"]
+
+
+def test_the_settings_endpoints_answer_without_windows(api_client):
+    aygitlar = api_client.get("/api/gorusme/ayar/aygitlar").json()
+    # Linux'ta ses paketi yok: liste bos, "supported" yanlis, uc yine de calisir.
+    assert aygitlar["supported"] is False
+    assert aygitlar["aygitlar"] == []
+    assert aygitlar["paketler"]["faster_whisper"] in (True, False)
+
+    sablon = api_client.get("/api/gorusme/ayar/sablon").json()
+    assert '"aksiyonlar"' in sablon["varsayilan"]
+    assert sablon["modeller"][0] == "gpt-5"
+
+
+def test_copilot_can_be_tested_from_the_settings_page(api_client, context, fake_gorusme):
+    fake_gorusme["ozetleyici"].reddedilen = {"gpt-5"}
+    yanit = api_client.post("/api/gorusme/ayar/copilot-sina").json()
+    assert yanit["calisiyor"] is True
+    assert yanit["model"] == "claude-sonnet-4.5"
+    assert context.settings.get("calls.ozet_model_son") == "claude-sonnet-4.5"
+    # Vekil adresi asla geri yazilmaz, yalnizca "ayarli mi" bilgisi doner.
+    assert yanit["proxy_ayarli"] is False
+    assert "proxy" not in yanit["mesaj"].lower()
+
+
+def test_a_note_never_leaks_raw_identities_to_the_screen(api_client, context, fake_gorusme):
+    not_id = akisi_kos(api_client, context, fake_gorusme)
+    depo.katilimcilari_yaz(context.conn, not_id, [{"kimlik": PERSON_ONE, "ad": ""}])
+    kart = api_client.get("/api/gorusme/view").json()["notlar"][0]
+    assert PERSON_ONE not in " ".join(kart["katilimcilar"])
+    assert kart["katilimcilar"][0].startswith("Bilinmeyen kişi")

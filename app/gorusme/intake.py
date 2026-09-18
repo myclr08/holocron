@@ -92,11 +92,15 @@ def _bool(deger: Any, varsayilan: bool = False) -> bool:
 
 
 def _sayi(deger: Any, varsayilan: float) -> float:
+    """Sayisal ayar; bozuk deger varsayilana duser.
+
+    Sifir GECERLIDIR: "asgari sure yok" demek isteyen kullanici 0 yazar.
+    """
     try:
         sonuc = float(str(deger).strip())
     except (TypeError, ValueError):
         return varsayilan
-    return sonuc if sonuc > 0 else varsayilan
+    return sonuc if sonuc >= 0 else varsayilan
 
 
 def load_config(settings: Any) -> Ayarlar:

@@ -13,6 +13,7 @@ from typing import Any, Iterable, Sequence
 from .. import repository
 from .source import (
     ARA_DURUMLAR,
+    DURUM_BIRLESTIRILIYOR,
     BOLUM_TURLERI,
     DURUM_HATA,
     DURUM_KAYDEDILIYOR,
@@ -193,6 +194,26 @@ def sonraki_kuyruk(conn: sqlite3.Connection) -> dict[str, Any] | None:
         (DURUM_KUYRUKTA,),
     ).fetchone()
     return _not_dict(row) if row is not None else None
+
+
+def kuyruktan_al(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """Siradaki notu KAPARAK dondurur (tek adimda durum degistirir).
+
+    Yalnizca `sonraki_kuyruk` okumak yetmiyor: arka plan iscisi ile elle
+    tetiklenen bir isleme ayni notu ikisi birden alabilir, ikincisi silinmis
+    klasore yazmaya calisirdi. Kosullu UPDATE bunu tek kazanana indirger.
+    """
+    while True:
+        sira = sonraki_kuyruk(conn)
+        if sira is None:
+            return None
+        with conn:
+            imlec = conn.execute(
+                "UPDATE gorusme_notu SET durum = ? WHERE id = ? AND durum = ?",
+                (DURUM_BIRLESTIRILIYOR, int(sira["id"]), DURUM_KUYRUKTA),
+            )
+        if imlec.rowcount:
+            return get_not(conn, sira["id"])
 
 
 def yarim_isleri_kuyruga_al(conn: sqlite3.Connection) -> int:
