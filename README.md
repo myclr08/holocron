@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.9.0** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.10.0** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -28,6 +28,7 @@ Güncel sürüm: **v0.9.0** (bkz. [Sürüm notları](#sürüm-notları)).
 | **Outlook e-postasından görev** (Windows) | Kimden / Kime / CC listelerine uyan postalar **Yapılacak** sütununa düşer; bir konuşmadan tek görev çıkar. |
 | **Teams'e mesaj** | Kayda iliştirilen kişilere tek tıkla mesaj: Graph API ve IT izni yok, `msteams:` derin bağlantısı. Gönder'e siz basarsınız. |
 | **Teams Aramalar** (Windows) | Teams'in yerel önbelleğinden okunan **kendi** arama geçmişiniz: liste, kişi kırılımı, istatistik şeridi, Excel. |
+| **Görüşme notları** (Windows) | Teams görüşmesi başlayınca mikrofonunuzu ve duyduğunuz sesi kaydeder; görüşme bitince arka planda yazıya döker ve Copilot CLI ile özetler. Not hazır olunca ses silinir; aksiyonlardan tek tıkla görev çıkar, not bir Jira kaydına bağlanır. |
 | **E-posta ile gönder** (Windows) | Grubun kayıtlarını seçili sütunlarla Excel'e çevirip şablonlu bir postaya ekler; Kime/CC şablondan gelir, posta Outlook'ta açılır ya da gönderilir. |
 | **Sefer** | Bitiş tarihi olan XP hedefi: görev kapatmak, kaydın filodan düşmesi ve durum geçişleri puan verir; rütbe, rozetler, haftalık emirler ve "ne için puan aldım" defteri (yanlış satır silinebilir). |
 | **Excel'e aktarma** | Gruplar, görevler, aramalar ve XP defteri için gerçek tarih/sayı hücreli, köprülü `.xlsx` dosyaları. |
@@ -38,6 +39,9 @@ Güncel sürüm: **v0.9.0** (bkz. [Sürüm notları](#sürüm-notları)).
 - Python 3.11 veya üstü (Windows tam paketi kendi Python'ını getirir, lite paket getirmez)
 - Jira Server / Data Center (kişisel erişim anahtarı destekleyen sürümler) veya Jira Cloud
 - Outlook ve Teams özellikleri yalnız **Windows**'ta çalışır; diğer her şey her yerde çalışır
+- Görüşme notları için ayrıca **faster-whisper** (elle kurulur) ve özet üretmek
+  isteniyorsa **Copilot CLI** gerekir; bkz.
+  [Görüşme notları](#görüşme-notları-yalnız-windows)
 
 ## Kurulum
 
@@ -191,7 +195,14 @@ Aynı kartın altındaki **Arama geçmişi** bölümünde önbellek klasörünü
 verebilir, Güncelle sonunda otomatik çekmeyi açabilirsiniz. Ayrıntı:
 [Teams Aramalar](#teams-aramalar-yalnız-windows).
 
-### 6. E-posta şablonları (gönderim)
+### 6. Görüşme notları (yalnız Windows)
+
+**Ayarlar → Görüşme notları** kartında aygıtları sınayın (**Deneme kaydı**),
+asgari süreyi ve özet modelini seçin, kurum vekili varsa **Copilot vekil
+sunucusu** alanını doldurun. Ayrıntı:
+[Görüşme notları](#görüşme-notları-yalnız-windows).
+
+### 7. E-posta şablonları (gönderim)
 
 **Ayarlar → E-posta şablonları** kartında Kime/CC/konu/gövde birlikte saklanır
 ve gönderim kipi seçilir. Ayrıntı: [E-posta ile gönder](#e-posta-ile-gönder-yalnız-windows).
@@ -655,6 +666,122 @@ Windows dışında ekran açılır ama **Aramaları çek** pasiftir ve uçlar
 `app/vendor/` altında taşınır, `pip` gerektirmez ve yalnızca çağrı anında
 yüklenir.
 
+### Görüşme notları (yalnız Windows)
+
+Teams'de bir görüşme başladığında Holocron **mikrofonunuzu** ve **duyduğunuz
+sesi** (hoparlör döngüsü) iki ayrı dosyaya kaydeder. Görüşme bitince kayıt
+kuyruğa girer; arka planda **sırayla** birleştirilir, yazıya dökülür, Copilot
+CLI ile özetlenir ve not kaydedilir. Ses ve transkript (ayar aksini
+söylemedikçe) o anda silinir. Notlara **Aramalar → Görüşme notları**
+sekmesinden ulaşırsınız.
+
+Hiçbir şey dışarı gitmez: ses de transkript de yalnızca sizin makinenizde
+işlenir, özet için yalnızca sizin kendi Copilot CLI oturumunuz kullanılır.
+
+**Nasıl çalışır**
+
+1. **Algıla.** İki saniyede bir Windows'un mikrofon izin defterine bakılır
+   (`ConsentStore\microphone`): Teams'in `LastUsedTimeStop` değeri sıfırsa
+   mikrofon o an kullanımdadır. Paketli yeni Teams ve klasik `ms-teams.exe`
+   ikisi de tanınır. Yedek sinyal Teams'in ses oturumudur (pycaw).
+2. **Kaydet.** WASAPI ile iki kanal, 16 kHz mono WAV, parça parça:
+   `…\Holocron\gorusme\<YYYYAAGG-SSDDSS>\mik-01.wav`, `hop-01.wav`.
+   Görüşme içinde aygıt değişirse kayıt **yeni parça** olarak sürer
+   (`mik-02.wav`); parçalar sonra zaman sırasıyla birleşir.
+3. **Kuyruğa al.** Görüşme biter bitmez satır "kuyrukta" olur. Aynı anda tek
+   iş işlenir; siz yeni bir görüşmeye girerseniz o da kuyruğa eklenir.
+4. **Birleştir.** Parçalar kanal bazında tek dosyaya eklenir (stdlib `wave`,
+   ffmpeg gerekmez).
+5. **Yazıya dök.** faster-whisper, CPU, `int8`. İki kanal ayrı çevrilir ve
+   zaman damgasıyla harmanlanır: mikrofon kanalı **Sen**, diğer kanal **Karşı
+   taraf**. Grup aramasında karşı taraf tek kanaldır, kişi ayrımı yoktur;
+   adlar katılımcı listesinden bilinir.
+6. **Özetle.** Transkript dosya olarak Copilot CLI'ye verilir
+   (`copilot --model <model> -p "<istem>" --allow-tool=read`), cevap JSON
+   döner: başlık, özet, kararlar, aksiyonlar, açık sorular.
+7. **Temizle.** Not kaydedilir, ses silinir, bildirim düşer.
+
+**Takip anahtarı.** Sekmenin üstündeki şeritte durur. Duraklatılmışken hiçbir
+şey kaydedilmez ve şerit solar. Ayarlarda "Takip açılışta açık gelsin" açıksa
+uygulama her açılışta takibi açar. **Asgari görüşme süresi** (varsayılan 4 dk)
+altındaki görüşmeler hiç işlenmez, listede "atlandı" satırı kalır.
+
+**Katılımcılar.** Notun zaman aralığı Teams arama geçmişiyle eşleştirilir
+(başlangıç ±3 dakika ve süre yakınlığı). Önbellek henüz çekilmediyse not
+"katılımcı bekleniyor" der; bir sonraki **Aramaları çek**te kendiliğinden
+dolar.
+
+**Not detayı.** Dört bölüm sabittir: Özet, Kararlar, Aksiyonlar, Açık sorular.
+Her aksiyonun yanındaki **Görev yap** düğmesi Görevlerim'e kart açar (metin,
+kişi, son tarih ve nota bağ ile; not bir Jira kaydına bağlıysa kart da o kayda
+bağlanır). Not tek bir Jira kaydına bağlanır; bağlı kaydın detayında
+**Görüşme notları (n)** bölümü açılır, Kişiler çekmecesinde de o kişiyle
+yapılan görüşmelerin notları görünür. **Yeniden özetle** yalnızca transkript
+saklanıyorsa çalışır. Excel'e aktarımda ayrı bir **Görüşme notları** sayfası
+vardır.
+
+**Hata.** Bir aşama düşerse satır "hata" olur, **ses silinmez** ve **Yeniden
+dene** aynı klasörden devam eder. Uygulama işleme ortasında kapanırsa yarım iş
+bir sonraki açılışta kuyruğa geri alınır.
+
+**Bağımlılıklar**
+
+| Paket | Ne için | Nasıl gelir |
+| --- | --- | --- |
+| `pyaudiowpatch` | WASAPI kaydı ve hoparlör döngüsü | Windows paketiyle birlikte (`requirements.txt`) |
+| `winotify` | Windows bildirimi | Windows paketiyle birlikte; yoksa bildirim sessizce atlanır |
+| `pycaw` | Teams'in ses oturumundan aygıt bulma | İsteğe bağlı; yoksa Windows varsayılan aygıtları kullanılır |
+| `faster-whisper` | Yazıya dökme | **Elle kurulur** (aşağıya bakın) |
+| Copilot CLI | Özet | Zaten kuruluysa kullanılır |
+
+**faster-whisper kurulumu.** Paketin kendisi ve `ctranslate2` büyük olduğu için
+uygulama paketine girmez:
+
+```bat
+rem Holocron klasorunde, tasinabilir pakette python-embed ile:
+python -m pip install faster-whisper
+```
+
+Model dosyası (ör. `small`, ~250 MB) ilk çalıştırmada Hugging Face'ten iner.
+Kurum vekili bunu kesiyorsa modeli başka bir makinede indirip klasörü
+kopyalayın ve yolunu **Ayarlar → Görüşme notları → Model klasörü** alanına
+yazın.
+
+**Copilot CLI ve vekil sunucu.** Kurumda Copilot vekil sunucudan çıkarken Jira
+doğrudan görülebiliyorsa (Holocron'un ağ ayarında "doğrudan bağlan"), vekili
+Holocron'un kendi sürecine yazmak Jira bağlantısını koparır. Bu yüzden vekil
+adresi **Ayarlar → Görüşme notları → Copilot vekil sunucusu** alanında ayrı
+durur: terminalde `set HTTPS_PROXY=...` ile yazdığınız adresi buraya yazın.
+Değer yalnızca Copilot alt sürecinin ortamına konur (`HTTPS_PROXY`,
+`HTTP_PROXY` ve küçük harfli eşleri), Jira sunucusu da o alt sürecin
+muafiyet listesine (`NO_PROXY`) eklenir. Holocron'un kendi istekleri ve Jira
+istemcisinin davranışı hiç değişmez. **Copilot'u sına** düğmesi seçili model
+ve vekille kısa bir istek atar; model reddedilirse yedek sıradaki denenir ve
+çalışan model "son çalışan" olarak saklanır.
+
+**Aygıt kuralı.** Varsayılan **otomatik**tir: Teams'in ses oturumunun açık
+olduğu mikrofon ve çıkış kullanılır, bulunamazsa Windows'un varsayılan
+iletişim aygıtları. Ayarlardan sabitleyebilirsiniz. VDI'da sanal aygıtların
+hangisinin ses taşıdığını görmek için **Deneme kaydı (10 sn)** düğmesi vardır:
+iki kanalı da kaydeder ve "ses var / ses yok" der.
+
+**Saklama.** Varsayılan: not hazır olunca ses de transkript de silinir.
+"Transkripti sakla" açıksa transkript veritabanında kalır ve **Yeniden
+özetle** çalışabilir. "Ses dosyalarını sakla" açıksa klasör silinmez (disk
+dolar, bilerek açın).
+
+**Sorun giderme**
+
+| Belirti | Sebep / çözüm |
+| --- | --- |
+| Şeritte "Görüşme kaydı yalnız Windows'ta çalışır" | Windows dışındasınız; ekran çalışır, kayıt yapılmaz |
+| Kayıt hiç başlamıyor | Takip duraklatılmış olabilir; Teams mikrofon izni kapalıysa defter güncellenmez — Ayarlar'da aygıtı sabitleyip **Deneme kaydı** ile sınayın |
+| Satır "hata: faster-whisper yok" | Paket kurulu değil; kurup **Yeniden dene** deyin (ses silinmemiştir) |
+| Satır "hata: Özet alınamadı" | Copilot CLI oturumu kapalı ya da vekil yanlış; **Copilot'u sına** ile bakın |
+| "katılımcı bekleniyor" kalıyor | Arama geçmişi henüz çekilmemiş: **Aramaları çek** |
+| Hoparlör kanalı sessiz | Döngü aygıtı yanlış seçilmiş: Ayarlar'da "Duyduğum ses" aygıtını sabitleyin |
+| Görüşme sırasında makine yavaşlıyor | "İşleme yalnız görüşme dışında çalışsın" seçeneğini açık tutun |
+
 ### Sağ çekmeceleri genişletme
 
 Bütün sağ çekmecelerin (kayıt detayı, Teams aramaları) sol kenarında ince bir
@@ -1003,6 +1130,15 @@ pip download --only-binary=:all: --python-version 3.13 \
 
 Linux paketinde `pywin32` tekerlekleri `wheels/` klasörüne kopyalanmaz.
 
+`pyaudiowpatch` ve `winotify` (görüşme kaydı ve bildirimi) `requirements.txt`
+içinde `sys_platform == "win32"` işaretiyle durur, yani Windows paketine
+kendiliğinden girer. `faster-whisper` ve `ctranslate2` birkaç yüz megabayt
+tuttuğu için uygulama paketine **girmez**: release iş akışı bunları ayrı bir
+`holocron-windows-whisper.zip` dosyası olarak üretir (o sürüm için cp313
+tekerleği yoksa adım sessizce atlanır). İndirip `python -m pip install
+--no-index --find-links whisper-wheels faster-whisper` ile kurabilir ya da
+doğrudan `pip install faster-whisper` diyebilirsiniz.
+
 ### Sürüm çıkarma
 
 Sürüm numarası iki dosyada durur ve **aynı olmak zorundadır**:
@@ -1064,6 +1200,9 @@ taşımaz.
 | `app/static/js/campaign.js` | Sefer paneli (kahraman şeridi, emirler, rozetler, defter) |
 | `app/static/js/campaign-settings.js` | Ayarlar → Sefer kartı (XP kuralları, koruma durumu) |
 | `app/static/img/gamify/` | Rütbe ve rozet görselleri (yoksa SVG hologram yedeği) |
+| `app/gorusme/` | Görüşme notları: algılama, kayıt, kuyruk, yazıya dökme, özet |
+| `app/static/js/gorusme.js` | Görüşme notları sekmesi, takip şeridi, not çekmecesi |
+| `app/static/js/gorusme-settings.js` | Ayarlar → Görüşme notları kartı |
 | `tests/` | pytest testleri, sahte Jira sunucusu |
 | `tools/build_portable.py` | Taşınabilir Windows/Linux paketlerini üretir |
 | `tools/teams_probe/` | Teams önbellek sondası (paketlere girmez) |
@@ -1076,6 +1215,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.10.0** | 19 Eylül 2026 | **Görüşme notları**: Teams görüşmesi başlayınca mikrofon ve duyulan ses iki ayrı kanal olarak kaydedilir, görüşme bitince kuyrukta sırayla birleştirilir, faster-whisper ile yazıya dökülür ("Sen" / "Karşı taraf"), Copilot CLI ile özetlenir; not hazır olunca ses ve transkript silinir. Aramalar filosuna "Görüşme notları" sekmesi ve takip şeridi (duraklat/sürdür, canlı kayıt rozeti, işleniyor/kuyrukta sayaçları), not çekmecesi (Özet, Kararlar, Aksiyonlar, Açık sorular), aksiyondan tek tıkla görev, tek Jira kaydına bağ, Jira detayında ve Kişiler çekmecesinde "Görüşme notları (n)", Excel'e yeni sayfa. Ayarlar'da aygıt seçimi ve 10 saniyelik deneme kaydı, asgari süre, Whisper modeli/klasörü, özet modeli yedek sırası, özet şablonu, saklama ve bildirim seçenekleri. Copilot CLI'nin vekil sunucusu ayrı bir ayarda durur ve yalnızca alt sürecin ortamına yazılır: Jira "doğrudan bağlan" kipinde kalır |
 | **v0.9.0** | 17 Eylül 2026 | **Teams Aramalar sadeleşti: toplantı kavramı tümden kaldırıldı** (takvim eşleşmesi, toplantı sohbetinden katılım türetme, toplantı satırları/sütunları, "Eşleşmeyenler" ve "Katılım teşhisi" ekranları; göç eski toplantı satırlarını siler). Geriye **birebir** ve **grup** aramaları kaldı. Grup artık **katılımcı kümesidir** (sohbet kimliği değil): aynı kişilerle yapılan bütün aramalar tek satırda toplanır, etiket katılımcı adlarından türer. Yeni **Gruplar** sekmesi (arama sayısı, toplam süre, son arama, katılımcılar; tıklayınca liste süzülür, Excel'de ayrı sayfa). İstatistik şeridi dört kutu oldu: birebir / grupta / toplamda en çok görüşülenler ve birebir-grup dağılımı ("Toplam Teams" ile "iş günü" kutuları kalktı). Önbellekte artık yalnız iki veritabanı açılıyor |
 | **v0.8.3** | 17 Eylül 2026 | Uygulama bir süre sonra kendiliğinden kapanıyordu: tarayıcı arka plandaki sekmenin zamanlayıcılarını dondurunca (Edge uyuyan sekmeler, ekran kilidi) nabız kesiliyor, beş dakikalık zaman aşımı dolup süreç kapanıyordu. Zaman aşımı 12 saat oldu, nabız `setInterval` yerine zincirleme `setTimeout` ile atılıyor ve sekme görünür olunca / pencere odaklanınca anında bir nabız gidiyor. Sunucuya iki kez ulaşılamazsa sayfanın tepesinde kapatılabilir bir şerit çıkar, sunucu dönünce kendiliğinden kalkar. Başlatıcılar çalışan örneği bulup yalnızca tarayıcıyı açar; kapanma sebebi loga ayırt edilebilir yazılır |
 | **v0.8.2** | 16 Eylül 2026 | Yerel alan geçmişi popover'ı "Okunuyor..." yazısında takılı kalıyordu: `campaign.js` ile `app.js` aynı sayfada iki ayrı `renderHistory` tanımlıyordu, sonra yüklenen sefer sürümü diğerini eziyordu. Sefer sürümü `renderCampaignHistory` oldu; aynı sayfadaki betiklerde ad çakışmasını yasaklayan test eklendi |

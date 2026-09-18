@@ -61,6 +61,25 @@ jobs:
           pip download --only-binary=:all: --python-version ${{ env.PYTHON_VERSION }} --platform win_amd64 --implementation cp -r requirements.txt -d wheels
           dir wheels
 
+      # Gorusme notlarinin yaziya dokme katmani: `faster-whisper` ve
+      # `ctranslate2` birkac yuz megabayt tutuyor, uygulama paketine girmez.
+      # Ayri bir zip olarak release'e eklenir; cp313 tekerlegi yoksa is
+      # dusmesin diye adim hatayi yutar (README elle kurulumu anlatiyor).
+      - name: Yaziya dokme tekerlekleri (istege bagli)
+        continue-on-error: true
+        run: |
+          pip download --only-binary=:all: --python-version ${{ env.PYTHON_VERSION }} --platform win_amd64 --implementation cp faster-whisper -d whisper-wheels
+          dir whisper-wheels
+
+      - name: Yaziya dokme paketini sikistir
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          if (Test-Path whisper-wheels) {
+            New-Item -ItemType Directory -Force -Path dist | Out-Null
+            Compress-Archive -Path whisper-wheels\* -DestinationPath dist\holocron-windows-whisper.zip -Force
+          }
+
       - name: Embed dagitimini indir
         shell: pwsh
         run: |
@@ -93,6 +112,8 @@ jobs:
           path: |
             dist/holocron-windows-x64.zip
             dist/holocron-windows-x64-lite.zip
+            dist/holocron-windows-whisper.zip
+          if-no-files-found: warn
 
   publish:
     needs: [linux, windows]
