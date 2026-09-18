@@ -14,6 +14,7 @@ from app import db  # noqa: E402
 from app.context import AppContext  # noqa: E402
 from app.jira_client import create_client  # noqa: E402
 from app.lifecycle import Heartbeat  # noqa: E402
+from app.gorusme import sahte as gorusme_sahte  # noqa: E402
 from app.mail.fake import FakeMailSource  # noqa: E402
 from app.secrets import SecretBox  # noqa: E402
 from app.teamscalls.fake import FakeCallSource  # noqa: E402
@@ -77,7 +78,23 @@ def fake_calls():
 
 
 @pytest.fixture
-def context(conn, store, client_factory, fake_mail, fake_calls):
+def fake_gorusme():
+    """Gorusme hattinin sahteleri: algilayici, kayitci, dokucu, ozetleyici.
+
+    Hicbir test gercek ses kartina, faster-whisper'a ya da Copilot CLI'ye
+    dokunmaz; butun akis bellek ici sahtelerle uctan uca kosar.
+    """
+    return {
+        "algilayici": gorusme_sahte.SahteAlgilayici(),
+        "kayitci": gorusme_sahte.SahteKayitci(),
+        "dokucu": gorusme_sahte.SahteYaziyaDokucu(),
+        "ozetleyici": gorusme_sahte.SahteOzetleyici(),
+        "bildirimci": gorusme_sahte.SahteBildirimci(),
+    }
+
+
+@pytest.fixture
+def context(conn, store, client_factory, fake_mail, fake_calls, fake_gorusme):
     return AppContext(
         conn=conn,
         settings=store,
@@ -85,6 +102,11 @@ def context(conn, store, client_factory, fake_mail, fake_calls):
         client_factory=client_factory,
         mail_factory=lambda body_limit=None: fake_mail,
         calls_factory=lambda cache_path="": fake_calls,
+        gorusme_algilayici_factory=lambda *args, **kwargs: fake_gorusme["algilayici"],
+        gorusme_kayit_factory=lambda *args, **kwargs: fake_gorusme["kayitci"],
+        gorusme_dokucu_factory=lambda ayarlar: fake_gorusme["dokucu"],
+        gorusme_ozetleyici_factory=lambda ayarlar: fake_gorusme["ozetleyici"],
+        gorusme_bildirimci=fake_gorusme["bildirimci"],
     )
 
 

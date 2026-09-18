@@ -672,6 +672,94 @@ def _migration_0014_calls_without_meetings(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0015_gorusme_notlari(conn: sqlite3.Connection) -> None:
+    """Asama 12: gorusme notlari (kayit -> yaziya dokme -> ozet).
+
+    `gorusme_notu` hattin durum makinesidir: satir kayit baslar baslamaz
+    yazilir ve her asama degisiminde guncellenir, boylece uygulama kapanip
+    acilsa bile yarim kalmis is kuyruktan surdurulur.
+
+    `gorusme_transkript` yalnizca "transkripti sakla" acikken doldurulur;
+    ses dosyalari not hazir olunca zaten silinir. Arama icin FTS5 tablosu
+    kurulur; sqlite FTS5'siz derlenmisse tablo hic olusmaz ve arama LIKE'a
+    duser (`fts_var`).
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS gorusme_notu (
+            id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+            call_id                  TEXT,
+            baslangic                TEXT,
+            bitis                    TEXT,
+            sure_sn                  INTEGER NOT NULL DEFAULT 0,
+            tur                      TEXT,
+            baslik                   TEXT,
+            durum                    TEXT NOT NULL DEFAULT 'kaydediliyor',
+            hata                     TEXT,
+            model                    TEXT,
+            isleme_sn_birlestirme    INTEGER NOT NULL DEFAULT 0,
+            isleme_sn_yaziya_dokme   INTEGER NOT NULL DEFAULT 0,
+            isleme_sn_ozet           INTEGER NOT NULL DEFAULT 0,
+            klasor                   TEXT,
+            olusturma                TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_gorusme_notu_baslangic
+            ON gorusme_notu(baslangic);
+        CREATE INDEX IF NOT EXISTS idx_gorusme_notu_durum ON gorusme_notu(durum, id);
+        CREATE INDEX IF NOT EXISTS idx_gorusme_notu_call ON gorusme_notu(call_id);
+
+        CREATE TABLE IF NOT EXISTS gorusme_bolum (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            not_id     INTEGER NOT NULL,
+            tur        TEXT NOT NULL,
+            sira       INTEGER NOT NULL DEFAULT 0,
+            metin      TEXT NOT NULL,
+            kisi       TEXT,
+            son_tarih  TEXT,
+            FOREIGN KEY (not_id) REFERENCES gorusme_notu(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_gorusme_bolum_not
+            ON gorusme_bolum(not_id, tur, sira);
+
+        CREATE TABLE IF NOT EXISTS gorusme_katilimci (
+            not_id  INTEGER NOT NULL,
+            kimlik  TEXT NOT NULL,
+            ad      TEXT,
+            PRIMARY KEY (not_id, kimlik),
+            FOREIGN KEY (not_id) REFERENCES gorusme_notu(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS gorusme_bag (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            not_id    INTEGER NOT NULL,
+            jira_key  TEXT,
+            gorev_id  INTEGER,
+            FOREIGN KEY (not_id) REFERENCES gorusme_notu(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_gorusme_bag_not ON gorusme_bag(not_id);
+        CREATE INDEX IF NOT EXISTS idx_gorusme_bag_key ON gorusme_bag(jira_key);
+        CREATE INDEX IF NOT EXISTS idx_gorusme_bag_gorev ON gorusme_bag(gorev_id);
+
+        CREATE TABLE IF NOT EXISTS gorusme_transkript (
+            not_id  INTEGER PRIMARY KEY,
+            metin   TEXT NOT NULL,
+            FOREIGN KEY (not_id) REFERENCES gorusme_notu(id) ON DELETE CASCADE
+        );
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS gorusme_fts "
+            "USING fts5(metin, not_id UNINDEXED)"
+        )
+    except sqlite3.OperationalError:
+        # FTS5'siz derlenmis sqlite: arama LIKE'a duser, goc yine gecerlidir.
+        pass
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
@@ -688,6 +776,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (12, "gamify campaigns", _migration_0012_gamify),
     (13, "group Jira detail fields", _migration_0013_group_detail_fields),
     (14, "teams calls without meetings", _migration_0014_calls_without_meetings),
+    (15, "meeting notes", _migration_0015_gorusme_notlari),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

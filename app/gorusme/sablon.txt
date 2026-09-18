@@ -1,0 +1,25 @@
+Aşağıdaki dosya bir Teams görüşmesinin transkriptidir: {transkript}
+
+Dosyayı oku. Satırlar `[ss:dd:ss] Konuşan: söz` biçimindedir. "Sen" mikrofon
+kanalıdır (notu tutan kişi), "Karşı taraf" duyulan sestir.
+Katılımcılar: {katilimcilar}
+Görüşme tarihi: {tarih}, süresi: {sure}
+
+Görüşmeyi Türkçe özetle ve YALNIZCA aşağıdaki şemaya uyan tek bir JSON nesnesi
+yaz. JSON dışında hiçbir şey yazma, kod bloğu kullanma.
+
+{
+  "baslik": "görüşmeyi tek cümlede anlatan kısa başlık",
+  "ozet": ["madde", "madde"],
+  "kararlar": ["alınan karar", "alınan karar"],
+  "aksiyonlar": [
+    {"metin": "yapılacak iş", "kisi": "kim yapacak", "son_tarih": "YYYY-AA-GG ya da boş"}
+  ],
+  "sorular": ["cevapsız kalan soru"]
+}
+
+Kurallar:
+- Uydurma. Transkriptte geçmeyen karar, aksiyon ya da tarih yazma.
+- Aksiyonun sahibi belli değilse "kisi" alanını boş bırak.
+- Tarih geçiyorsa YYYY-AA-GG biçimine çevir; geçmiyorsa boş bırak.
+- Boş kalan listeleri boş dizi olarak yaz, alanı atlama.

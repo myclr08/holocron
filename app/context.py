@@ -15,6 +15,8 @@ from typing import Any, Callable
 import requests
 
 from . import db
+from .gorusme import default_algilayici as default_gorusme_algilayici
+from .gorusme import default_kayitci as default_gorusme_kayitci
 from .jira_client import BaseJiraClient, create_client
 from .lifecycle import Heartbeat
 from .mail import default_sender, default_source
@@ -30,6 +32,9 @@ MailFactory = Callable[..., Any]
 CallFactory = Callable[..., Any]
 # Posta gondericisi fabrikasi: uretimde Outlook, testlerde sahte gonderici.
 SenderFactory = Callable[..., Any]
+# Gorusme notlari: algilayici / kayitci / yaziya dokucu / ozetleyici fabrikalari.
+# Uretimde Windows uygulamalari, testlerde `app/gorusme/sahte.py` icindekiler.
+GorusmeFactory = Callable[..., Any]
 
 
 @dataclass
@@ -43,6 +48,15 @@ class AppContext:
     mail_factory: MailFactory = field(default=default_source)
     calls_factory: CallFactory = field(default=default_calls_source)
     sender_factory: SenderFactory = field(default=default_sender)
+    # Gorusme notlari hatti: fabrikalar disaridan verilebilir, boylece
+    # Windows olmayan makinede uctan uca akis sahtelerle sinanabilir.
+    gorusme_algilayici_factory: GorusmeFactory = field(default=default_gorusme_algilayici)
+    gorusme_kayit_factory: GorusmeFactory = field(default=default_gorusme_kayitci)
+    gorusme_dokucu_factory: GorusmeFactory | None = None
+    gorusme_ozetleyici_factory: GorusmeFactory | None = None
+    gorusme_bildirimci: Any = None
+    # Kurulumda baglanan servis (takipci + kuyruk); `gorusme.servis.kur` yazar.
+    gorusme: Any = None
     # Yazma islemleri bu kilitle sirayla girer (okumalar paralel kalabilir).
     db_lock: threading.RLock = field(default_factory=threading.RLock)
 
