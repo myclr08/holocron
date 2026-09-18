@@ -49,9 +49,33 @@ def yaz(yol: Path, cerceveler: bytes, hiz: int = ORNEK_HIZI) -> Path:
 
 
 def oku(yol: Path) -> tuple[bytes, int]:
-    """Cerceveleri ve ornek hizini dondurur."""
-    with wave.open(str(yol), "rb") as dosya:
-        return dosya.readframes(dosya.getnframes()), dosya.getframerate()
+    """Cerceveleri ve ornek hizini dondurur; okunamayan dosya BOS doner.
+
+    Burada istisna atmiyoruz ve bu bilincli bir karar: sahada 0 baytlik bir
+    WAV (aygit hic veri vermemis, basligi bile yazilmamis) `wave.open`ta
+    `EOFError` atip deneme kaydi ucunu 500'e dusuruyordu. Okunamayan dosya
+    "ses yok" demektir, cokme sebebi degil.
+    """
+    try:
+        with wave.open(str(yol), "rb") as dosya:
+            return dosya.readframes(dosya.getnframes()), dosya.getframerate() or ORNEK_HIZI
+    except Exception:  # noqa: BLE001 - bos, eksik ya da bozuk dosya
+        log.debug("WAV okunamadı: %s", yol, exc_info=True)
+        return b"", ORNEK_HIZI
+
+
+def cerceve_sayisi(yol: Path) -> int:
+    """Dosyadaki cerceve sayisi; okunamayan ya da bos dosyada sifir."""
+    try:
+        with wave.open(str(yol), "rb") as dosya:
+            return int(dosya.getnframes())
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def bos_mu(yol: Path) -> bool:
+    """Parca "bos" mu? (dosya yok, 0 bayt, bozuk ya da 0 cerceve)"""
+    return cerceve_sayisi(yol) <= 0
 
 
 def sure_sn(yol: Path) -> float:
@@ -59,7 +83,7 @@ def sure_sn(yol: Path) -> float:
         with wave.open(str(yol), "rb") as dosya:
             hiz = dosya.getframerate() or ORNEK_HIZI
             return dosya.getnframes() / float(hiz)
-    except (OSError, wave.Error):
+    except Exception:  # noqa: BLE001 - bos, eksik ya da bozuk dosya
         return 0.0
 
 
@@ -75,7 +99,10 @@ def sirala(parcalar: Iterable[Path]) -> list[Path]:
 
 def birlestir(parcalar: Sequence[Path], hedef: Path) -> Path | None:
     """Bir kanalin parcalarini tek WAV'a ekler; parca yoksa `None`."""
-    varolan = [yol for yol in sirala(parcalar) if yol.exists()]
+    # Bos parca (aygittan veri gelmedi) ATLANIR: 0 cerceveli bir dosya
+    # birlestirmeye girerse transkript "konusma bulunamadi" der ve asil
+    # sebep -- kanala hic veri gelmemis olmasi -- kaybolur.
+    varolan = [yol for yol in sirala(parcalar) if yol.exists() and not bos_mu(yol)]
     if not varolan:
         return None
     toplam = bytearray()
@@ -93,8 +120,8 @@ def karistir(sol: Path, sag: Path, hedef: Path) -> Path:
     Yalnizca kullanici sesi saklamak istediginde kullanilir; yaziya dokum
     her zaman kanallari AYRI okur, yoksa kimin konustugu kaybolurdu.
     """
-    bir, hiz = oku(sol) if sol.exists() else (b"", ORNEK_HIZI)
-    iki, _ = oku(sag) if sag.exists() else (b"", hiz)
+    bir, hiz = oku(sol)
+    iki, _ = oku(sag)
     a = array.array("h")
     b = array.array("h")
     a.frombytes(bir[: len(bir) - len(bir) % 2])
@@ -121,10 +148,7 @@ def rms(cerceveler: bytes) -> float:
 
 
 def dosya_rms(yol: Path) -> float:
-    try:
-        cerceve, _ = oku(yol)
-    except (OSError, wave.Error):
-        return 0.0
+    cerceve, _ = oku(yol)
     return rms(cerceve)
 
 

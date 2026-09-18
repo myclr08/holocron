@@ -9,12 +9,16 @@ Ornek adlar bilerek uydurmadir (`Örnek Kişi`), hicbir sirket icerigi yoktur.
 
 from __future__ import annotations
 
+import array
 import json
+import math
+import threading
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
 from . import birlestir
-from .kayit import parca_adi, sonuc_ozeti
+from .kayit import BLOK, parca_adi, sonuc_ozeti
 from .source import (
     KANAL_HOP,
     KANAL_MIK,
@@ -211,3 +215,176 @@ class SahteKurucu:
             "mesaj": "Kurulum yapılamadı: paket sunucusuna ulaşılamadı.",
             "cikti": "",
         }
+
+
+# --- sahte ses karti ------------------------------------------------------
+#
+# `WasapiKayitci` gercek `pyaudiowpatch` yerine bu moduller uzerinden de
+# calisabilir (`WasapiKayitci(modul=...)`). Sahadaki hata -- aygit acildi ama
+# tek cerceve gelmedi -- ancak boyle sinanabiliyor: gercek ses kartinda
+# "susan aygit" uretmenin yolu yok.
+
+# Sahte aygit tablosu: 0 mikrofon, 1 dongu (loopback) aygiti.
+SAHTE_AYGIT_BILGISI: dict[int, dict[str, Any]] = {
+    0: {
+        "index": 0,
+        "name": "Örnek Mikrofon",
+        "hostApi": 2,
+        "defaultSampleRate": 48000.0,
+        "maxInputChannels": 1,
+        "maxOutputChannels": 0,
+        "isLoopbackDevice": False,
+    },
+    1: {
+        "index": 1,
+        "name": "Örnek Hoparlör (döngü)",
+        "hostApi": 2,
+        "defaultSampleRate": 48000.0,
+        "maxInputChannels": 2,
+        "maxOutputChannels": 2,
+        "isLoopbackDevice": True,
+    },
+}
+
+# Yukaridaki tabloya isaret eden aygit secimi (kimlikler aygit index'idir).
+AYGIT_INDEKSLERI = Aygitlar(
+    mikrofon="0",
+    hoparlor="1",
+    mikrofon_ad="Örnek Mikrofon",
+    hoparlor_ad="Örnek Hoparlör (döngü)",
+)
+
+
+class SahteAkis:
+    """Geri cagri kipinde calisan sahte PortAudio akisi."""
+
+    def __init__(self, kart: "SahteSesKarti", kwargs: dict[str, Any]) -> None:
+        self.kart = kart
+        self.kwargs = dict(kwargs)
+        self.kapandi = False
+        self.durduruldu = False
+        self.yazilan = 0
+        self._dur = threading.Event()
+        self._thread: threading.Thread | None = None
+        if kwargs.get("stream_callback") is not None:
+            self._thread = threading.Thread(target=self._besle, daemon=True)
+            self._thread.start()
+
+    # --- giris (kayit) --------------------------------------------------
+
+    def _besle(self) -> None:
+        geri_cagri = self.kwargs["stream_callback"]
+        kanal = int(self.kwargs.get("channels", 1) or 1)
+        blok = self.kart.blok_verisi(kanal)
+        kalan = self.kart.bloklar
+        while not self._dur.is_set() and (self.kart.sonsuz or kalan > 0):
+            geri_cagri(blok, BLOK, None, 0)
+            kalan -= 1
+            time.sleep(0.001)
+
+    # --- cikis (deneme sinyali) ------------------------------------------
+
+    def write(self, veri: bytes) -> None:
+        self.yazilan += 1
+        self.kart.calan_blok += 1
+        time.sleep(0.002)
+
+    # --- kapanis ---------------------------------------------------------
+
+    def stop_stream(self) -> None:
+        self.durduruldu = True
+        if not self.kart.sonsuz:
+            self._dur.set()
+
+    def close(self) -> None:
+        self.kapandi = True
+        if not self.kart.sonsuz:
+            self._dur.set()
+
+    def durdur(self) -> None:
+        """Testin sonunda takilan beslemeyi de keser."""
+        self._dur.set()
+
+
+class SahteSesKarti:
+    """`pyaudiowpatch.PyAudio()` yerine gecen sahte ses karti.
+
+    `bloklar=0`: aygit acilir ama tek cerceve gelmez (sahadaki VDI hatasi).
+    `acilis_hatasi=n`: ilk n giris acilisi duser (yedek bicim sinanir).
+    `sonsuz=True`: durdurma komutu dinlenmez (takilan yazici sinanir).
+    """
+
+    def __init__(
+        self,
+        bloklar: int = 4,
+        sessiz: bool = False,
+        acilis_hatasi: int = 0,
+        sonsuz: bool = False,
+        aygitlar: dict[int, dict[str, Any]] | None = None,
+    ) -> None:
+        self.bloklar = bloklar
+        self.sessiz = sessiz
+        self.acilis_hatasi = acilis_hatasi
+        self.sonsuz = sonsuz
+        self.aygitlar = aygitlar or SAHTE_AYGIT_BILGISI
+        self.acilislar: list[dict[str, Any]] = []
+        self.akislar: list[SahteAkis] = []
+        self.sonlandi = False
+        self.calan_blok = 0
+
+    # --- pyaudio yuzeyi --------------------------------------------------
+
+    def get_format_from_width(self, genislik: int) -> int:
+        return 8  # pyaudio.paInt16
+
+    def get_device_info_by_index(self, index: int) -> dict[str, Any]:
+        if int(index) not in self.aygitlar:
+            raise OSError(f"[Errno -9996] Invalid device index {index}")
+        return dict(self.aygitlar[int(index)])
+
+    def get_default_output_device_info(self) -> dict[str, Any]:
+        return dict(self.aygitlar[1])
+
+    def open(self, **kwargs: Any) -> SahteAkis:
+        self.acilislar.append(dict(kwargs))
+        if kwargs.get("input") and self.acilis_hatasi > 0:
+            self.acilis_hatasi -= 1
+            raise OSError("[Errno -9997] Invalid sample rate")
+        akis = SahteAkis(self, kwargs)
+        self.akislar.append(akis)
+        return akis
+
+    def terminate(self) -> None:
+        self.sonlandi = True
+        self.hepsini_durdur()
+
+    # --- yardimcilar -----------------------------------------------------
+
+    def hepsini_durdur(self) -> None:
+        for akis in self.akislar:
+            akis.durdur()
+
+    def blok_verisi(self, kanal: int) -> bytes:
+        """Bir bloktan olusan ham veri (sessiz ya da duyulur sinus)."""
+        veri = array.array("h")
+        for sira in range(BLOK):
+            deger = 0 if self.sessiz else int(9000 * math.sin(2 * math.pi * 440 * sira / 48000))
+            for _ in range(max(1, kanal)):
+                veri.append(deger)
+        return veri.tobytes()
+
+    @property
+    def giris_acilislari(self) -> list[dict[str, Any]]:
+        return [kwargs for kwargs in self.acilislar if kwargs.get("input")]
+
+
+class SahtePyAudio:
+    """`pyaudiowpatch` modulunun yerine gecer: tek bir sahte kart dondurur."""
+
+    def __init__(self, kart: SahteSesKarti | None = None) -> None:
+        self.kart = kart or SahteSesKarti()
+        self.cagri = 0
+
+    def PyAudio(self) -> SahteSesKarti:  # noqa: N802 - pyaudio'nun adi
+        self.cagri += 1
+        return self.kart

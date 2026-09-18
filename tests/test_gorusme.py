@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 import wave
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -28,6 +30,7 @@ import pytest
 from app import db, repository as repo
 from app.gorusme import algilayici as algilayici_modulu
 from app.gorusme import birlestir, depo, intake as gorusme_intake, ozet, sahte, yaziyadok
+from app.gorusme import kayit as kayit_modulu
 from app.gorusme.algilayici import DefterSatiri, KayitDefteriAlgilayici, mikrofon_acik, teams_mi
 from app.gorusme.kuyruk import Kuyruk
 from app.gorusme.source import (
@@ -39,6 +42,7 @@ from app.gorusme.source import (
     KANAL_HOP,
     KANAL_MIK,
     GorusmeHatasi,
+    Parca,
     Segment,
     calisma_koku,
 )
@@ -243,6 +247,169 @@ def test_the_trial_recording_measures_both_channels(tmp_path):
     sessiz = sahte.SahteKayitci(parca_sn=0.3, sessiz=True)
     bos = sessiz.deneme(0.3, sahte.AYGITLAR, tmp_path / "sessiz")
     assert bos["kanallar"][KANAL_MIK]["ses_var"] is False
+
+
+# --- Asama A2: dayanikli kayit -------------------------------------------
+#
+# Saha hatasi (19 Eylul 2026, Windows VDI): dongu aygiti 10 saniye boyunca
+# tek cerceve vermedi, WAV 0 bayt kaldi, deneme kaydi ucu `EOFError` ile
+# HTTP 500 dondu. Asagidaki testler o zincirin her halkasini tutuyor.
+
+
+def kayitci_kur(kart: sahte.SahteSesKarti) -> kayit_modulu.WasapiKayitci:
+    return kayit_modulu.WasapiKayitci(modul=sahte.SahtePyAudio(kart))
+
+
+def test_empty_missing_and_broken_wav_files_never_raise(tmp_path):
+    bos = tmp_path / "bos.wav"
+    bos.write_bytes(b"")
+    bozuk = tmp_path / "bozuk.wav"
+    bozuk.write_bytes(b"RIFF????BOZUK")
+    yok = tmp_path / "yok.wav"
+    for yol in (bos, bozuk, yok):
+        assert birlestir.oku(yol) == (b"", 16000)
+        assert birlestir.dosya_rms(yol) == 0.0
+        assert birlestir.sure_sn(yol) == 0.0
+        assert birlestir.cerceve_sayisi(yol) == 0
+        assert birlestir.bos_mu(yol) is True
+
+
+def test_the_trial_summary_survives_a_zero_byte_part(tmp_path):
+    yol = tmp_path / "mik-00.wav"
+    yol.write_bytes(b"")
+    ozet_sonuc = kayit_modulu.sonuc_ozeti([Parca(kanal=KANAL_MIK, sira=0, yol=yol)], tmp_path)
+    assert ozet_sonuc["kanallar"][KANAL_MIK]["cerceve"] == 0
+    assert ozet_sonuc["kanallar"][KANAL_MIK]["ses_var"] is False
+    assert ozet_sonuc["kanallar"][KANAL_MIK]["sure_sn"] == 0.0
+    assert ozet_sonuc["oneriler"]
+
+
+def test_the_merge_skips_parts_that_have_no_frames(tmp_path):
+    birlestir.yaz(tmp_path / "mik-01.wav", sahte.sentetik_cerceve(0.25))
+    birlestir.yaz(tmp_path / "mik-02.wav", b"")  # acildi, veri gelmedi
+    (tmp_path / "mik-03.wav").write_bytes(b"")  # basligi bile yazilmamis
+    hedef = birlestir.birlestir(sorted(tmp_path.glob("mik-*.wav")), tmp_path / "mik.wav")
+    assert hedef is not None
+    assert birlestir.sure_sn(hedef) == pytest.approx(0.25, abs=0.02)
+
+    yalnizca_bos = tmp_path / "hop"
+    yalnizca_bos.mkdir()
+    birlestir.yaz(yalnizca_bos / "hop-01.wav", b"")
+    parcalar = list(yalnizca_bos.glob("hop-*.wav"))
+    assert birlestir.birlestir(parcalar, yalnizca_bos / "hop.wav") is None
+
+
+def test_the_recorder_reads_in_callback_mode_and_reports_the_device(tmp_path):
+    kart = sahte.SahteSesKarti(bloklar=6)
+    sonuc = kayitci_kur(kart).deneme(0.2, sahte.AYGIT_INDEKSLERI, tmp_path)
+
+    mik = sonuc["kanallar"][KANAL_MIK]
+    assert mik["acildi"] is True and mik["hata"] == ""
+    assert mik["cerceve"] > 0 and mik["ses_var"] is True
+    assert mik["aygit"]["ad"] == "Örnek Mikrofon"
+    assert mik["aygit"]["hostApi"] == 2
+    assert mik["aygit"]["defaultSampleRate"] == 48000
+    # Bloklayan `read` YOK: her giris akisi geri cagriyla aciliyor.
+    assert all(kwargs.get("stream_callback") for kwargs in kart.giris_acilislari)
+    # Dongu aygiti kendi kanal sayisi ve hiziyla aciliyor.
+    dongu = kart.giris_acilislari[1]
+    assert (dongu["rate"], dongu["channels"]) == (48000, 2)
+    # Deneme sirasinda hoparlore duyulmayan sinyal calinir (dongu beslensin).
+    assert any(kwargs.get("output") for kwargs in kart.acilislar)
+    assert kart.calan_blok > 0
+    assert sonuc["oneriler"] == []
+
+
+def test_a_device_that_sends_nothing_leaves_a_readable_empty_file(tmp_path):
+    kart = sahte.SahteSesKarti(bloklar=0)
+    sonuc = kayitci_kur(kart).deneme(0.15, sahte.AYGIT_INDEKSLERI, tmp_path)
+
+    assert sonuc["hata"] == ""
+    for kanal in (KANAL_MIK, KANAL_HOP):
+        veri = sonuc["kanallar"][kanal]
+        assert veri["acildi"] is True
+        assert veri["cerceve"] == 0
+        assert veri["ses_var"] is False
+        assert "veri gelmedi" in veri["hata"]
+        yol = Path(veri["yol"])
+        # Sahadaki 0 bayt dosya bir daha olmasin: baslik her zaman yazilir.
+        assert yol.exists() and yol.stat().st_size >= 44
+        with wave.open(str(yol), "rb") as dosya:
+            assert dosya.getnframes() == 0
+    assert "ses çalın" in sonuc["kanallar"][KANAL_HOP]["hata"]
+    assert sonuc["oneriler"]
+
+
+def test_a_part_with_no_frames_is_marked_empty(tmp_path):
+    """Gercek kayitta da veri gelmeyen parca "bos" isaretlenir."""
+    sessiz = kayitci_kur(sahte.SahteSesKarti(bloklar=0))
+    sessiz.basla(tmp_path / "sessiz", 1, sahte.AYGIT_INDEKSLERI)
+    parcalar = sessiz.bitir()
+    assert parcalar and all(parca.bos for parca in parcalar)
+
+    dolu = kayitci_kur(sahte.SahteSesKarti(bloklar=4))
+    dolu.basla(tmp_path / "dolu", 1, sahte.AYGIT_INDEKSLERI)
+    time.sleep(0.05)
+    assert all(not parca.bos for parca in dolu.bitir())
+
+
+def test_the_stream_retries_with_the_fallback_format(tmp_path):
+    kart = sahte.SahteSesKarti(bloklar=4, acilis_hatasi=1)
+    sonuc = kayitci_kur(kart).deneme(0.2, sahte.AYGIT_INDEKSLERI, tmp_path)
+
+    ilk, ikinci = kart.giris_acilislari[0], kart.giris_acilislari[1]
+    assert (ilk["rate"], ilk["channels"]) == (48000, 1)
+    assert (ikinci["rate"], ikinci["channels"]) == (44100, 2)
+    assert sonuc["kanallar"][KANAL_MIK]["acildi"] is True
+    assert sonuc["kanallar"][KANAL_MIK]["cerceve"] > 0
+
+
+def test_a_stuck_writer_thread_still_closes_the_file(tmp_path, monkeypatch):
+    """Yazici takilirsa bile dosya kapanir: WAV 0 bayt kalmaz."""
+    kart = sahte.SahteSesKarti(bloklar=2)
+    yol = tmp_path / "mik-01.wav"
+    yazici = kayit_modulu._KanalYazici(kart, 0, yol, False, kanal=KANAL_MIK)
+    engel = threading.Event()
+    # Takilmis yazici: is parcacigi `bitir`in zaman asimi icinde donmuyor.
+    monkeypatch.setattr(yazici, "_yaz_dongusu", lambda: engel.wait(5.0))
+    assert yazici.basla() is True
+    try:
+        yazici.bitir(zaman_asimi=0.05)
+        assert "kapanmadı" in yazici.hata
+        assert yol.stat().st_size >= 44
+        with wave.open(str(yol), "rb") as dosya:
+            assert dosya.getnchannels() == 1
+            assert dosya.getnframes() == 0
+    finally:
+        engel.set()
+
+
+def test_a_channel_that_cannot_be_opened_reports_the_driver_error(tmp_path):
+    kart = sahte.SahteSesKarti(bloklar=4, acilis_hatasi=10)
+    sonuc = kayitci_kur(kart).deneme(0.1, sahte.AYGIT_INDEKSLERI, tmp_path)
+    mik = sonuc["kanallar"][KANAL_MIK]
+    assert mik["acildi"] is False
+    assert "Invalid sample rate" in mik["hata"]
+
+
+def test_a_recording_without_audio_fails_with_a_clear_message(context, fake_gorusme):
+    saat = Saat()
+    not_id = hazirla_not(context, fake_gorusme, saat)
+    klasor = Path(depo.require_not(context.conn, not_id)["klasor"])
+    # Iki kanal da acildi ama veri gelmedi: parcalar 0 cerceve.
+    for ad in ("mik-01.wav", "hop-01.wav"):
+        birlestir.yaz(klasor / ad, b"")
+
+    kuyruk = kur_kuyruk(context, fake_gorusme)
+    assert kuyruk.sirayi_isle() == 1
+
+    kayit = depo.require_not(context.conn, not_id)
+    assert kayit["durum"] == DURUM_HATA
+    assert "Ses alınamadı" in kayit["hata"]
+    assert "mikrofon: veri gelmedi" in kayit["hata"]
+    assert "hoparlör: veri gelmedi" in kayit["hata"]
+    # Ses klasoru DURUR: sorun cozulunce yeniden denenebilsin.
+    assert klasor.exists()
 
 
 # --- Asama B: WAV birlestirme --------------------------------------------
@@ -934,6 +1101,50 @@ def test_the_settings_endpoints_answer_without_windows(api_client):
     assert sablon["modeller"][0] == "gpt-5"
 
 
+def test_the_trial_endpoint_returns_the_diagnosis_instead_of_a_500(api_client, context):
+    """Deneme kaydi asla 500 dondurmez: veri gelmeyen kanal da 200 ve metin."""
+    kart = sahte.SahteSesKarti(bloklar=0)
+    context.gorusme_kayit_factory = lambda *args, **kwargs: kayitci_kur(kart)
+    context.settings.set("calls.mikrofon", "0")
+    context.settings.set("calls.hoparlor", "1")
+
+    cevap = api_client.post("/api/gorusme/ayar/deneme", json={"saniye": 0.1})
+    assert cevap.status_code == 200
+    govde = cevap.json()
+    assert govde["hata"] == ""
+    hop = govde["kanallar"][KANAL_HOP]
+    assert hop["acildi"] is True and hop["cerceve"] == 0
+    assert "veri gelmedi" in hop["hata"]
+    assert hop["aygit"]["ad"] == "Örnek Hoparlör (döngü)"
+    assert govde["oneriler"]
+
+
+def test_an_unexpected_sound_driver_error_is_shown_as_text(api_client, context):
+    def patlayan(*args, **kwargs):
+        raise RuntimeError("pyaudio: [Errno -9999] Unanticipated host error\n  ikinci satır")
+
+    context.gorusme_kayit_factory = patlayan
+    cevap = api_client.post("/api/gorusme/ayar/deneme", json={"saniye": 0.1})
+    assert cevap.status_code == 200
+    govde = cevap.json()
+    assert "Unanticipated host error" in govde["hata"]
+    assert "\n" not in govde["hata"]  # tek satirlik temiz metin
+    assert govde["kod"] == "deneme_dustu"
+    assert govde["kanallar"][KANAL_MIK]["cerceve"] == 0
+
+
+def test_the_trial_endpoint_explains_a_missing_capture_package(api_client, context):
+    def eksik(*args, **kwargs):
+        raise kayit_modulu.eksik_paket()
+
+    context.gorusme_kayit_factory = eksik
+    cevap = api_client.post("/api/gorusme/ayar/deneme", json={"saniye": 0.1})
+    assert cevap.status_code == 200
+    govde = cevap.json()
+    assert govde["kod"] == "ses_yakalama_yok"
+    assert "pyaudiowpatch" in govde["hata"]
+
+
 def test_copilot_can_be_tested_from_the_settings_page(api_client, context, fake_gorusme):
     fake_gorusme["ozetleyici"].reddedilen = {"gpt-5"}
     yanit = api_client.post("/api/gorusme/ayar/copilot-sina").json()
@@ -1119,6 +1330,11 @@ def test_the_settings_script_saves_every_field(api_client):
         '"calls.isleme_gorusme_disinda"',
         "ses var",
         "ses yok",
+        # Kanal basina teshis satiri: aygit adi, acildi mi, kac cerceve geldi.
+        "çerçeve",
+        "açılamadı",
+        "sonuc.oneriler",
+        "sonuc.hata",
         # Uc `{settings: {...}}` doner: sozlugu acmadan okumak butun onay
         # kutularini bos gosteriyordu.
         "data.settings",

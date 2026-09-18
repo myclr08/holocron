@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.10.1** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.10.2** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -791,7 +791,23 @@ ve vekille kısa bir istek atar; model reddedilirse yedek sıradaki denenir ve
 olduğu mikrofon ve çıkış kullanılır, bulunamazsa Windows'un varsayılan
 iletişim aygıtları. Ayarlardan sabitleyebilirsiniz. VDI'da sanal aygıtların
 hangisinin ses taşıdığını görmek için **Deneme kaydı (10 sn)** düğmesi vardır:
-iki kanalı da kaydeder ve "ses var / ses yok" der.
+iki kanalı da kaydeder ve kanal başına tek satır yazar —
+
+```
+Mikrofon: Remote Audio — açıldı, 156672 çerçeve, ses var
+Duyduğum ses: Hoparlör (döngü) — açıldı, 0 çerçeve — hoparlör: veri gelmedi (10 sn). Kayıt sırasında bir ses çalın.
+```
+
+Satırda aygıtın adı, açılıp açılmadığı, kaç çerçeve geldiği ve ses olup
+olmadığı durur; altında ne yapılacağı yazar (aygıtı sabitleyin, bir ses
+çalın). Düğme hiçbir durumda hata sayfası göstermez: sürücü patlasa bile
+ekranda sebebin metni belirir.
+
+**Döngü kanalı neden sessiz kalır?** WASAPI'nin döngü aygıtı, hoparlörden ses
+**çıkmıyorken** tek çerçeve üretmez. Bu yüzden deneme kaydı boyunca Holocron
+hoparlöre duyulmayacak seviyede (-60 dB) bir sinyal çalar; döngü akar ve
+"açıldı, N çerçeve" satırı gerçeği gösterir. Ses çıkışı yoksa bu adım sessizce
+atlanır, deneme yine çalışır.
 
 **Saklama.** Varsayılan: not hazır olunca ses de transkript de silinir.
 "Transkripti sakla" açıksa transkript veritabanında kalır ve **Yeniden
@@ -809,6 +825,8 @@ dolar, bilerek açın).
 | Satır "hata: Özet alınamadı" | Copilot CLI oturumu kapalı ya da vekil yanlış; **Copilot'u sına** ile bakın |
 | "katılımcı bekleniyor" kalıyor | Arama geçmişi henüz çekilmemiş: **Aramaları çek** |
 | Hoparlör kanalı sessiz | Döngü aygıtı yanlış seçilmiş: Ayarlar'da "Duyduğum ses" aygıtını sabitleyin |
+| Deneme kaydında "veri gelmedi" | Aygıt açıldı ama tek çerçeve göndermedi (VDI'nın sanal aygıtı, ses çalınmayan döngü): aygıtı Ayarlar'da sabitleyin, döngü için kayıt sırasında bir ses çalın |
+| Satır "hata: Ses alınamadı (mikrofon: veri gelmedi)" | Görüşme kaydedildi ama kanallardan veri gelmedi; ses klasörü durur, aygıtı sabitleyip **Deneme kaydı** ile sınayın, sonra **Yeniden dene** |
 | Görüşme sırasında makine yavaşlıyor | "İşleme yalnız görüşme dışında çalışsın" seçeneğini açık tutun |
 
 ### Sağ çekmeceleri genişletme
@@ -1248,6 +1266,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.10.2** | 19 Eylül 2026 | Sahadan gelen ikinci hata: VDI'da **Deneme kaydı** HTTP 500 veriyordu — döngü aygıtı 10 saniye boyunca tek çerçeve vermemiş, WAV 0 bayt kalmış, okuma `EOFError` atmıştı. Kayıt artık bloklayan `read` yerine **geri çağrı (callback)** kipinde çalışıyor: susan bir aygıt kayıt iş parçacığını kilitleyemiyor, dosya her durumda geçerli başlıkla kapanıyor. Deneme kaydı hiçbir durumda 500 dönmüyor; kanal başına aygıt adı, açıldı mı, kaç çerçeve geldi, ses var mı ve hata metni gösteriliyor, altında öneri duruyor. Döngü kanalını beslemek için deneme boyunca hoparlöre duyulmayan (-60 dB) bir sinyal çalınıyor. Akış açılamazsa 44100/2 ile yeniden deneniyor; döngü aygıtı kendi kanal sayısı ve hızıyla açılıyor. Gerçek kayıtta veri gelmeyen parça "boş" işaretlenip birleştirmede atlanıyor, not "hata: Ses alınamadı (mikrofon: veri gelmedi)" diye düşüyor ve ses klasörü silinmiyor. Boş, eksik ya da bozuk WAV artık istisna yerine 0 çerçeve dönüyor |
 | **v0.10.1** | 19 Eylül 2026 | Sahadan gelen "faster-whisper kurulu değil" hatası: paket `requirements.txt`e girdi (Windows işaretiyle), yani artık ilk kurulumda gelir. Başlatıcılar (`holocron.bat`, `holocron.sh`) her açılışta `requirements.txt`in SHA256 özetini `.venv` içinde tuttukları özetle karşılaştırıyor; liste değiştiyse eksik paketleri kuruyor (önce `wheels/` ve `whisper-wheels/`, olmazsa ağdan) — eski sürümün üstüne açılan kurulumlarda sonradan eklenen bağımlılık hiç kurulmuyordu. Kurulum düşse bile uygulama açılıyor. Ayarlar → Görüşme notları'na **Yazıya dökme paketini kur** düğmesi eklendi (pip alt süreçte, vekil yalnızca o sürecin ortamında, çıktı maskelenir); Görüşme notları sekmesinde paket yokken kapatılabilir uyarı şeridi duruyor. Paket gelince kuyrukta "hata: faster-whisper yok" diye bekleyen satırlar hem açılışta hem kurulumdan sonra kendiliğinden yeniden deneniyor. `holocron-windows-whisper.zip` artık `whisper-wheels/` klasörü olarak açılıyor |
 | **v0.10.0** | 19 Eylül 2026 | **Görüşme notları**: Teams görüşmesi başlayınca mikrofon ve duyulan ses iki ayrı kanal olarak kaydedilir, görüşme bitince kuyrukta sırayla birleştirilir, faster-whisper ile yazıya dökülür ("Sen" / "Karşı taraf"), Copilot CLI ile özetlenir; not hazır olunca ses ve transkript silinir. Aramalar filosuna "Görüşme notları" sekmesi ve takip şeridi (duraklat/sürdür, canlı kayıt rozeti, işleniyor/kuyrukta sayaçları), not çekmecesi (Özet, Kararlar, Aksiyonlar, Açık sorular), aksiyondan tek tıkla görev, tek Jira kaydına bağ, Jira detayında ve Kişiler çekmecesinde "Görüşme notları (n)", Excel'e yeni sayfa. Ayarlar'da aygıt seçimi ve 10 saniyelik deneme kaydı, asgari süre, Whisper modeli/klasörü, özet modeli yedek sırası, özet şablonu, saklama ve bildirim seçenekleri. Copilot CLI'nin vekil sunucusu ayrı bir ayarda durur ve yalnızca alt sürecin ortamına yazılır: Jira "doğrudan bağlan" kipinde kalır |
 | **v0.9.0** | 17 Eylül 2026 | **Teams Aramalar sadeleşti: toplantı kavramı tümden kaldırıldı** (takvim eşleşmesi, toplantı sohbetinden katılım türetme, toplantı satırları/sütunları, "Eşleşmeyenler" ve "Katılım teşhisi" ekranları; göç eski toplantı satırlarını siler). Geriye **birebir** ve **grup** aramaları kaldı. Grup artık **katılımcı kümesidir** (sohbet kimliği değil): aynı kişilerle yapılan bütün aramalar tek satırda toplanır, etiket katılımcı adlarından türer. Yeni **Gruplar** sekmesi (arama sayısı, toplam süre, son arama, katılımcılar; tıklayınca liste süzülür, Excel'de ayrı sayfa). İstatistik şeridi dört kutu oldu: birebir / grupta / toplamda en çok görüşülenler ve birebir-grup dağılımı ("Toplam Teams" ile "iş günü" kutuları kalktı). Önbellekte artık yalnız iki veritabanı açılıyor |

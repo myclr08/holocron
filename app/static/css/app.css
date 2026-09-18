@@ -2435,6 +2435,6 @@ html.no-motion *::after {
 .jira-box input { flex: 1; min-width: 140px; font-family: var(--mono); }
 
 /* Ayarlar -> Gorusme notlari: deneme kaydi sonucu. */
-.trial-result { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+.trial-result { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .trial-result .ok { color: var(--saber-green); }
 .trial-result .no { color: var(--saber-red); }

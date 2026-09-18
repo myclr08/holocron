@@ -30,6 +30,7 @@ from .source import (
     DURUM_KUYRUKTA,
     DURUM_OZETLENIYOR,
     DURUM_YAZIYA_DOKULUYOR,
+    KANAL_AYGIT_ETIKETLERI,
     KANAL_HOP,
     KANAL_MIK,
     GorusmeHatasi,
@@ -145,10 +146,18 @@ class Kuyruk:
         depo.durum_yaz(conn, not_id, DURUM_BIRLESTIRILIYOR)
         basladi = time.monotonic()
         sonuc: dict[str, Path | None] = {}
+        bos_kanallar: list[str] = []
         for kanal, ad in ((KANAL_MIK, BIRLESIK_MIK), (KANAL_HOP, BIRLESIK_HOP)):
             parcalar = sorted(klasor.glob(f"{kanal}-*.wav")) if klasor.exists() else []
             sonuc[kanal] = birlestir.birlestir(parcalar, klasor / ad)
+            if sonuc[kanal] is None and parcalar:
+                # Parca dosyasi var ama icinde tek cerceve yok: aygit acildi,
+                # veri gelmedi. Kullaniciya bunu aynen soyleriz.
+                bos_kanallar.append(KANAL_AYGIT_ETIKETLERI.get(kanal, kanal))
         if sonuc[KANAL_MIK] is None and sonuc[KANAL_HOP] is None:
+            if bos_kanallar:
+                ayrinti = ", ".join(f"{ad}: veri gelmedi" for ad in bos_kanallar)
+                raise GorusmeHatasi("ses_alinamadi", f"Ses alınamadı ({ayrinti}).")
             raise GorusmeHatasi("ses_yok", "Ses dosyası bulunamadı, not üretilemedi.")
         depo.not_guncelle(
             conn, not_id, isleme_sn_birlestirme=int(time.monotonic() - basladi)

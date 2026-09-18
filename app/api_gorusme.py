@@ -19,6 +19,7 @@ from .gorusme import aygit as gorusme_aygit
 from .gorusme import birlestir
 from .gorusme import depo, intake as gorusme_intake, ozet as gorusme_ozet
 from .gorusme import yaziyadok
+from .gorusme import kayit as gorusme_kayit
 from .gorusme.kayit import parca_adi  # noqa: F401 - ad disariya acik kalsin
 from .gorusme.source import (
     BOLUM_AKSIYON,
@@ -290,20 +291,52 @@ def read_devices(request: Request) -> dict[str, Any]:
     }
 
 
+def temiz_hata(hata: BaseException) -> str:
+    """Istisnadan tek satirlik, kullaniciya gosterilebilir metin."""
+    metin = " ".join(str(hata).split()) or hata.__class__.__name__
+    return metin[:300]
+
+
+def _bos_deneme(klasor: Path, aygitlar: Any) -> dict[str, Any]:
+    """Kayit hic baslayamadiginda donen iskelet: arayuz ayni sekli okur."""
+    ozet = gorusme_kayit.sonuc_ozeti([], klasor)
+    ozet["oneriler"] = []
+    ozet["aygitlar"] = aygitlar.sozluk()
+    return ozet
+
+
 @router.post("/ayar/deneme")
 def trial_record(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
-    """10 saniyelik deneme kaydi: iki kanalin seviyesini olcer."""
+    """10 saniyelik deneme kaydi: iki kanalin seviyesini ve teshisini olcer.
+
+    Bu uc HICBIR durumda 500 dondurmez. Deneme kaydinin isi zaten "ses
+    gelmiyor"u tespit etmek; ses katmani patladiginda 500 gormek kullaniciyi
+    tam da sorunu anlamasi gereken yerde kor birakiyordu. Her yol 200 ve
+    ayni sozluk: kanal basina teshis, varsa `hata` metni.
+    """
     context = get_context(request)
     ayarlar = _ayarlar(context)
-    try:
-        kayitci = context.gorusme_kayit_factory()
-    except GorusmeHatasi as hata:
-        return error_response(hata.code, str(hata), status=hata.status)
     aygitlar = gorusme_aygit.secili_aygitlar(ayarlar.mikrofon, ayarlar.hoparlor)
     klasor = ayarlar.kok() / "deneme"
-    saniye = float(payload.get("saniye") or DENEME_SN)
-    sonuc = kayitci.deneme(saniye, aygitlar, klasor)
+    try:
+        kayitci = context.gorusme_kayit_factory()
+        saniye = float(payload.get("saniye") or DENEME_SN)
+        sonuc = dict(kayitci.deneme(saniye, aygitlar, klasor))
+    except GorusmeHatasi as hata:
+        log.warning("Deneme kaydı yapılamadı: %s", hata)
+        cevap = _bos_deneme(klasor, aygitlar)
+        cevap["hata"] = str(hata)
+        cevap["kod"] = hata.code
+        return cevap
+    except Exception as hata:  # noqa: BLE001 - ses surucusu her seyi atabilir
+        log.warning("Deneme kaydı beklenmedik hata verdi", exc_info=True)
+        cevap = _bos_deneme(klasor, aygitlar)
+        cevap["hata"] = f"Deneme kaydı yapılamadı: {temiz_hata(hata)}"
+        cevap["kod"] = "deneme_dustu"
+        return cevap
     sonuc["aygitlar"] = aygitlar.sozluk()
+    sonuc.setdefault("hata", "")
+    sonuc.setdefault("oneriler", [])
     return sonuc
 
 

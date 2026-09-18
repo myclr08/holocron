@@ -135,32 +135,51 @@ async function saveGorusmeSettings() {
   }
 }
 
-/** Deneme kaydı: iki kanalı kaydeder, "ses var / yok" der. */
+/** Deneme kaydının tek satırı: "Mikrofon: <aygıt> — açıldı, 312 çerçeve, ses var". */
+function trialLineText(ad, kanal) {
+  const bilgi = kanal.aygit || {};
+  const aygit = bilgi.ad || "aygıt seçilmedi";
+  const parcalar = [kanal.acildi ? "açıldı" : "açılamadı", (kanal.cerceve || 0) + " çerçeve"];
+  if (kanal.acildi && kanal.cerceve) parcalar.push(kanal.ses_var ? "ses var" : "ses yok");
+  let metin = ad + ": " + aygit + " — " + parcalar.join(", ");
+  if (kanal.hata) metin += " — " + kanal.hata;
+  return metin;
+}
+
+/** Deneme kaydı: iki kanalı kaydeder, kanal başına ne olduğunu yazar.
+ *
+ * Uç artık hata durumunda da 200 döner (`sonuc.hata`): kullanıcı 500 yerine
+ * neyin olmadığını okur. */
 async function runGorusmeTrial() {
   const kutu = gorusmeField("gorusme-deneme-sonuc");
-  kutu.textContent = "Kaydediliyor...";
+  kutu.textContent = "Kaydediliyor... 10 saniye.";
+  const yaz = (metin, sinif) => {
+    const satir = document.createElement("span");
+    satir.className = sinif;
+    satir.textContent = metin;
+    kutu.appendChild(satir);
+  };
   try {
     const sonuc = await api("/api/gorusme/ayar/deneme", {
       method: "POST",
       body: JSON.stringify({ saniye: 10 }),
     });
     while (kutu.firstChild) kutu.removeChild(kutu.firstChild);
+    if (sonuc.hata) yaz(sonuc.hata, "no");
+    const kanallar = sonuc.kanallar || {};
     [
-      ["mikrofon", sonuc.kanallar.mik],
-      ["hoparlör", sonuc.kanallar.hop],
+      ["Mikrofon", kanallar.mik],
+      ["Duyduğum ses", kanallar.hop],
     ].forEach(([ad, kanal]) => {
-      const satir = document.createElement("span");
-      satir.className = kanal.ses_var ? "ok" : "no";
-      satir.textContent = `${ad}: ${kanal.ses_var ? "ses var" : "ses yok"}`;
-      satir.title = kanal.yol || "";
-      kutu.appendChild(satir);
+      if (!kanal) return;
+      const iyi = kanal.acildi && kanal.cerceve > 0 && kanal.ses_var && !kanal.hata;
+      yaz(trialLineText(ad, kanal), iyi ? "ok" : "no");
     });
-    const yol = document.createElement("span");
-    yol.className = "hint";
-    yol.textContent = sonuc.klasor || "";
-    kutu.appendChild(yol);
+    (sonuc.oneriler || []).forEach((oneri) => yaz(oneri, "hint"));
+    if (sonuc.klasor) yaz(sonuc.klasor, "hint");
   } catch (err) {
-    kutu.textContent = err.message;
+    while (kutu.firstChild) kutu.removeChild(kutu.firstChild);
+    yaz(err.message, "no");
   }
 }
 

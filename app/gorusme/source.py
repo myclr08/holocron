@@ -101,6 +101,9 @@ BOLUM_ETIKETLERI: dict[str, str] = {
 KANAL_MIK = "mik"
 KANAL_HOP = "hop"
 KANAL_ETIKETLERI: dict[str, str] = {KANAL_MIK: "Sen", KANAL_HOP: "Karşı taraf"}
+# Ayni kanallarin AYGIT adlari: teshis ve hata metinleri bunu kullanir
+# ("Sen" / "Karsi taraf" transkript etiketidir, mikrofonun adi degil).
+KANAL_AYGIT_ETIKETLERI: dict[str, str] = {KANAL_MIK: "mikrofon", KANAL_HOP: "hoparlör"}
 
 # Kayit bicimi: faster-whisper 16 kHz mono bekler, dosya da kucuk kalir.
 ORNEK_HIZI = 16000
@@ -169,11 +172,16 @@ class AlgilamaDurumu:
 
 @dataclass(frozen=True)
 class Parca:
-    """Bir kanalin tek bir kayit parcasi (aygit degisince yenisi acilir)."""
+    """Bir kanalin tek bir kayit parcasi (aygit degisince yenisi acilir).
+
+    `bos`: aygit acildi ama tek cerceve gelmedi (VDI'nin sanal aygiti ya da
+    ses calinmayan dongu). Birlestirme boyle bir parcayi atlar.
+    """
 
     kanal: str
     sira: int
     yol: Path
+    bos: bool = False
 
 
 @dataclass(frozen=True)
