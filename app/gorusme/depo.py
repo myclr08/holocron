@@ -240,7 +240,10 @@ def hataya_dus(conn: sqlite3.Connection, not_id: int, mesaj: str) -> None:
 
 
 # Yaziya dokme paketi yokken dusen satirlarin hata metnindeki iz.
-EKSIK_PAKET_IZI = "faster-whisper"
+# Yalnizca "kurulu degil" cumlesi aranir: model yolu hatasinin metninde de
+# "faster-whisper-small" gecebiliyor, o satir her acilista bosuna kuyruga
+# donmesin (paket kurulu, eksik olan model dosyasi).
+EKSIK_PAKET_IZI = "faster-whisper kurulu değil"
 
 
 def eksik_paket_hatalarini_kuyruga_al(conn: sqlite3.Connection) -> int:

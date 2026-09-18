@@ -10,6 +10,13 @@ Model dosyasi ayardan verilen klasorden okunur; kurum vekili Hugging Face'i
 kesiyorsa kullanici model klasorunu elle kopyalayabilsin diye. Klasor bossa
 kitaplik modeli kendi indirir.
 
+Klasor VERILDIYSE aga HIC cikilmaz (`model_cozumle`): kurumsal vekilde
+Hugging Face denemesi dakikalarca zaman asimi bekletiyor, kullanici da
+"isleniyor"da takili kaliyordu. Klasorde model yoksa once anlasilir bir hata
+verilir. faster-whisper `model_size_or_path` olarak yerel klasoru DOGRUDAN
+kabul eder (icinde `model.bin` + `config.json`); `download_root` ise HF
+onbellek KOKUDUR, acilmis model klasoru degil -- saha hatasi buydu.
+
 Iki kanal AYRI cevrilir, sonra zaman damgasiyla harmanlanir: mikrofon kanali
 "Sen", dongu kanali "Karsi taraf". Grup aramasinda karsi taraf tek kanaldir,
 kisi ayrimi yoktur -- adlar katilimci listesinden bilinir.
@@ -39,12 +46,76 @@ VARSAYILAN_DIL = "tr"
 # CPU'da bellek ve hiz dengesi: int8 kuantizasyon.
 HESAP_TIPI = "int8"
 
+# Acilmis bir faster-whisper modelinde bu dosya mutlaka vardir.
+MODEL_DOSYASI = "model.bin"
+# Release'teki zip klasoru boyle adlanir: `faster-whisper-small`.
+KLASOR_ONEKI = "faster-whisper-"
+# Hugging Face onbellek duzeni: `models--Systran--faster-whisper-small/snapshots/<id>/`.
+ONBELLEK_ONEKI = "models--Systran--faster-whisper-"
+# Model yukleme hatasi ekranda tek satir kalsin diye kirpilir.
+HATA_SINIRI = 200
+
+BEKLENEN_DUZEN = (
+    "klasörün içinde model.bin olmalı "
+    "(ya doğrudan, ya <model adı> alt klasöründe, ya da Hugging Face önbelleği olarak)"
+)
+
 
 def eksik_paket() -> GorusmeHatasi:
     return GorusmeHatasi(
         "faster_whisper_yok",
         "faster-whisper kurulu değil; görüşme yazıya dökülemez.",
         status=400,
+    )
+
+
+def model_hatasi(hata: BaseException) -> GorusmeHatasi:
+    """Kitapligin attigi her seyi kisa, Turkce tek satira indirir."""
+    metin = " ".join(str(hata).split()) or hata.__class__.__name__
+    return GorusmeHatasi("model_yuklenemedi", f"Model yüklenemedi: {metin[:HATA_SINIRI]}")
+
+
+def _model_var(yol: Path) -> bool:
+    return (yol / MODEL_DOSYASI).is_file()
+
+
+def _onbellek_var(klasor: Path, model_adi: str) -> bool:
+    """Klasor bir HF onbellek koku mu? (`models--Systran--...--/snapshots/*/model.bin`)"""
+    kok = klasor / f"{ONBELLEK_ONEKI}{model_adi}" / "snapshots"
+    if not kok.is_dir():
+        return False
+    return any(_model_var(anlik) for anlik in kok.iterdir() if anlik.is_dir())
+
+
+def model_cozumle(model_adi: str, klasor: str) -> tuple[str, dict[str, Any]]:
+    """Ayardan gelen klasoru faster-whisper argumanlarina cevirir.
+
+    Doner: (`model_size_or_path`, ek secenekler). Klasor bossa model adi
+    dondurulur ve kitaplik HF'den indirir. Klasor VERILDIYSE ag hic
+    denenmez: ya yerel bir yol bulunur ya da anlasilir hata atilir.
+    """
+    ad = str(model_adi or VARSAYILAN_MODEL).strip() or VARSAYILAN_MODEL
+    metin = str(klasor or "").strip()
+    if not metin:
+        return ad, {}
+    yol = Path(metin)
+    if not yol.is_dir():
+        raise GorusmeHatasi(
+            "model_klasoru_yok", f"Model klasörü bulunamadı: {metin}"
+        )
+    # (a) klasorun kendisi acilmis model.
+    if _model_var(yol):
+        return str(yol), {}
+    # (b) icinde `<model adi>` ya da `faster-whisper-<model adi>` alt klasoru.
+    for alt in (yol / ad, yol / f"{KLASOR_ONEKI}{ad}"):
+        if _model_var(alt):
+            return str(alt), {}
+    # (c) HF onbellek koku: kitaplik kendi bulur ama aga CIKMAZ.
+    if _onbellek_var(yol, ad):
+        return ad, {"download_root": str(yol), "local_files_only": True}
+    raise GorusmeHatasi(
+        "model_bulunamadi",
+        f"Model klasöründe {MODEL_DOSYASI} bulunamadı: {metin}; beklenen düzen: {BEKLENEN_DUZEN}.",
     )
 
 
@@ -79,24 +150,31 @@ class WhisperDokucu:
     def __init__(self, model: str = VARSAYILAN_MODEL, klasor: str = "") -> None:
         self.model_adi = str(model or VARSAYILAN_MODEL).strip() or VARSAYILAN_MODEL
         self.klasor = str(klasor or "").strip()
+        # Cozumlenen yol: "Modeli sına" bunu ekrana yazar.
+        self.yol = ""
         self._model: Any = None
 
-    def _yukle(self) -> Any:
+    def yukle(self) -> Any:
+        """Modeli bir kez yukler; hata Turkce ve kisa doner."""
         if self._model is not None:
             return self._model
         try:
             from faster_whisper import WhisperModel  # yerel ice aktarim
         except ImportError as hata:
             raise eksik_paket() from hata
-        secenekler: dict[str, Any] = {"device": "cpu", "compute_type": HESAP_TIPI}
-        if self.klasor:
-            # Vekil engelinde kullanici klasoru elle kopyalayabilsin.
-            secenekler["download_root"] = self.klasor
-        self._model = WhisperModel(self.model_adi, **secenekler)
+        hedef, ek = model_cozumle(self.model_adi, self.klasor)
+        self.yol = hedef
+        secenekler: dict[str, Any] = {"device": "cpu", "compute_type": HESAP_TIPI, **ek}
+        try:
+            self._model = WhisperModel(hedef, **secenekler)
+        except GorusmeHatasi:
+            raise
+        except Exception as hata:  # noqa: BLE001 - kitaplik her seyi atabilir
+            raise model_hatasi(hata) from hata
         return self._model
 
     def cevir(self, yol: Path, dil: str = VARSAYILAN_DIL) -> list[Segment]:
-        model = self._yukle()
+        model = self.yukle()
         segmentler, _ = model.transcribe(str(yol), language=dil or VARSAYILAN_DIL)
         return [
             Segment(
@@ -240,6 +318,37 @@ def _kurulum_hatasi(cikti: str) -> str:
 
 def default_dokucu(model: str = VARSAYILAN_MODEL, klasor: str = "") -> WhisperDokucu:
     return WhisperDokucu(model=model, klasor=klasor)
+
+
+def sina(
+    model: str = VARSAYILAN_MODEL, klasor: str = "", dokucu: Any = None
+) -> dict[str, Any]:
+    """"Modeli sına": modeli yuklemeyi dener, kuyruga hic dokunmaz.
+
+    Kendi dokucusunu kurar; isci is parcacigi ile ortak durum yoktur, yani
+    sinama sirasinda kuyruk calismaya devam eder. Klasor verildiyse ag
+    denenmez: hatali yol dakikalarca zaman asimi yerine aninda yanit verir.
+    """
+    import time
+
+    arac = dokucu if dokucu is not None else default_dokucu(model, klasor)
+    basladi = time.monotonic()
+    try:
+        arac.yukle()
+    except GorusmeHatasi as hata:
+        return {"calisiyor": False, "yol": "", "sn": 0.0, "kod": hata.code, "mesaj": str(hata)}
+    except Exception as hata:  # noqa: BLE001 - kitaplik her seyi atabilir
+        temiz = model_hatasi(hata)
+        return {"calisiyor": False, "yol": "", "sn": 0.0, "kod": temiz.code, "mesaj": str(temiz)}
+    gecen = time.monotonic() - basladi
+    yol = str(getattr(arac, "yol", "") or model)
+    return {
+        "calisiyor": True,
+        "yol": yol,
+        "sn": round(gecen, 1),
+        "kod": "",
+        "mesaj": f"hazır: {yol}, {gecen:.1f} sn",
+    }
 
 
 def bos_mu(segmentler: Iterable[Segment]) -> bool:

@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.10.2** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.10.3** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -770,10 +770,27 @@ rem ya da ag aciksa:
 .venv\Scripts\python -m pip install faster-whisper
 ```
 
-Model dosyası (ör. `small`, ~250 MB) ilk çalıştırmada Hugging Face'ten iner.
-Kurum vekili bunu kesiyorsa modeli başka bir makinede indirip klasörü
-kopyalayın ve yolunu **Ayarlar → Görüşme notları → Model klasörü** alanına
-yazın.
+**Model dosyası.** Model (ör. `small`, ~250 MB) ilk çalıştırmada Hugging
+Face'ten iner. Kurum vekili bunu kesiyorsa modeli ağa çıkmadan yanınızda
+taşıyabilirsiniz:
+
+1. Release sayfasındaki `holocron-whisper-model-small.zip` dosyasını indirin ve
+   **açın**: içinden `faster-whisper-small\` klasörü çıkar (`model.bin`,
+   `config.json`, `tokenizer.json`, `vocabulary.txt`).
+2. Klasörü istediğiniz yere kopyalayın (ör. `D:\modeller\faster-whisper-small`).
+3. Yolunu **Ayarlar → Görüşme notları → Model klasörü** alanına yazın ve
+   kaydedin. **Klasörün içinde `model.bin` olmalı.** Hem açılmış model
+   klasörünün kendisi (`D:\modeller\faster-whisper-small`) hem de onun üst
+   klasörü (`D:\modeller`, içinde `small\` ya da `faster-whisper-small\`)
+   kabul edilir; elinizde Hugging Face önbelleği varsa
+   (`models--Systran--faster-whisper-small\snapshots\...`) önbellek kökünü
+   yazabilirsiniz.
+4. **Modeli sına** düğmesi modeli yüklemeyi dener ve `hazır: <yol>, N sn` ya da
+   tek satırlık hatayı yazar. Kuyruğu bloklamaz, kaydetmeden de çalışır.
+
+Bu alan doluyken Holocron **ağa hiç çıkmaz**: klasörde model yoksa dakikalarca
+zaman aşımı beklemek yerine anında "Model klasöründe model.bin bulunamadı:
+`<yol>`" der. Alan boşsa eski davranış sürer, model Hugging Face'ten iner.
 
 **Copilot CLI ve vekil sunucu.** Kurumda Copilot vekil sunucudan çıkarken Jira
 doğrudan görülebiliyorsa (Holocron'un ağ ayarında "doğrudan bağlan"), vekili
@@ -1266,6 +1283,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.10.3** | 19 Eylül 2026 | Sahadan gelen üçüncü hata: VDI'da model zip'i açılıp yolu **Model klasörü** alanına yazılınca yazıya dökme `ConnectTimeout ... cannot find the appropriate snapshot folder` diye düşüyordu — klasör Hugging Face **önbellek kökü** sanılıp `download_root`a veriliyordu, oysa faster-whisper açılmış model klasörünü DOĞRUDAN kabul eder. Klasör artık sırayla çözümleniyor: klasörün kendisi (`model.bin` içeriyorsa), `<klasör>/<model adı>` ya da `<klasör>/faster-whisper-<model adı>` alt klasörü, ya da HF önbellek düzeni (`models--Systran--faster-whisper-<ad>/snapshots/*`, `local_files_only` ile). **Klasör yazılıysa ağa hiç çıkılmıyor**: model bulunamazsa dakikalarca zaman aşımı yerine anında "Model klasöründe model.bin bulunamadı: `<yol>`; beklenen düzen ..." deniyor. Model yükleme hataları tek satırlık Türkçeye iniyor ("Model yüklenemedi: ...", ilk 200 karakter), satır kesin olarak **hata** durumuna geçiyor ve takip şeridindeki "işleniyor" sayacı sıfırlanıyor; yarım kalan satırlar açılışta kuyruğa dönüyor. Ayarlar'a **Modeli sına** düğmesi geldi: modeli yüklemeyi dener, `hazır: <yol>, N sn` ya da temiz hata yazar, kuyruğu bloklamaz |
 | **v0.10.2** | 19 Eylül 2026 | Sahadan gelen ikinci hata: VDI'da **Deneme kaydı** HTTP 500 veriyordu — döngü aygıtı 10 saniye boyunca tek çerçeve vermemiş, WAV 0 bayt kalmış, okuma `EOFError` atmıştı. Kayıt artık bloklayan `read` yerine **geri çağrı (callback)** kipinde çalışıyor: susan bir aygıt kayıt iş parçacığını kilitleyemiyor, dosya her durumda geçerli başlıkla kapanıyor. Deneme kaydı hiçbir durumda 500 dönmüyor; kanal başına aygıt adı, açıldı mı, kaç çerçeve geldi, ses var mı ve hata metni gösteriliyor, altında öneri duruyor. Döngü kanalını beslemek için deneme boyunca hoparlöre duyulmayan (-60 dB) bir sinyal çalınıyor. Akış açılamazsa 44100/2 ile yeniden deneniyor; döngü aygıtı kendi kanal sayısı ve hızıyla açılıyor. Gerçek kayıtta veri gelmeyen parça "boş" işaretlenip birleştirmede atlanıyor, not "hata: Ses alınamadı (mikrofon: veri gelmedi)" diye düşüyor ve ses klasörü silinmiyor. Boş, eksik ya da bozuk WAV artık istisna yerine 0 çerçeve dönüyor |
 | **v0.10.1** | 19 Eylül 2026 | Sahadan gelen "faster-whisper kurulu değil" hatası: paket `requirements.txt`e girdi (Windows işaretiyle), yani artık ilk kurulumda gelir. Başlatıcılar (`holocron.bat`, `holocron.sh`) her açılışta `requirements.txt`in SHA256 özetini `.venv` içinde tuttukları özetle karşılaştırıyor; liste değiştiyse eksik paketleri kuruyor (önce `wheels/` ve `whisper-wheels/`, olmazsa ağdan) — eski sürümün üstüne açılan kurulumlarda sonradan eklenen bağımlılık hiç kurulmuyordu. Kurulum düşse bile uygulama açılıyor. Ayarlar → Görüşme notları'na **Yazıya dökme paketini kur** düğmesi eklendi (pip alt süreçte, vekil yalnızca o sürecin ortamında, çıktı maskelenir); Görüşme notları sekmesinde paket yokken kapatılabilir uyarı şeridi duruyor. Paket gelince kuyrukta "hata: faster-whisper yok" diye bekleyen satırlar hem açılışta hem kurulumdan sonra kendiliğinden yeniden deneniyor. `holocron-windows-whisper.zip` artık `whisper-wheels/` klasörü olarak açılıyor |
 | **v0.10.0** | 19 Eylül 2026 | **Görüşme notları**: Teams görüşmesi başlayınca mikrofon ve duyulan ses iki ayrı kanal olarak kaydedilir, görüşme bitince kuyrukta sırayla birleştirilir, faster-whisper ile yazıya dökülür ("Sen" / "Karşı taraf"), Copilot CLI ile özetlenir; not hazır olunca ses ve transkript silinir. Aramalar filosuna "Görüşme notları" sekmesi ve takip şeridi (duraklat/sürdür, canlı kayıt rozeti, işleniyor/kuyrukta sayaçları), not çekmecesi (Özet, Kararlar, Aksiyonlar, Açık sorular), aksiyondan tek tıkla görev, tek Jira kaydına bağ, Jira detayında ve Kişiler çekmecesinde "Görüşme notları (n)", Excel'e yeni sayfa. Ayarlar'da aygıt seçimi ve 10 saniyelik deneme kaydı, asgari süre, Whisper modeli/klasörü, özet modeli yedek sırası, özet şablonu, saklama ve bildirim seçenekleri. Copilot CLI'nin vekil sunucusu ayrı bir ayarda durur ve yalnızca alt sürecin ortamına yazılır: Jira "doğrudan bağlan" kipinde kalır |

@@ -138,8 +138,25 @@ class SahteYaziyaDokucu:
             ],
         }
         self.cagri = 0
+        self.yukleme = 0
+        # "Modeli sina" bunu ekrana yazar; gercek dokucuda cozumlenen yoldur.
+        self.yol = "sahte-model"
+        # Testler model yuklemesini dusurmek isterse buraya istisna koyar.
+        self.yukleme_hatasi: BaseException | None = None
+        self._yuklendi = False
+
+    def yukle(self) -> Any:
+        """Gercek dokucu gibi: model bir kez yuklenir, hata cevirmeden once gelir."""
+        if self._yuklendi:
+            return self
+        if self.yukleme_hatasi is not None:
+            raise self.yukleme_hatasi
+        self.yukleme += 1
+        self._yuklendi = True
+        return self
 
     def cevir(self, yol: Path, dil: str = "tr") -> list[Segment]:
+        self.yukle()
         self.cagri += 1
         kanal = KANAL_HOP if yol.stem.startswith(KANAL_HOP) else KANAL_MIK
         return list(self.segmentler.get(kanal, []))

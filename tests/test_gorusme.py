@@ -861,6 +861,244 @@ def test_startup_resumes_package_errors_only_when_the_package_is_installed(
     assert depo.require_not(context.conn, not_id)["durum"] == DURUM_KUYRUKTA
 
 
+# --- yerel model klasoru --------------------------------------------------
+#
+# Saha hatasi (19 Eylul 2026, VDI + kurumsal vekil): kullanici release'teki
+# model zip'ini acti, klasor yolunu ayara yazdi ve yaziya dokme "ConnectTimeout
+# ... cannot find the appropriate snapshot folder" diye dustu. Klasor HF
+# ONBELLEK KOKU sanilip `download_root`a veriliyordu; faster-whisper ise acilmis
+# klasoru DOGRUDAN kabul eder. Asagidaki testler dort dali da sabitler ve
+# klasor verildiginde aga CIKILMADIGINI gosterir.
+
+
+def model_klasoru(kok: Path, *parcalar: str) -> Path:
+    """Icinde `model.bin` + `config.json` olan bir model klasoru uretir."""
+    klasor = kok.joinpath(*parcalar) if parcalar else kok
+    klasor.mkdir(parents=True, exist_ok=True)
+    (klasor / "model.bin").write_bytes(b"sahte model")
+    (klasor / "config.json").write_text("{}", encoding="utf-8")
+    return klasor
+
+
+class SahteWhisperModel:
+    """Kitapligin yerine gecer: hangi argumanla cagrildigini kaydeder."""
+
+    cagrilar: list[tuple[str, dict]] = []
+    hata: BaseException | None = None
+
+    def __init__(self, yol, **kwargs):
+        SahteWhisperModel.cagrilar.append((str(yol), dict(kwargs)))
+        if SahteWhisperModel.hata is not None:
+            raise SahteWhisperModel.hata
+
+
+@pytest.fixture
+def sahte_whisper(monkeypatch):
+    """`faster_whisper` modulunu sahtesiyle degistirir (paket kurulu olmasa da)."""
+    import sys
+    import types
+
+    SahteWhisperModel.cagrilar = []
+    SahteWhisperModel.hata = None
+    modul = types.ModuleType("faster_whisper")
+    modul.WhisperModel = SahteWhisperModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", modul)
+    return SahteWhisperModel
+
+
+def test_an_unpacked_model_folder_is_passed_to_whisper_directly(tmp_path, sahte_whisper):
+    klasor = model_klasoru(tmp_path / "faster-whisper-small")
+
+    yaziyadok.WhisperDokucu("small", str(klasor)).yukle()
+
+    yol, secenekler = sahte_whisper.cagrilar[0]
+    assert yol == str(klasor)
+    # Klasorun kendisi model: HF onbellegi diye gosterilmez, ag denenmez.
+    assert "download_root" not in secenekler
+    assert secenekler["device"] == "cpu"
+    assert secenekler["compute_type"] == yaziyadok.HESAP_TIPI
+
+
+@pytest.mark.parametrize("alt", ["small", "faster-whisper-small"])
+def test_the_model_can_sit_one_folder_below_the_given_path(tmp_path, sahte_whisper, alt):
+    klasor = model_klasoru(tmp_path / "modeller" / alt)
+
+    yaziyadok.WhisperDokucu("small", str(tmp_path / "modeller")).yukle()
+
+    yol, secenekler = sahte_whisper.cagrilar[0]
+    assert yol == str(klasor)
+    assert "download_root" not in secenekler
+
+
+def test_a_hugging_face_cache_root_is_used_offline(tmp_path, sahte_whisper):
+    model_klasoru(
+        tmp_path / "models--Systran--faster-whisper-small" / "snapshots" / "abc123"
+    )
+
+    yaziyadok.WhisperDokucu("small", str(tmp_path)).yukle()
+
+    yol, secenekler = sahte_whisper.cagrilar[0]
+    assert yol == "small"
+    assert secenekler["download_root"] == str(tmp_path)
+    # Onbellek duzeninde bile aga CIKILMAZ.
+    assert secenekler["local_files_only"] is True
+
+
+def test_an_empty_model_folder_fails_before_touching_the_network(tmp_path, sahte_whisper):
+    (tmp_path / "bos").mkdir()
+
+    with pytest.raises(GorusmeHatasi) as hata:
+        yaziyadok.WhisperDokucu("small", str(tmp_path / "bos")).yukle()
+
+    assert hata.value.code == "model_bulunamadi"
+    assert "model.bin" in str(hata.value)
+    assert "beklenen düzen" in str(hata.value)
+    # Kurumsal agda dakikalarca bekletmesin: kitaplik hic cagrilmadi.
+    assert sahte_whisper.cagrilar == []
+
+
+def test_a_missing_model_folder_says_so(tmp_path, sahte_whisper):
+    with pytest.raises(GorusmeHatasi) as hata:
+        yaziyadok.WhisperDokucu("small", str(tmp_path / "yok")).yukle()
+
+    assert hata.value.code == "model_klasoru_yok"
+    assert sahte_whisper.cagrilar == []
+
+
+def test_an_empty_setting_still_lets_the_library_download(sahte_whisper):
+    yaziyadok.WhisperDokucu("small", "").yukle()
+
+    yol, secenekler = sahte_whisper.cagrilar[0]
+    assert yol == "small"
+    assert "download_root" not in secenekler
+    assert "local_files_only" not in secenekler
+
+
+def test_a_library_failure_becomes_one_short_turkish_line(tmp_path, sahte_whisper):
+    model_klasoru(tmp_path)
+    sahte_whisper.hata = OSError("ConnectTimeout: " + "x" * 500)
+
+    with pytest.raises(GorusmeHatasi) as hata:
+        yaziyadok.WhisperDokucu("small", str(tmp_path)).yukle()
+
+    assert hata.value.code == "model_yuklenemedi"
+    mesaj = str(hata.value)
+    assert mesaj.startswith("Model yüklenemedi: ")
+    assert len(mesaj) <= len("Model yüklenemedi: ") + yaziyadok.HATA_SINIRI
+
+
+def test_the_model_is_loaded_once_per_transcriber(tmp_path, sahte_whisper):
+    model_klasoru(tmp_path)
+    dokucu = yaziyadok.WhisperDokucu("small", str(tmp_path))
+
+    dokucu.yukle()
+    dokucu.yukle()
+
+    assert len(sahte_whisper.cagrilar) == 1
+
+
+# --- "Modeli sina" --------------------------------------------------------
+
+
+def test_testing_the_model_reports_the_resolved_path_and_the_seconds(tmp_path, sahte_whisper):
+    klasor = model_klasoru(tmp_path / "faster-whisper-small")
+
+    sonuc = yaziyadok.sina("small", str(klasor))
+
+    assert sonuc["calisiyor"] is True
+    assert sonuc["yol"] == str(klasor)
+    assert sonuc["mesaj"].startswith(f"hazır: {klasor}, ")
+    assert sonuc["mesaj"].endswith(" sn")
+
+
+def test_testing_the_model_returns_a_clean_error_instead_of_raising(tmp_path, sahte_whisper):
+    (tmp_path / "bos").mkdir()
+
+    sonuc = yaziyadok.sina("small", str(tmp_path / "bos"))
+
+    assert sonuc["calisiyor"] is False
+    assert sonuc["kod"] == "model_bulunamadi"
+    assert "model.bin" in sonuc["mesaj"]
+    assert sahte_whisper.cagrilar == []
+
+
+def test_the_model_test_endpoint_uses_the_unsaved_form_values(api_client, fake_gorusme):
+    yanit = api_client.post(
+        "/api/gorusme/ayar/model-sina", json={"model": "small", "klasor": ""}
+    )
+
+    assert yanit.status_code == 200
+    govde = yanit.json()
+    assert govde["calisiyor"] is True
+    assert govde["yol"] == "sahte-model"
+    assert fake_gorusme["dokucu"].yukleme == 1
+
+
+def test_the_model_test_endpoint_reports_failures_as_text(api_client, fake_gorusme):
+    fake_gorusme["dokucu"].yukleme_hatasi = GorusmeHatasi(
+        "model_bulunamadi", "Model klasöründe model.bin bulunamadı: D:\\yok"
+    )
+
+    govde = api_client.post("/api/gorusme/ayar/model-sina", json={}).json()
+
+    assert govde["calisiyor"] is False
+    assert govde["kod"] == "model_bulunamadi"
+    assert "model.bin" in govde["mesaj"]
+
+
+# --- hata yolunda kuyruk durumu -------------------------------------------
+
+
+def test_a_model_failure_leaves_the_row_in_error_and_clears_the_counter(
+    context, fake_gorusme, tmp_path
+):
+    not_id = hazirla_not(context, fake_gorusme, Saat())
+    fake_gorusme["dokucu"].yukleme_hatasi = GorusmeHatasi(
+        "model_yuklenemedi", "Model yüklenemedi: ConnectTimeout"
+    )
+
+    kur_kuyruk(context, fake_gorusme).sirayi_isle()
+
+    kayit = depo.require_not(context.conn, not_id)
+    assert kayit["durum"] == DURUM_HATA
+    assert kayit["hata"].startswith("Model yüklenemedi: ")
+    # Takip seridindeki "isleniyor n" sayaci ara durumlari sayar: sifirlandi.
+    serit = gorusme_intake.serit(context.conn, gorusme_intake.load_config(context.settings))
+    assert serit["isleniyor"] == 0
+    assert serit["hata"] == 1
+
+
+def test_a_model_failure_is_not_mistaken_for_a_missing_package(context, fake_gorusme):
+    not_id = hazirla_not(context, fake_gorusme, Saat())
+    # Hata metninde model klasorunun adi geciyor ("faster-whisper-small"):
+    # bu satir paket kurulumu bekleyen satir DEGILDIR, kuyruga donmemeli.
+    depo.hataya_dus(
+        context.conn,
+        not_id,
+        "Model yüklenemedi: D:\\modeller\\faster-whisper-small okunamadı",
+    )
+
+    assert depo.eksik_paket_hatalarini_kuyruga_al(context.conn) == 0
+    assert depo.require_not(context.conn, not_id)["durum"] == DURUM_HATA
+
+
+def test_a_half_finished_row_returns_to_the_queue_on_startup(context, fake_gorusme):
+    from app.gorusme import servis as gorusme_servis
+
+    not_id = hazirla_not(context, fake_gorusme, Saat())
+    # Isci model yuklerken oldurulmus: satir "yaziya_dokuluyor"da kalmis.
+    depo.durum_yaz(context.conn, not_id, DURUM_YAZIYA_DOKULUYOR)
+    serit = gorusme_intake.serit(context.conn, gorusme_intake.load_config(context.settings))
+    assert serit["isleniyor"] == 1
+
+    gorusme_servis.kur(context)
+
+    assert depo.require_not(context.conn, not_id)["durum"] == DURUM_KUYRUKTA
+    serit = gorusme_intake.serit(context.conn, gorusme_intake.load_config(context.settings))
+    assert serit["isleniyor"] == 0
+    assert serit["kuyrukta"] == 1
+
+
 # --- katilimci eslemesi ---------------------------------------------------
 
 
@@ -1300,6 +1538,10 @@ def test_the_settings_card_is_on_the_settings_page(api_client):
         'id="gorusme-whisper-kur"',
         "Yazıya dökme paketini kur",
         'id="gorusme-whisper-kur-sonuc"',
+        'id="gorusme-model-sina"',
+        "Modeli sına",
+        'id="gorusme-model-sina-sonuc"',
+        "model.bin",
         'id="gorusme-modeller"',
         'id="gorusme-copilot-proxy"',
         'id="gorusme-copilot-test"',

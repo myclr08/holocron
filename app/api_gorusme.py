@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -360,6 +361,33 @@ def install_whisper(request: Request) -> dict[str, Any]:
     sonuc["whisper_var"] = yaziyadok.kurulu_mu()
     sonuc["supported"] = gorusme_supported()
     return sonuc
+
+
+@router.post("/ayar/model-sina")
+def test_whisper_model(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
+    """"Modeli sına": yazıya dökme modeli gerçekten yüklenebiliyor mu?
+
+    Ayarlar ekranindaki ALANLARDAN gelen degerlerle calisir (kaydetmeden
+    denenebilsin), alan gonderilmediyse ayara duser. Kuyruga hic dokunmaz:
+    kendi dokucusunu kurar, veritabani kilidi almaz, isci calismaya devam
+    eder. Klasor verildiyse ag DENENMEZ: hatali yol kurumsal vekilde
+    dakikalarca zaman asimi beklemek yerine aninda yanit verir.
+    """
+    context = get_context(request)
+    ayarlar = _ayarlar(context)
+    model = str(payload.get("model") or "").strip() or ayarlar.whisper_model
+    klasor = (
+        str(payload.get("klasor") or "").strip()
+        if "klasor" in payload
+        else ayarlar.whisper_klasor
+    )
+    fabrika = context.gorusme_dokucu_factory
+    dokucu = (
+        fabrika(replace(ayarlar, whisper_model=model, whisper_klasor=klasor))
+        if fabrika is not None
+        else None
+    )
+    return yaziyadok.sina(model, klasor, dokucu=dokucu)
 
 
 @router.post("/ayar/copilot-sina")

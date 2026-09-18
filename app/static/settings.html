@@ -337,12 +337,16 @@
           <label for="gorusme-whisper-klasor">Model klasörü (boş = indirilsin)</label>
           <input type="text" id="gorusme-whisper-klasor" placeholder="D:\modeller\faster-whisper" />
           <p class="hint">
-            Vekil sunucu Hugging Face'i kesiyorsa model klasörünü elle kopyalayıp yolunu
-            buraya yazın.
+            Vekil sunucu Hugging Face'i kesiyorsa model zip'ini açıp klasörün yolunu buraya
+            yazın: klasörün içinde <code>model.bin</code> olmalı (zip'ten çıkan
+            <code>faster-whisper-small</code> klasörünü ya da onun üst klasörünü verebilirsiniz).
+            Klasör yazılıysa ağa hiç çıkılmaz.
           </p>
           <div class="actions">
+            <button id="gorusme-model-sina">Modeli sına</button>
             <button id="gorusme-whisper-kur" hidden>Yazıya dökme paketini kur</button>
           </div>
+          <p class="hint" id="gorusme-model-sina-sonuc"></p>
           <p class="hint" id="gorusme-whisper-kur-sonuc"></p>
         </div>
 

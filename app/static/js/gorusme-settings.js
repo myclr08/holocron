@@ -183,6 +183,31 @@ async function runGorusmeTrial() {
   }
 }
 
+/** "Modeli sına": yazıya dökme modeli yüklenebiliyor mu? Kuyruğu bloklamaz. */
+async function testWhisperModel() {
+  const dugme = gorusmeField("gorusme-model-sina");
+  const kutu = gorusmeField("gorusme-model-sina-sonuc");
+  dugme.disabled = true;
+  kutu.textContent = "Model yükleniyor...";
+  try {
+    // Alandaki değerler kaydedilmemiş olabilir: uca onları yollarız.
+    const sonuc = await api("/api/gorusme/ayar/model-sina", {
+      method: "POST",
+      body: JSON.stringify({
+        model: gorusmeField("gorusme-whisper-model").value.trim(),
+        klasor: gorusmeField("gorusme-whisper-klasor").value.trim(),
+      }),
+    });
+    kutu.textContent = sonuc.mesaj || "";
+    setStatus(gorusmeStatusBox(), sonuc.mesaj || "", sonuc.calisiyor ? "ok" : "error");
+  } catch (err) {
+    kutu.textContent = err.message;
+    setStatus(gorusmeStatusBox(), err.message, "error");
+  } finally {
+    dugme.disabled = false;
+  }
+}
+
 /** Copilot sınaması: seçili model ve vekil ile kısa bir istek. */
 async function testGorusmeCopilot() {
   setStatus(gorusmeStatusBox(), "Copilot CLI sınanıyor...", "");
@@ -202,6 +227,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("gorusme-deneme").addEventListener("click", runGorusmeTrial);
   document.getElementById("gorusme-copilot-test").addEventListener("click", testGorusmeCopilot);
   document.getElementById("gorusme-whisper-kur").addEventListener("click", installWhisperPackage);
+  document.getElementById("gorusme-model-sina").addEventListener("click", testWhisperModel);
   api("/api/settings")
     // Uc `{settings: {...}}` doner: kart yalnizca ayar sozlugunu okur.
     .then((data) => loadGorusmeSettings(data.settings || {}))
