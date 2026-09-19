@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from .altsurec import sessiz_calistir_ayarlari
 from .source import (
     KANAL_ETIKETLERI,
     KANAL_HOP,
@@ -251,6 +252,7 @@ def _pip_calistir(kosucu: Any, komut: Sequence[str], ortam: dict[str, str]) -> t
             text=True,
             timeout=KURULUM_ZAMAN_ASIMI,
             env=ortam,
+            **sessiz_calistir_ayarlari(),
         )
     except FileNotFoundError:
         return 127, "Python yorumlayicisi bulunamadi."

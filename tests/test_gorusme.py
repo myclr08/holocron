@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import threading
 import time
 import wave
@@ -870,6 +872,46 @@ def test_the_summariser_resolves_the_path_and_remembers_it(tmp_path, monkeypatch
     assert not (transkript.parent / ozet.ISTEM_DOSYASI).exists()
 
 
+def test_the_copilot_subprocess_never_pops_a_console_window_on_windows(tmp_path, monkeypatch):
+    """Saha hatasi 19 Eylul 2026: konsolsuz surecte Copilot cagrisi bos bir
+    konsol penceresi aciyordu. `sessiz_calistir_ayarlari` gercek `subprocess.run`
+    cagrisina gecmeli; Windows dalini Linux'ta da kanitlamak icin STARTUPINFO
+    sahte olarak eklenir (gercek Windows'ta zaten var)."""
+
+    class SahteStartupInfo:
+        def __init__(self) -> None:
+            self.dwFlags = 0
+            self.wShowWindow = None
+
+    class SahteSonuc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(subprocess, "STARTUPINFO", SahteStartupInfo, raising=False)
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(subprocess, "STARTF_USESHOWWINDOW", 1, raising=False)
+    monkeypatch.setattr(subprocess, "SW_HIDE", 0, raising=False)
+
+    yakalanan: dict = {}
+
+    def sahte_run(argumanlar, **kwargs):
+        yakalanan.update(kwargs)
+        return SahteSonuc()
+
+    monkeypatch.setattr(ozet.subprocess, "run", sahte_run)
+
+    ozetleyici = ozet.CopilotOzetleyici()
+    sonuc = ozetleyici.calistir(["copilot", "--model", "gpt-5"], tmp_path)
+
+    assert sonuc.returncode == 0
+    assert yakalanan["stdin"] == subprocess.DEVNULL
+    assert yakalanan["creationflags"] == 0x08000000
+    assert isinstance(yakalanan["startupinfo"], SahteStartupInfo)
+    assert yakalanan["startupinfo"].wShowWindow == 0
+
+
 def test_a_missing_copilot_tells_the_user_where_to_look(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path / "bos"))
     cikti = ozet.CopilotOzetleyici().ozetle(tmp_path / "transkript.txt", "gpt-5", "istem")
@@ -963,6 +1005,36 @@ def test_installing_without_local_wheels_goes_straight_to_the_network(tmp_path):
     assert len(pip.cagrilar) == 1
     assert "--find-links" not in pip.cagrilar[0]
     assert sonuc["kaynak"] == "ağ"
+
+
+def test_the_pip_install_never_pops_a_console_window_on_windows(tmp_path, monkeypatch):
+    """Ayni saha hatasi pip kurulumu icin de gecerli: konsolsuz surecte pip
+    cagrisi da bos bir konsol acmamali."""
+
+    class SahteStartupInfo:
+        def __init__(self) -> None:
+            self.dwFlags = 0
+            self.wShowWindow = None
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(subprocess, "STARTUPINFO", SahteStartupInfo, raising=False)
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(subprocess, "STARTF_USESHOWWINDOW", 1, raising=False)
+    monkeypatch.setattr(subprocess, "SW_HIDE", 0, raising=False)
+
+    yakalanan: dict = {}
+
+    def kosucu(komut, **kwargs):
+        yakalanan.update(kwargs)
+        return PipCiktisi(0, "tamam")
+
+    sonuc = yaziyadok.kur(kok=tmp_path, calistirici=kosucu)
+
+    assert sonuc["kuruldu"] is True
+    assert yakalanan["stdin"] == subprocess.DEVNULL
+    assert yakalanan["creationflags"] == 0x08000000
+    assert isinstance(yakalanan["startupinfo"], SahteStartupInfo)
+    assert yakalanan["startupinfo"].wShowWindow == 0
 
 
 def test_a_failed_installation_never_leaks_a_secret_to_the_screen(tmp_path):

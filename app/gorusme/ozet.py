@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
+from .altsurec import sessiz_calistir_ayarlari
 from .source import BOLUM_AKSIYON, OzetCikti
 
 log = logging.getLogger("holocron.gorusme.ozet")
@@ -435,6 +436,7 @@ class CopilotOzetleyici:
             timeout=self.zaman_asimi,
             cwd=str(klasor),
             env=self.ortam(),
+            **sessiz_calistir_ayarlari(),
         )
 
     def ozetle(self, transkript: Path, model: str, istem: str) -> OzetCikti:
