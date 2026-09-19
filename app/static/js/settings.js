@@ -7,6 +7,37 @@
 
 const GROUP_KEY = "holocron.settings.group";
 const DEFAULT_GROUP = "jira";
+// Ana ekranin son gorunumu (app.js'teki saveView() ile ayni anahtar).
+const LAST_VIEW_KEY = "holocron.lastView";
+
+/** Ana ekranin son gorunum hash'i; depolama kapaliysa bos doner. */
+function lastMainViewHash() {
+  try {
+    return localStorage.getItem(LAST_VIEW_KEY) || "";
+  } catch (err) {
+    return "";
+  }
+}
+
+/** Referrer ayni kokenden ve ana sayfaya (index) mi ait, onu soyler. */
+function referrerIsMainPage(referrer, origin) {
+  if (!referrer) return false;
+  try {
+    const url = new URL(referrer, origin);
+    return url.origin === origin && (url.pathname === "/" || url.pathname === "/index.html");
+  } catch (err) {
+    return false;
+  }
+}
+
+/** "Geri": ana sayfadan gelindiyse tarayici gecmisiyle doner, yoksa son gorunume gider. */
+function goBackToMain() {
+  if (referrerIsMainPage(document.referrer, window.location.origin)) {
+    window.history.back();
+    return;
+  }
+  window.location.href = "/" + lastMainViewHash();
+}
 
 function groupTabs() {
   return Array.from(document.querySelectorAll(".settings-tab"));
@@ -927,6 +958,7 @@ async function testCopilot() {
 document.addEventListener("DOMContentLoaded", () => {
   bindShell();
   bindGroups();
+  document.getElementById("settings-back").addEventListener("click", goBackToMain);
   document.getElementById("mode").addEventListener("change", applyModeVisibility);
   document.getElementById("auth-type").addEventListener("change", applyModeVisibility);
   document.getElementById("save").addEventListener("click", () => saveSettings("status"));

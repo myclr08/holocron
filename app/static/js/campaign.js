@@ -37,6 +37,7 @@ function showCampaign() {
   if (typeof renderGroups === "function") renderGroups();
   if (typeof closeDrawer === "function") closeDrawer();
   loadCampaign();
+  if (typeof saveView === "function") saveView();
 }
 
 function leaveCampaign() {

@@ -119,6 +119,63 @@ function fail(err) {
   toast("İşlem yapılamadı", err.message || String(err), "error");
 }
 
+// --- son gorunum: hash + localStorage yedegi -----------------------------
+// Ayarlar'dan "Geri" ile donuldugunde son bakilan yere dusmek icin ana
+// ekranin gorunumu adres cubugunda ve localStorage'da tutulur.
+
+const LAST_VIEW_KEY = "holocron.lastView";
+
+/** Verilen goruntu/aktif-filo icin hash uretir; taniyamiyorsa bos doner. */
+function viewHash(view, activeId) {
+  if (view === "tasks") return "#gorevlerim";
+  if (view === "campaign") return "#sefer";
+  if (view === "groups" && activeId) return "#filo/" + encodeURIComponent(activeId);
+  return "";
+}
+
+/** Su anki gorunumu hash'e ve localStorage'a yazar; ikisi de sessizce basarisiz olabilir. */
+function saveView() {
+  const hash = viewHash(state.view, state.activeId);
+  if (!hash) return;
+  try {
+    if (window.location.hash !== hash) window.history.replaceState(null, "", hash);
+  } catch (err) {
+    // adres cubugu guncellenemedi (ozel sekme vb.); localStorage yedek kalir
+  }
+  try {
+    localStorage.setItem(LAST_VIEW_KEY, hash);
+  } catch (err) {
+    // depolama kapali/dolu olabilir: hatirlamak zorunlu degil
+  }
+}
+
+/** Acilista hangi gorunume gidilecegini cozer: once hash, sonra localStorage. */
+function resolveStartupView() {
+  let hash = "";
+  try {
+    hash = window.location.hash || "";
+  } catch (err) {
+    hash = "";
+  }
+  if (!hash) {
+    try {
+      hash = localStorage.getItem(LAST_VIEW_KEY) || "";
+    } catch (err) {
+      hash = "";
+    }
+  }
+  if (hash === "#gorevlerim") return { view: "tasks", groupId: null };
+  if (hash === "#sefer") return { view: "campaign", groupId: null };
+  const match = /^#filo\/(.+)$/.exec(hash);
+  if (match) {
+    // Grup id'leri sayisal (SQLite rowid); hash'ten string gelir, karsilastirma icin cevrilir.
+    const raw = decodeURIComponent(match[1]);
+    const id = Number(raw);
+    return { view: "groups", groupId: Number.isFinite(id) ? id : null };
+  }
+  return { view: "groups", groupId: null };
+}
+
 // --- modal --------------------------------------------------------------
 
 function openModal(title, body, buttons, options) {
@@ -261,6 +318,7 @@ async function selectGroup(groupId, keepView) {
   }
   renderGroups();
   await loadIssues();
+  saveView();
 }
 
 function renderGroupHead() {
@@ -2064,6 +2122,7 @@ function showTasks() {
   renderGroups();
   closeDrawer();
   loadTasks();
+  saveView();
 }
 
 function leaveTasks() {
@@ -2877,7 +2936,17 @@ document.addEventListener("DOMContentLoaded", () => {
     })
     .catch(() => {});
 
-  loadGroups().catch(fail);
+  // Son gorunum: hash/localStorage'daki filo/gorevlerim/sefer'e donulur.
+  const startupView = resolveStartupView();
+  if (startupView.view === "tasks" || startupView.view === "campaign") {
+    state.view = startupView.view;
+  }
+  loadGroups(startupView.groupId || undefined)
+    .then(() => {
+      if (startupView.view === "tasks") showTasks();
+      else if (startupView.view === "campaign") showCampaign();
+    })
+    .catch(fail);
   refreshTaskBadge();
   pollRefresh();
 });

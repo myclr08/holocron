@@ -1118,3 +1118,254 @@ def test_the_fix_settings_are_on_the_copilot_card(api_client):
     ):
         assert marker in script, marker
 
+
+# --- ana ekranin son gorunumu: hash + localStorage yedegi ----------------
+#
+# Saha geri bildirimi: Ayarlar'daki Geri her zaman ilk filoya donuyordu,
+# kullanicinin son baktigi filo/Gorevlerim/Sefer'i hatirlamiyordu. Ana ekran
+# artik gorunumunu `#filo/<id>`, `#gorevlerim`, `#sefer` hash'i ile ve yedek
+# olarak localStorage'a yazar; Ayarlar'daki Geri bu bilgiyi okur.
+
+
+def test_settings_back_button_is_no_longer_a_hardcoded_link(api_client):
+    """Eskiden <a href="/">Geri</a> her zaman ana sayfanin varsayilanina duserdi."""
+    page = api_client.get("/settings").text
+    assert 'id="settings-back"' in page
+    assert '<a class="button" href="/">Geri</a>' not in page
+
+    script = api_client.get("/static/js/settings.js").text
+    for marker in (
+        "function referrerIsMainPage",
+        "function goBackToMain",
+        "function lastMainViewHash",
+        '"holocron.lastView"',
+        'getElementById("settings-back")',
+    ):
+        assert marker in script, marker
+
+
+def test_main_view_hash_literals_are_wired_up(api_client):
+    app_js = api_client.get("/static/js/app.js").text
+    for marker in (
+        "function viewHash",
+        "function saveView",
+        "function resolveStartupView",
+        '"#gorevlerim"',
+        '"#sefer"',
+        '"#filo/"',
+        '"holocron.lastView"',
+    ):
+        assert marker in app_js, marker
+    campaign_js = api_client.get("/static/js/campaign.js").text
+    assert "saveView" in campaign_js
+
+
+def test_view_hash_maps_each_screen_with_the_real_javascript():
+    """`viewHash` gercek app.js icinden calistirilir: hash <-> gorunum eslemesi."""
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node yok")
+    script = (STATIC / "js" / "app.js").read_text(encoding="utf-8")
+    shim = r"""
+globalThis.document = {
+  addEventListener() {}, getElementById() { return null; },
+};
+globalThis.window = {
+  location: { hash: "" }, history: { replaceState() {} },
+};
+globalThis.localStorage = {
+  getItem() { return null; }, setItem() {}, removeItem() {},
+};
+"""
+    probe = r"""
+process.stdout.write(JSON.stringify({
+  tasks: viewHash("tasks", null),
+  campaign: viewHash("campaign", null),
+  groupWithId: viewHash("groups", 42),
+  groupNoId: viewHash("groups", null),
+}));
+"""
+    result = subprocess.run(
+        [node], input=shim + script + probe, capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == {
+        "tasks": "#gorevlerim",
+        "campaign": "#sefer",
+        "groupWithId": "#filo/42",
+        "groupNoId": "",
+    }
+
+
+def test_resolve_startup_view_prefers_hash_then_local_storage():
+    """Acilista: once adres cubugundaki hash, sonra localStorage, sonra varsayilan."""
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node yok")
+    script = (STATIC / "js" / "app.js").read_text(encoding="utf-8")
+    shim = r"""
+globalThis.document = {
+  addEventListener() {}, getElementById() { return null; },
+};
+let hash = "";
+const store = {};
+globalThis.window = {
+  location: { get hash() { return hash; }, set hash(value) { hash = value; } },
+  history: { replaceState() {} },
+};
+globalThis.localStorage = {
+  getItem(key) { return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null; },
+  setItem(key, value) { store[key] = String(value); },
+  removeItem(key) { delete store[key]; },
+};
+"""
+    probe = r"""
+const out = {};
+out.bothEmpty = resolveStartupView();
+localStorage.setItem("holocron.lastView", "#gorevlerim");
+out.fromStorage = resolveStartupView();
+window.location.hash = "#sefer";
+out.hashWinsOverStorage = resolveStartupView();
+window.location.hash = "#filo/42";
+out.groupHashIsNumeric = resolveStartupView();
+window.location.hash = "#filo/nope";
+out.nonNumericGroupFallsBack = resolveStartupView();
+process.stdout.write(JSON.stringify(out));
+"""
+    result = subprocess.run(
+        [node], input=shim + script + probe, capture_output=True, text=True, check=True
+    )
+    out = json.loads(result.stdout)
+    assert out["bothEmpty"] == {"view": "groups", "groupId": None}
+    assert out["fromStorage"] == {"view": "tasks", "groupId": None}
+    assert out["hashWinsOverStorage"] == {"view": "campaign", "groupId": None}
+    assert out["groupHashIsNumeric"] == {"view": "groups", "groupId": 42}
+    assert out["nonNumericGroupFallsBack"] == {"view": "groups", "groupId": None}
+
+
+def test_save_view_writes_hash_and_local_storage_and_survives_blocked_storage():
+    """`saveView` hem adres cubugunu hem localStorage'i gunceller; ikisi de patlarsa yutulur."""
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node yok")
+    script = (STATIC / "js" / "app.js").read_text(encoding="utf-8")
+    shim = r"""
+globalThis.document = {
+  addEventListener() {}, getElementById() { return null; },
+};
+let hash = "";
+const store = {};
+globalThis.window = {
+  location: { get hash() { return hash; }, set hash(value) { hash = value; } },
+  history: { replaceState(_state, _title, url) { hash = url; } },
+};
+globalThis.localStorage = {
+  getItem(key) { return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null; },
+  setItem(key, value) { store[key] = String(value); },
+  removeItem(key) { delete store[key]; },
+};
+"""
+    probe = r"""
+const out = {};
+state.view = "tasks";
+state.activeId = null;
+saveView();
+out.hashAfterTasks = window.location.hash;
+out.storedAfterTasks = localStorage.getItem("holocron.lastView");
+
+state.view = "groups";
+state.activeId = 7;
+saveView();
+out.hashAfterGroup = window.location.hash;
+out.storedAfterGroup = localStorage.getItem("holocron.lastView");
+
+// Depolama ve adres cubugu patlarsa saveView() sessizce yutmali.
+globalThis.window.history.replaceState = () => { throw new Error("engellendi"); };
+globalThis.localStorage.setItem = () => { throw new Error("dolu"); };
+let threw = false;
+try {
+  saveView();
+} catch (err) {
+  threw = true;
+}
+out.threwWhenBlocked = threw;
+process.stdout.write(JSON.stringify(out));
+"""
+    result = subprocess.run(
+        [node], input=shim + script + probe, capture_output=True, text=True, check=True
+    )
+    out = json.loads(result.stdout)
+    assert out["hashAfterTasks"] == "#gorevlerim"
+    assert out["storedAfterTasks"] == "#gorevlerim"
+    assert out["hashAfterGroup"] == "#filo/7"
+    assert out["storedAfterGroup"] == "#filo/7"
+    assert out["threwWhenBlocked"] is False
+
+
+def test_settings_back_button_resolves_target_with_the_real_javascript():
+    """`goBackToMain`: ana sayfadan gelindiyse `history.back()`, yoksa son gorunume gider."""
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node yok")
+    script = (STATIC / "js" / "settings.js").read_text(encoding="utf-8")
+    shim = r"""
+globalThis.document = { addEventListener() {}, referrer: "" };
+globalThis.window = {
+  location: { origin: "http://localhost:8000", href: "" },
+  history: { back() { window.__backCalls = (window.__backCalls || 0) + 1; } },
+};
+globalThis.localStorage = { getItem() { return null; }, setItem() {} };
+"""
+    probe = r"""
+const out = {};
+out.sameOriginRoot = referrerIsMainPage("http://localhost:8000/", "http://localhost:8000");
+out.sameOriginIndex = referrerIsMainPage("http://localhost:8000/index.html", "http://localhost:8000");
+out.sameOriginOtherPage = referrerIsMainPage("http://localhost:8000/settings", "http://localhost:8000");
+out.crossOrigin = referrerIsMainPage("http://evil.example/", "http://localhost:8000");
+out.emptyReferrer = referrerIsMainPage("", "http://localhost:8000");
+
+document.referrer = "http://localhost:8000/";
+goBackToMain();
+out.backCalls = window.__backCalls || 0;
+
+document.referrer = "http://localhost:8000/settings";
+window.location.href = "";
+goBackToMain();
+out.hrefWithNoStoredView = window.location.href;
+
+document.referrer = "";
+window.location.href = "";
+localStorage.getItem = () => "#gorevlerim";
+goBackToMain();
+out.hrefWithStoredView = window.location.href;
+
+process.stdout.write(JSON.stringify(out));
+"""
+    result = subprocess.run(
+        [node], input=shim + script + probe, capture_output=True, text=True, check=True
+    )
+    out = json.loads(result.stdout)
+    assert out["sameOriginRoot"] is True
+    assert out["sameOriginIndex"] is True
+    assert out["sameOriginOtherPage"] is False
+    assert out["crossOrigin"] is False
+    assert out["emptyReferrer"] is False
+    assert out["backCalls"] == 1
+    assert out["hrefWithNoStoredView"] == "/"
+    assert out["hrefWithStoredView"] == "/#gorevlerim"
+
