@@ -18,6 +18,7 @@ from . import (
     export,
     fields as field_utils,
     gamify,
+    gamify_repo,
     grid,
     repository,
     tasks as task_utils,
@@ -336,6 +337,10 @@ def export_group(
     """Grubu Excel dosyasi olarak indirir; satirlar grid ile birebir aynidir."""
     context = get_context(request)
     group = repository.require_group(context.connection(), group_id)
+    # Rozet izi: "ilk Excel dokumu" baska hicbir tabloda gorunmuyor.
+    gamify_repo.log_activity(
+        context.connection(), gamify_repo.ACTIVITY_EXCEL, f"group:{group_id}"
+    )
     payload = export.build_workbook(
         context,
         group_id,
@@ -441,6 +446,7 @@ def export_tasks(request: Request, status: str = "all", q: str = ""):
     context = get_context(request)
     if status and status != "all":
         repository.clean_task_status(status)
+    gamify_repo.log_activity(context.connection(), gamify_repo.ACTIVITY_EXCEL, "tasks")
     payload = export.build_tasks_workbook(context, status=status or "all", q=q)
     return Response(
         content=payload,
@@ -981,6 +987,9 @@ def fix_text(request: Request, payload: dict[str, Any] = Body(default_factory=di
     if sonuc.get("model"):
         # Calisan model bir sonraki istekte basa alinir.
         context.settings.set("copilot.son_model", str(sonuc["model"]))
+    if sonuc.get("metin"):
+        # Yalnizca gercekten duzelen metin sayilir; hata donen cagri iz birakmaz.
+        gamify_repo.log_activity(context.connection(), gamify_repo.ACTIVITY_FIX)
     return sonuc
 
 

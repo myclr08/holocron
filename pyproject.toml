@@ -25,7 +25,7 @@ dev = ["pytest", "httpx"]
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["static/*", "static/css/*", "static/js/*", "static/fonts/*"]
+app = ["static/*", "static/css/*", "static/js/*", "static/fonts/*", "static/rozetler/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

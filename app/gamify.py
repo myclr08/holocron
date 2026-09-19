@@ -22,6 +22,7 @@ Zaman disaridan verilebilir (`now`), testler kendi gununu enjekte eder.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Sequence
 
 from . import fields as field_utils, repository, tasks as task_utils
@@ -121,34 +122,368 @@ RANKS: tuple[dict[str, Any], ...] = (
 IMAGE_DIR = "/static/img/gamify/"
 
 # --- rozetler -----------------------------------------------------------
+#
+# Katalog TEK yerde durur: kod, ad, ipucu, kategori, nadirlik. Kazanma kurali
+# asagidaki uc tablodan birindedir ve hepsi GERCEK veriden olculur:
+#
+# * `SERIES_BADGES` -- sayilabilir olaylarin sirali damga listesi. Ilerleme
+#   listenin uzunlugu, kazanma ani N. damgadir; boylece gecmis veriden hak
+#   edilmis rozet dogru TARIHLE verilir (geriye donuk degerlendirme).
+# * `GAUGE_BADGES` -- anlik bir sayi (seri uzunlugu, kisi sayisi, toplam XP).
+#   Gecmis damgasi yoktur, kazanma ani bugundur.
+# * `FLAG_BADGES` -- "oldu / olmadi" kosullari (bir ayin her is gunu dolu,
+#   ayni gun uc ayri proje, emirler pazartesi bitti).
+#
+# Rutbe rozetleri ayri tutulur: esikleri seferin HEDEFINE oranlidir.
+#
+# Telifli karakter adi kullanilmaz; adlar genel uzay/sefer sozlugundendir.
 
-BADGE_CLEAN_DESK = "clean_desk"
-BADGE_FAST_REPLY = "fast_reply"
+# "Temiz Masa" kac gun gecikmis gorevsiz gecmesini ister.
+CLEAN_DESK_DAYS = 7
+
+# Gorev
+BADGE_FIRST_TASK = "first_task"
+BADGE_TASK_10 = "task_10"
 BADGE_CLOSER = "closer"
+BADGE_TASK_50 = "task_50"
+BADGE_TASK_200 = "task_200"
+BADGE_TASK_DAY_5 = "task_day_5"
+BADGE_EARLY_10 = "early_10"
+BADGE_NOTED_20 = "noted_20"
+BADGE_LINKED_25 = "linked_25"
+BADGE_CLEAN_DESK = "clean_desk"
+BADGE_ARCHIVIST = "archivist"
+
+# Jira akisi
+BADGE_FIRST_ISSUE = "first_issue"
 BADGE_FINISHER = "finisher"
+BADGE_DROP_25 = "drop_25"
+BADGE_DROP_100 = "drop_100"
+BADGE_DROP_500 = "drop_500"
+BADGE_WEEK_20 = "week_20"
+BADGE_OLD_ISSUE = "old_issue"
+BADGE_THREE_PROJECTS = "three_projects"
+BADGE_LOCAL_50 = "local_50"
+
+# Seri
 BADGE_STREAK_5 = "streak_5"
 BADGE_STREAK_20 = "streak_20"
+BADGE_STREAK_30 = "streak_30"
 BADGE_STREAK_60 = "streak_60"
-BADGE_CARTOGRAPHER = "cartographer"
-BADGE_ARCHIVIST = "archivist"
-BADGE_ENVOY = "envoy"
+BADGE_GRACE_SAVED = "grace_saved"
+BADGE_STREAK_AGAIN = "streak_again_10"
+
+# Haftalik emirler
+BADGE_FIRST_QUEST = "first_quest"
+BADGE_QUEST_4_WEEKS = "quest_4_weeks"
+BADGE_QUEST_MONDAY = "quest_monday"
+
+# XP ve rutbe
+BADGE_XP_1000 = "xp_1000"
+BADGE_XP_5000 = "xp_5000"
+BADGE_XP_20000 = "xp_20000"
+BADGE_RANK_KNIGHT = "rank_knight"
+BADGE_RANK_MASTER = "rank_master"
+BADGE_RANK_COUNCIL = "rank_council"
+BADGE_RANK_LEGEND = "rank_legend"
+BADGE_XP_DAY_300 = "xp_day_300"
 BADGE_COMPLETE = "campaign_complete"
 
+# Zaman ve ritm
+BADGE_DAWN_10 = "dawn_10"
+BADGE_FRIDAY_5 = "friday_5"
+BADGE_FULL_MONTH = "full_month"
+BADGE_YEAR_FIRST = "year_first"
+
+# Iletisim
+BADGE_ENVOY = "envoy"
+BADGE_MAIL_10 = "mail_10"
+BADGE_TEAMS_10 = "teams_10"
+BADGE_CONTACTS_20 = "contacts_20"
+BADGE_FAST_REPLY = "fast_reply"
+
+# Kesif ve araclar
+BADGE_FIRST_FIX = "first_fix"
+BADGE_FIX_25 = "fix_25"
+BADGE_FIRST_EXCEL = "first_excel"
+BADGE_FIRST_FLEET = "first_fleet"
+BADGE_FLEET_5 = "fleet_5"
+BADGE_FIRST_LOCAL_FIELD = "first_local_field"
+BADGE_CARTOGRAPHER = "cartographer"
+
+CATEGORY_TASK = "gorev"
+CATEGORY_JIRA = "jira"
+CATEGORY_STREAK = "seri"
+CATEGORY_QUEST = "emir"
+CATEGORY_RANK = "rutbe"
+CATEGORY_RITUAL = "ritim"
+CATEGORY_CONTACT = "iletisim"
+CATEGORY_TOOL = "kesif"
+
+BADGE_CATEGORIES: tuple[dict[str, str], ...] = (
+    {"code": CATEGORY_TASK, "label": "Görev"},
+    {"code": CATEGORY_JIRA, "label": "Jira akışı"},
+    {"code": CATEGORY_STREAK, "label": "Seri"},
+    {"code": CATEGORY_QUEST, "label": "Haftalık emirler"},
+    {"code": CATEGORY_RANK, "label": "XP ve rütbe"},
+    {"code": CATEGORY_RITUAL, "label": "Zaman ve ritim"},
+    {"code": CATEGORY_CONTACT, "label": "İletişim"},
+    {"code": CATEGORY_TOOL, "label": "Keşif ve araçlar"},
+)
+
+CATEGORY_LABELS: dict[str, str] = {
+    item["code"]: item["label"] for item in BADGE_CATEGORIES
+}
+
+RARITY_COMMON = "yaygin"
+RARITY_RARE = "nadir"
+RARITY_LEGEND = "efsanevi"
+
+# Nadirlik hem halkanin rengini hem rozetin odedigi XP carpanini belirler:
+# "Rozet kazanildi" kuralindaki puan carpanla olceklenir.
+RARITIES: tuple[dict[str, Any], ...] = (
+    {"code": RARITY_COMMON, "label": "Yaygın", "multiplier": 1},
+    {"code": RARITY_RARE, "label": "Nadir", "multiplier": 2},
+    {"code": RARITY_LEGEND, "label": "Efsanevi", "multiplier": 4},
+)
+
+RARITY_LABELS: dict[str, str] = {item["code"]: item["label"] for item in RARITIES}
+RARITY_MULTIPLIERS: dict[str, int] = {
+    item["code"]: int(item["multiplier"]) for item in RARITIES
+}
+
+
+def _badge(code: str, label: str, hint: str, category: str, rarity: str) -> dict[str, Any]:
+    return {
+        "code": code,
+        "label": label,
+        "hint": hint,
+        "category": category,
+        "rarity": rarity,
+    }
+
+
 BADGES: tuple[dict[str, Any], ...] = (
-    {"code": BADGE_CLEAN_DESK, "label": "Temiz Masa", "hint": "7 gün boyunca gecikmiş görev yok"},
-    {"code": BADGE_FAST_REPLY, "label": "Hızlı Yanıt", "hint": "10 e-posta görevi 24 saat içinde ele alındı"},
-    {"code": BADGE_CLOSER, "label": "Kapatıcı", "hint": "Bir seferde 25 görev kapatıldı"},
-    {"code": BADGE_FINISHER, "label": "Bitirici", "hint": "Bir filtre filosundan 20 kayıt düştü"},
-    {"code": BADGE_STREAK_5, "label": "Beş Gün", "hint": "5 iş günü kesintisiz seri"},
-    {"code": BADGE_STREAK_20, "label": "Yirmi Gün", "hint": "20 iş günü kesintisiz seri"},
-    {"code": BADGE_STREAK_60, "label": "Altmış Gün", "hint": "60 iş günü kesintisiz seri"},
-    {"code": BADGE_CARTOGRAPHER, "label": "Haritacı", "hint": "Bütün filolarda sütun düzeni tanımlı"},
-    {"code": BADGE_ARCHIVIST, "label": "Arşivci", "hint": "30 günden eski 20 tamamlanmış görev katlandı"},
-    {"code": BADGE_ENVOY, "label": "Elçi", "hint": "20 kez son durum soruldu"},
-    {"code": BADGE_COMPLETE, "label": "Sefer Tamam", "hint": "Sefer hedefine ulaşıldı"},
+    # --- Gorev ---
+    _badge(BADGE_FIRST_TASK, "İlk Adım", "İlk görevi kapat", CATEGORY_TASK, RARITY_COMMON),
+    _badge(BADGE_TASK_10, "Onlu Devriye", "10 görev kapat", CATEGORY_TASK, RARITY_COMMON),
+    _badge(BADGE_CLOSER, "Kapatıcı", "25 görev kapat", CATEGORY_TASK, RARITY_RARE),
+    _badge(BADGE_TASK_50, "Elli Sefer", "50 görev kapat", CATEGORY_TASK, RARITY_RARE),
+    _badge(BADGE_TASK_200, "İki Yüz Görev", "200 görev kapat", CATEGORY_TASK, RARITY_LEGEND),
+    _badge(BADGE_TASK_DAY_5, "Yoğun Uçuş", "Bir günde 5 görev kapat",
+           CATEGORY_TASK, RARITY_RARE),
+    _badge(BADGE_EARLY_10, "Zamanın Önünde", "Son tarihinden önce 10 görev bitir",
+           CATEGORY_TASK, RARITY_COMMON),
+    _badge(BADGE_NOTED_20, "Seyir Defteri", "Notu olan 20 görev biriktir",
+           CATEGORY_TASK, RARITY_COMMON),
+    _badge(BADGE_LINKED_25, "Bağlantı Subayı", "Jira kaydına bağlı 25 görev",
+           CATEGORY_TASK, RARITY_RARE),
+    _badge(BADGE_CLEAN_DESK, "Temiz Masa", "7 gün boyunca gecikmiş görev yok",
+           CATEGORY_TASK, RARITY_RARE),
+    _badge(BADGE_ARCHIVIST, "Arşivci", "30 günden eski 20 tamamlanmış görev katlandı",
+           CATEGORY_TASK, RARITY_COMMON),
+    # --- Jira akisi ---
+    _badge(BADGE_FIRST_ISSUE, "İlk Kapanış", "İlk Jira kaydı tamamlandı",
+           CATEGORY_JIRA, RARITY_COMMON),
+    _badge(BADGE_FINISHER, "Bitirici", "Bir filtre filosundan 20 kayıt düştü",
+           CATEGORY_JIRA, RARITY_RARE),
+    _badge(BADGE_DROP_25, "Filo Süpürgesi", "Filtre filolarından 25 kayıt düştü",
+           CATEGORY_JIRA, RARITY_COMMON),
+    _badge(BADGE_DROP_100, "Yüz Kayıt", "Filtre filolarından 100 kayıt düştü",
+           CATEGORY_JIRA, RARITY_RARE),
+    _badge(BADGE_DROP_500, "Beş Yüz Kayıt", "Filtre filolarından 500 kayıt düştü",
+           CATEGORY_JIRA, RARITY_LEGEND),
+    _badge(BADGE_WEEK_20, "Haftanın Fırtınası", "Bir hafta içinde 20 kayıt düştü",
+           CATEGORY_JIRA, RARITY_RARE),
+    _badge(BADGE_OLD_ISSUE, "Arkeolog", "30 günden uzun açık kalmış bir kaydı kapat",
+           CATEGORY_JIRA, RARITY_RARE),
+    _badge(BADGE_THREE_PROJECTS, "Üç Cephe", "Aynı gün üç farklı projeden kayıt ilerlet",
+           CATEGORY_JIRA, RARITY_RARE),
+    _badge(BADGE_LOCAL_50, "Kayıt Tutan", "50 yerel alan hücresi doldur",
+           CATEGORY_JIRA, RARITY_COMMON),
+    # --- Seri ---
+    _badge(BADGE_STREAK_5, "Beş Gün", "5 iş günü kesintisiz seri",
+           CATEGORY_STREAK, RARITY_COMMON),
+    _badge(BADGE_STREAK_20, "Yirmi Gün", "20 iş günü kesintisiz seri",
+           CATEGORY_STREAK, RARITY_RARE),
+    _badge(BADGE_STREAK_30, "Otuz Gün", "30 iş günü kesintisiz seri",
+           CATEGORY_STREAK, RARITY_RARE),
+    _badge(BADGE_STREAK_60, "Altmış Gün", "60 iş günü kesintisiz seri",
+           CATEGORY_STREAK, RARITY_LEGEND),
+    _badge(BADGE_GRACE_SAVED, "Güç Kalkanı", "Güç koruması bir seriyi kurtardı",
+           CATEGORY_STREAK, RARITY_RARE),
+    _badge(BADGE_STREAK_AGAIN, "Küllerinden", "Seri kırıldıktan sonra yeniden 10 güne çık",
+           CATEGORY_STREAK, RARITY_RARE),
+    # --- Haftalik emirler ---
+    _badge(BADGE_FIRST_QUEST, "İlk Emir", "Bir haftalık emri tamamla",
+           CATEGORY_QUEST, RARITY_COMMON),
+    _badge(BADGE_QUEST_4_WEEKS, "Dört Hafta Disiplin",
+           "Dört hafta üst üste o haftanın bütün emirlerini bitir",
+           CATEGORY_QUEST, RARITY_LEGEND),
+    _badge(BADGE_QUEST_MONDAY, "Pazartesi Fırtınası",
+           "Bir haftanın bütün emirlerini pazartesi bitir", CATEGORY_QUEST, RARITY_RARE),
+    # --- XP ve rutbe ---
+    _badge(BADGE_XP_1000, "Bin Işık", "Bir seferde 1.000 XP topla",
+           CATEGORY_RANK, RARITY_COMMON),
+    _badge(BADGE_XP_5000, "Beş Bin Işık", "Bir seferde 5.000 XP topla",
+           CATEGORY_RANK, RARITY_RARE),
+    _badge(BADGE_XP_20000, "Yirmi Bin Işık", "Bir seferde 20.000 XP topla",
+           CATEGORY_RANK, RARITY_LEGEND),
+    _badge(BADGE_RANK_KNIGHT, "Şövalye Yemini", "Şövalye rütbesine çık",
+           CATEGORY_RANK, RARITY_COMMON),
+    _badge(BADGE_RANK_MASTER, "Usta Kürsüsü", "Usta rütbesine çık",
+           CATEGORY_RANK, RARITY_RARE),
+    _badge(BADGE_RANK_COUNCIL, "Konsey Koltuğu", "Konsey Üyesi rütbesine çık",
+           CATEGORY_RANK, RARITY_RARE),
+    _badge(BADGE_RANK_LEGEND, "Efsane Adı", "Efsane rütbesine çık",
+           CATEGORY_RANK, RARITY_LEGEND),
+    _badge(BADGE_XP_DAY_300, "Tek Günde Üç Yüz", "Bir günde 300 XP topla",
+           CATEGORY_RANK, RARITY_RARE),
+    _badge(BADGE_COMPLETE, "Sefer Tamam", "Sefer hedefine ulaşıldı",
+           CATEGORY_RANK, RARITY_RARE),
+    # --- Zaman ve ritim ---
+    _badge(BADGE_DAWN_10, "Şafak Nöbeti", "Sabah 08:00'den önce 10 görev kapat",
+           CATEGORY_RITUAL, RARITY_RARE),
+    _badge(BADGE_FRIDAY_5, "Cuma Kapanışı", "Cuma öğleden sonra 5 görev kapat",
+           CATEGORY_RITUAL, RARITY_COMMON),
+    _badge(BADGE_FULL_MONTH, "Dolu Ay", "Bir ayın her iş gününde etkin ol",
+           CATEGORY_RITUAL, RARITY_LEGEND),
+    _badge(BADGE_YEAR_FIRST, "Yılın İlk Nöbeti", "Yılın ilk iş gününde etkin ol",
+           CATEGORY_RITUAL, RARITY_RARE),
+    # --- Iletisim ---
+    _badge(BADGE_ENVOY, "Elçi", "20 kez son durum soruldu",
+           CATEGORY_CONTACT, RARITY_COMMON),
+    _badge(BADGE_MAIL_10, "Posta Kuryesi", "E-posta ile 10 kayıt gönder",
+           CATEGORY_CONTACT, RARITY_COMMON),
+    _badge(BADGE_TEAMS_10, "Kanal Sesi", "10 farklı kayıt için Teams mesajı aç",
+           CATEGORY_CONTACT, RARITY_COMMON),
+    _badge(BADGE_CONTACTS_20, "Adres Defteri", "Adres defterinde 20 kişi biriktir",
+           CATEGORY_CONTACT, RARITY_COMMON),
+    _badge(BADGE_FAST_REPLY, "Hızlı Yanıt", "10 e-posta görevi 24 saat içinde ele alındı",
+           CATEGORY_CONTACT, RARITY_RARE),
+    # --- Kesif ve araclar ---
+    _badge(BADGE_FIRST_FIX, "İlk Düzeltme", "Copilot ile ilk metin düzeltmesi",
+           CATEGORY_TOOL, RARITY_COMMON),
+    _badge(BADGE_FIX_25, "Metin Ustası", "25 metin düzeltmesi", CATEGORY_TOOL, RARITY_RARE),
+    _badge(BADGE_FIRST_EXCEL, "İlk Döküm", "İlk Excel dışa aktarımı",
+           CATEGORY_TOOL, RARITY_COMMON),
+    _badge(BADGE_FIRST_FLEET, "İlk Filo", "İlk filoyu yarat", CATEGORY_TOOL, RARITY_COMMON),
+    _badge(BADGE_FLEET_5, "Filo Komutanı", "5 filo yönet", CATEGORY_TOOL, RARITY_RARE),
+    _badge(BADGE_FIRST_LOCAL_FIELD, "İlk Yerel Alan", "İlk yerel alanı tanımla",
+           CATEGORY_TOOL, RARITY_COMMON),
+    _badge(BADGE_CARTOGRAPHER, "Haritacı", "Bütün filolarda sütun düzeni tanımlı",
+           CATEGORY_TOOL, RARITY_RARE),
 )
 
 BADGE_CODES: tuple[str, ...] = tuple(badge["code"] for badge in BADGES)
+BADGES_BY_CODE: dict[str, dict[str, Any]] = {badge["code"]: badge for badge in BADGES}
+
+# Rozet simgeleri: her kod icin ayri bir SVG (24x24, cizgi tabanli, kategori
+# cercevesi + nadirlik halkasi). `tools/rozet_simgeleri.py` uretir.
+ICON_DIR = "/static/rozetler/"
+
+# Kod -> (seri adi, esik). Seri = sirali damga listesi.
+SERIES_BADGES: dict[str, tuple[str, int]] = {
+    BADGE_FIRST_TASK: ("task_done", 1),
+    BADGE_TASK_10: ("task_done", 10),
+    BADGE_CLOSER: ("task_done", 25),
+    BADGE_TASK_50: ("task_done", 50),
+    BADGE_TASK_200: ("task_done", 200),
+    BADGE_EARLY_10: ("task_early", 10),
+    BADGE_FIRST_ISSUE: ("issue_done", 1),
+    BADGE_DROP_25: ("issue_drop", 25),
+    BADGE_DROP_100: ("issue_drop", 100),
+    BADGE_DROP_500: ("issue_drop", 500),
+    BADGE_FIRST_QUEST: ("quest_done", 1),
+    BADGE_FAST_REPLY: ("mail_fast", 10),
+    BADGE_DAWN_10: ("dawn", 10),
+    BADGE_FRIDAY_5: ("friday", 5),
+    BADGE_FIRST_FIX: ("fix", 1),
+    BADGE_FIX_25: ("fix", 25),
+    BADGE_FIRST_EXCEL: ("excel", 1),
+}
+
+SERIES_NAMES: tuple[str, ...] = (
+    "task_done", "task_early", "issue_done", "issue_drop", "quest_done",
+    "mail_fast", "dawn", "friday", "fix", "excel",
+)
+
+# Kod -> (olcu adi, esik). Olcu anlik sayidir; kazanma ani bugundur.
+GAUGE_BADGES: dict[str, tuple[str, int]] = {
+    BADGE_NOTED_20: ("noted_tasks", 20),
+    BADGE_LINKED_25: ("linked_tasks", 25),
+    BADGE_CLEAN_DESK: ("clean_days", CLEAN_DESK_DAYS),
+    BADGE_ARCHIVIST: ("old_done", 20),
+    BADGE_FINISHER: ("group_max", 20),
+    BADGE_LOCAL_50: ("local_values", 50),
+    BADGE_STREAK_5: ("streak", 5),
+    BADGE_STREAK_20: ("streak", 20),
+    BADGE_STREAK_30: ("streak", 30),
+    BADGE_STREAK_60: ("streak", 60),
+    BADGE_XP_1000: ("xp", 1000),
+    BADGE_XP_5000: ("xp", 5000),
+    BADGE_XP_20000: ("xp", 20000),
+    BADGE_ENVOY: ("asked", 20),
+    BADGE_MAIL_10: ("mail_issues", 10),
+    BADGE_TEAMS_10: ("teams_issues", 10),
+    BADGE_CONTACTS_20: ("contacts", 20),
+    BADGE_FIRST_FLEET: ("fleets", 1),
+    BADGE_FLEET_5: ("fleets", 5),
+    BADGE_FIRST_LOCAL_FIELD: ("local_fields", 1),
+}
+
+GAUGE_NAMES: tuple[str, ...] = (
+    "noted_tasks", "linked_tasks", "clean_days", "old_done", "group_max",
+    "local_values", "streak", "xp", "asked", "mail_issues", "teams_issues",
+    "contacts", "fleets", "local_fields",
+)
+
+# Kod -> bayrak adi. "Oldu ya da olmadi": ara ilerleme anlamli degildir.
+FLAG_BADGES: dict[str, str] = {
+    BADGE_TASK_DAY_5: "task_day_5",
+    BADGE_WEEK_20: "week_20",
+    BADGE_OLD_ISSUE: "old_issue",
+    BADGE_THREE_PROJECTS: "three_projects",
+    BADGE_GRACE_SAVED: "grace_saved",
+    BADGE_STREAK_AGAIN: "streak_again",
+    BADGE_QUEST_4_WEEKS: "quest_4_weeks",
+    BADGE_QUEST_MONDAY: "quest_monday",
+    BADGE_XP_DAY_300: "xp_day_300",
+    BADGE_FULL_MONTH: "full_month",
+    BADGE_YEAR_FIRST: "year_first",
+    BADGE_COMPLETE: "target_reached",
+    BADGE_CARTOGRAPHER: "all_columns",
+}
+
+FLAG_NAMES: tuple[str, ...] = tuple(sorted(set(FLAG_BADGES.values())))
+
+# Rutbe rozetleri: esik seferin hedefine oranlidir, o yuzden ayri tablo.
+RANK_BADGES: dict[str, str] = {
+    BADGE_RANK_KNIGHT: "knight",
+    BADGE_RANK_MASTER: "master",
+    BADGE_RANK_COUNCIL: "council",
+    BADGE_RANK_LEGEND: "legend",
+}
+
+# Padawan rozeti YOKTUR: sefer o rutbeyle baslar, kazanilacak bir sey degil.
+
+# Bir gunde kac XP "buyuk gun" sayilir.
+BIG_DAY_XP = 300
+# Bir haftada kac kayit dusmesi "firtina" sayilir.
+STORM_WEEK_DROPS = 20
+# Bir gunde kac gorev kapanmasi "yogun ucus" sayilir.
+BUSY_DAY_TASKS = 5
+# Kac gunden uzun acik kalmis kayit "eski" sayilir.
+OLD_ISSUE_DAYS = 30
+# Sabah nobeti bu saatten once biten gorevleri sayar.
+DAWN_HOUR = 8
+# Cuma kapanisi bu saatten sonra biten gorevleri sayar.
+FRIDAY_HOUR = 13
+# "Kullerinden" rozeti icin kirilmadan sonra ulasilmasi gereken seri.
+STREAK_AGAIN_DAYS = 10
+# "Dort hafta disiplin" icin ust uste tam hafta sayisi.
+QUEST_WEEKS = 4
+
 
 # --- haftalik emirler ---------------------------------------------------
 
@@ -174,8 +509,6 @@ DROP_CAP = 20
 SETTING_GRACE_MONTH = "gamify.streak_grace_used_month"
 SETTING_CLEAN_SINCE = "gamify.clean_since"
 SETTING_DIGEST_WEEK = "gamify.digest_seen_week"
-
-CLEAN_DESK_DAYS = 7
 
 
 # --- zaman --------------------------------------------------------------
@@ -390,9 +723,14 @@ def award(
     note: str = "",
     points: int | None = None,
     now: datetime | None = None,
+    at: str | None = None,
 ) -> dict[str, Any] | None:
     """Tek bir defter satiri. Sefer yoksa, kural kapaliysa ya da olay zaten
-    defterdeyse `None` doner."""
+    defterdeyse `None` doner.
+
+    `at` verilirse satir O ANA yazilir: geriye donuk verilen rozet defterde de
+    gercek tarihiyle durur.
+    """
     campaign = ensure_campaign(context, now)
     if campaign is None:
         return None
@@ -404,7 +742,8 @@ def award(
     if value <= 0:
         return None
     return store.add_event(
-        conn, campaign["id"], source, kind, value, ref, title, note, at=stamp_of(now)
+        conn, campaign["id"], source, kind, value, ref, title, note,
+        at=at or stamp_of(now),
     )
 
 
@@ -895,83 +1234,385 @@ def _sync_quests(
     return store.list_quests(conn, campaign["id"], week)
 
 
-# --- rozetler -----------------------------------------------------------
+# --- rozetler: degerlendirme ---------------------------------------------
 
 
 def _check_badges(context: Any, campaign: dict[str, Any], now: datetime | None) -> list[str]:
+    """Hak edilmis ama henuz verilmemis rozetleri yazar.
+
+    Kosullar gecmis veriden olculdugu icin bu ayni zamanda GERIYE DONUK
+    degerlendirmedir: eski bir kurulumda panel ilk acildiginda (ya da ilk
+    Guncelle'de) gecmisten hak edilen rozetler topluca duser. Kazanma tarihi
+    mumkunse gercek olayin damgasidir, degilse bugun.
+    """
     conn = context.connection()
     earned = store.earned_badges(conn, campaign["id"])
     facts = badge_facts(context, campaign, now)
+    rule = enabled_rule(conn, KIND_BADGE_EARNED)
+    base = int(rule["points"]) if rule else 0
     fresh: list[str] = []
     for badge in BADGES:
         code = badge["code"]
         if code in earned or not _badge_met(code, facts):
             continue
-        if store.earn_badge(conn, campaign["id"], code, stamp_of(now)):
+        at = _badge_at(code, facts) or stamp_of(now)
+        if store.earn_badge(conn, campaign["id"], code, at):
             fresh.append(code)
             award(
                 context, SOURCE_BADGE, KIND_BADGE_EARNED, f"badge:{code}",
-                f"Rozet kazanıldı: {badge['label']}", now=now,
+                f"Rozet kazanıldı: {badge['label']}",
+                points=base * RARITY_MULTIPLIERS.get(badge["rarity"], 1) or None,
+                now=now, at=at,
             )
     return fresh
 
 
+def badge_progress(code: str, facts: dict[str, Any]) -> tuple[int, int]:
+    """Rozetin (ilerleme, hedef) ikilisi. Kilitli kutucuktaki "12/25" budur.
+
+    Bayrak rozetlerinde ara deger yoktur: 0/1 ya da 1/1.
+    """
+    series = SERIES_BADGES.get(code)
+    if series is not None:
+        name, need = series
+        return min(len(facts["series"].get(name, ())), need), need
+    gauge = GAUGE_BADGES.get(code)
+    if gauge is not None:
+        name, need = gauge
+        return min(int(facts["gauges"].get(name, 0)), need), need
+    rank_code = RANK_BADGES.get(code)
+    if rank_code is not None:
+        need = int(facts["rank_needs"].get(rank_code, 0))
+        return (min(int(facts["gauges"].get("xp", 0)), need), need) if need > 0 else (0, 1)
+    flag = FLAG_BADGES.get(code)
+    if flag is not None:
+        return (1, 1) if facts["flags"].get(flag) else (0, 1)
+    return 0, 1
+
+
 def _badge_met(code: str, facts: dict[str, Any]) -> bool:
-    if code == BADGE_CLEAN_DESK:
-        return facts["clean_days"] >= CLEAN_DESK_DAYS
-    if code == BADGE_FAST_REPLY:
-        return facts["mail_fast"] >= 10
-    if code == BADGE_CLOSER:
-        return facts["tasks_done"] >= 25
-    if code == BADGE_FINISHER:
-        return facts["group_max"] >= 20
-    if code == BADGE_STREAK_5:
-        return facts["streak"] >= 5
-    if code == BADGE_STREAK_20:
-        return facts["streak"] >= 20
-    if code == BADGE_STREAK_60:
-        return facts["streak"] >= 60
-    if code == BADGE_CARTOGRAPHER:
-        return facts["all_columns"]
-    if code == BADGE_ARCHIVIST:
-        return facts["old_done"] >= 20
-    if code == BADGE_ENVOY:
-        return facts["asked"] >= 20
-    if code == BADGE_COMPLETE:
-        return facts["target_reached"]
-    return False
+    value, need = badge_progress(code, facts)
+    return need > 0 and value >= need
+
+
+def _badge_at(code: str, facts: dict[str, Any]) -> str:
+    """Kazanmanin GERCEK ani, bilinebiliyorsa.
+
+    Sayilabilir rozetlerde esigi dolduran olayin damgasidir: gecmis veriden
+    verilen rozet "bugun kazanildi" diye gorunmez.
+    """
+    series = SERIES_BADGES.get(code)
+    if series is None:
+        return ""
+    name, need = series
+    stamps = facts["series"].get(name) or []
+    return stamps[need - 1] if len(stamps) >= need else ""
+
+
+# --- rozetler: gercekler --------------------------------------------------
+
+
+def _local_hour(value: Any) -> int:
+    """Saklanmis damganin YEREL saati; okunamazsa -1."""
+    parsed = field_utils.parse_moment(value)
+    if parsed is None:
+        return -1
+    return parsed.astimezone().hour
+
+
+def _project_of(key: str) -> str:
+    """'ABC-123' -> 'ABC'. Proje onu yoksa bos."""
+    text = str(key or "").strip().upper()
+    return text.split("-")[0] if "-" in text else ""
 
 
 def badge_facts(
     context: Any, campaign: dict[str, Any], now: datetime | None = None
 ) -> dict[str, Any]:
-    """Rozet kosullarinin tamami tek okumada; her biri gercek veriden."""
+    """Butun rozet kosullari tek okumada; hepsi gercek veriden.
+
+    Uc kova doner: `series` (sirali damga listeleri), `gauges` (anlik sayilar),
+    `flags` (oldu/olmadi). Ayrica rutbe esikleri (`rank_needs`) -- onlar sefer
+    hedefine oranli oldugu icin katalogda sabit duramaz.
+    """
     conn = context.connection()
     board = _board_facts(context, now)
+    start = campaign["starts_at"] or ""
+
+    series: dict[str, list[str]] = {name: [] for name in SERIES_NAMES}
+    day_tasks: dict[str, int] = {}
+    day_points: dict[str, int] = {}
+    day_projects: dict[str, set[str]] = {}
+    week_drops: dict[str, int] = {}
+    done_keys: dict[str, str] = {}
+    active_days: set[str] = set()
+
+    events = store.list_events(conn, campaign["id"], limit=store.LEDGER_MAX)
+    for event in sorted(events, key=lambda item: (item["at"], item["id"])):
+        stamp = event["at"]
+        kind = event["kind"]
+        day = local_day(stamp)
+        active_days.add(day)
+        day_points[day] = day_points.get(day, 0) + int(event["points"])
+        if kind in (KIND_DONE, KIND_DONE_OVERDUE):
+            series["task_done"].append(stamp)
+            day_tasks[day] = day_tasks.get(day, 0) + 1
+            hour = _local_hour(stamp)
+            if 0 <= hour < DAWN_HOUR:
+                series["dawn"].append(stamp)
+            weekday = parse_day(day)
+            if weekday is not None and weekday.weekday() == 4 and hour >= FRIDAY_HOUR:
+                series["friday"].append(stamp)
+        elif kind == KIND_DONE_BEFORE_DUE:
+            series["task_early"].append(stamp)
+        elif kind == KIND_MAIL_FAST:
+            series["mail_fast"].append(stamp)
+        elif kind == KIND_QUEST_DONE:
+            series["quest_done"].append(stamp)
+        elif kind == KIND_STATUS_DONE:
+            series["issue_done"].append(stamp)
+            key = event["ref"].split(":", 1)[-1]
+            done_keys.setdefault(key.upper(), stamp)
+            project = _project_of(key)
+            if project:
+                day_projects.setdefault(day, set()).add(project)
+        elif kind == KIND_LEFT_GROUP:
+            series["issue_drop"].append(stamp)
+            parsed = parse_day(day)
+            if parsed is not None:
+                week = week_start_of(parsed)
+                week_drops[week] = week_drops.get(week, 0) + 1
+            project = _project_of(event["ref"].split(":", 1)[-1])
+            if project:
+                day_projects.setdefault(day, set()).add(project)
+
+    # Sefere bagli olmayan is izleri: seferin baslangicindan sonrakiler sayilir.
+    for name, kind in (("fix", store.ACTIVITY_FIX), ("excel", store.ACTIVITY_EXCEL)):
+        series[name] = [
+            stamp for stamp in store.activity_stamps(conn, kind) if local_day(stamp) >= start
+        ]
+
+    marks = store.marked_days(conn, campaign["id"])
+    total = store.total_xp(conn, campaign["id"])
+    target = int(campaign["target_xp"] or 0)
+
+    gauges = {
+        "noted_tasks": 0,
+        "linked_tasks": 0,
+        "clean_days": _clean_days(context, board["overdue"], now),
+        "old_done": board["old_done"],
+        "group_max": 0,
+        "local_values": _local_value_count(conn),
+        "streak": _best_streak(marks),
+        "xp": total,
+        "asked": _asked_count(context, campaign),
+        "mail_issues": _mailed_issue_count(conn, start),
+        "teams_issues": len(_asked_keys(conn, start)),
+        "contacts": _row_count(conn, "contacts"),
+        "fleets": 0,
+        "local_fields": len(repository.list_local_fields(conn)),
+    }
+
     groups = repository.list_groups(conn)
-    group_max = 0
+    gauges["fleets"] = len(groups)
     for group in groups:
         if group["kind"] != repository.KIND_FILTER:
             continue
-        group_max = max(
-            group_max,
+        gauges["group_max"] = max(
+            gauges["group_max"],
             store.ref_prefix_count(conn, campaign["id"], KIND_LEFT_GROUP, f"{group['id']}:"),
         )
-    asked = _asked_count(context, campaign)
-    total = store.total_xp(conn, campaign["id"])
-    return {
-        "clean_days": _clean_days(context, board["overdue"], now),
-        "mail_fast": store.count_events(conn, campaign["id"], (KIND_MAIL_FAST,)),
-        "tasks_done": store.count_events(
-            conn, campaign["id"], (KIND_DONE, KIND_DONE_OVERDUE)
-        ),
-        "group_max": group_max,
-        "streak": _best_streak(store.marked_days(conn, campaign["id"])),
+
+    for task in repository.list_tasks(conn):
+        if (task.get("note") or "").strip():
+            gauges["noted_tasks"] += 1
+        if (task.get("issue_key") or "").strip():
+            gauges["linked_tasks"] += 1
+
+    quests = store.list_quests(conn, campaign["id"])
+    flags = {
+        "task_day_5": any(count >= BUSY_DAY_TASKS for count in day_tasks.values()),
+        "week_20": any(count >= STORM_WEEK_DROPS for count in week_drops.values()),
+        "xp_day_300": any(points >= BIG_DAY_XP for points in day_points.values()),
+        "three_projects": any(len(names) >= 3 for names in day_projects.values()),
+        "old_issue": _closed_an_old_issue(conn, done_keys),
+        "grace_saved": store.STREAK_GRACE in marks.values(),
+        "streak_again": _streak_after_break(marks),
+        "quest_4_weeks": _full_weeks_in_a_row(quests) >= QUEST_WEEKS,
+        "quest_monday": _finished_a_week_on_monday(quests),
+        "full_month": _full_month(marks, active_days),
+        "year_first": _worked_year_opening(active_days),
+        "target_reached": target > 0 and total >= target,
         "all_columns": bool(groups) and all(group["columns"] for group in groups),
-        "old_done": board["old_done"],
-        "asked": asked,
-        "target_reached": campaign["target_xp"] > 0 and total >= campaign["target_xp"],
     }
+
+    return {
+        "series": series,
+        "gauges": gauges,
+        "flags": flags,
+        "rank_needs": {
+            rank["code"]: int(round(rank["at"] * target)) for rank in RANKS
+        },
+    }
+
+
+def _row_count(conn: Any, table: str) -> int:
+    return int(conn.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()["c"])
+
+
+def _local_value_count(conn: Any) -> int:
+    """Doldurulmus yerel alan hucresi sayisi (bos deger sayilmaz)."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS c FROM local_values WHERE value IS NOT NULL AND TRIM(value) <> ''"
+    ).fetchone()
+    return int(row["c"])
+
+
+def _mailed_issue_count(conn: Any, start: str) -> int:
+    """Sefer basladiktan sonra e-postayla gonderilen kayit sayisi."""
+    rows = conn.execute("SELECT issue_count, sent_at FROM mail_sends").fetchall()
+    return sum(
+        int(row["issue_count"] or 0) for row in rows if local_day(row["sent_at"]) >= start
+    )
+
+
+def _asked_keys(conn: Any, start: str) -> set[str]:
+    """Sefer icinde Teams mesaji acilan FARKLI kayitlar."""
+    rows = conn.execute(
+        "SELECT issue_key, opened_at FROM sent_messages WHERE opened_at IS NOT NULL"
+    ).fetchall()
+    return {row["issue_key"] for row in rows if local_day(row["opened_at"]) >= start}
+
+
+def _closed_an_old_issue(conn: Any, done_keys: dict[str, str]) -> bool:
+    """30 gunden uzun acik kalmis bir kayit kapatildi mi.
+
+    Kaydin `created` alani yereldeki kopyadan okunur; kayit silinmisse ya da
+    tarih okunamiyorsa o kayit sessizce atlanir (yanlis rozetten yoksun rozet
+    yegdir).
+    """
+    if not done_keys:
+        return False
+    stored = repository.get_issues(conn, list(done_keys))
+    for key, stamp in done_keys.items():
+        record = stored.get(key)
+        if record is None:
+            continue
+        created = field_utils.parse_moment(
+            ((record.get("raw") or {}).get("fields") or {}).get("created")
+        )
+        closed = field_utils.parse_moment(stamp)
+        if created is None or closed is None:
+            continue
+        if (closed - created) >= timedelta(days=OLD_ISSUE_DAYS):
+            return True
+    return False
+
+
+def _streak_after_break(marks: dict[str, str]) -> bool:
+    """Seri kirildiktan SONRA yeniden 10 is gunune ulasildi mi.
+
+    Ilk seri sayilmaz: rozetin anlattigi sey "dusup kalkmak". Bir serinin
+    "yeniden" olmasi, baslangicindan onceki is gununun isaretsiz olmasi ve
+    ondan once de en az bir isaretli gun bulunmasidir.
+    """
+    days = sorted(day for day in marks if parse_day(day) is not None)
+    if not days:
+        return False
+    first = parse_day(days[0])
+    for text in days:
+        day = parse_day(text)
+        if day is None or _streak_length(marks, day) < STREAK_AGAIN_DAYS:
+            continue
+        # Serinin basi: geriye dogru isaretsiz ilk gune kadar yuru.
+        head = day
+        while True:
+            earlier = previous_workday(head)
+            if earlier.isoformat() not in marks:
+                break
+            head = earlier
+        if first is not None and head > first:
+            return True
+    return False
+
+
+def _full_weeks_in_a_row(quests: list[dict[str, Any]]) -> int:
+    """Butun emirleri biten en uzun ARDISIK hafta dizisi."""
+    weeks: dict[str, list[dict[str, Any]]] = {}
+    for quest in quests:
+        weeks.setdefault(quest["week_start"], []).append(quest)
+    best = 0
+    run = 0
+    previous: date | None = None
+    for week in sorted(weeks):
+        day = parse_day(week)
+        if day is None:
+            continue
+        whole = bool(weeks[week]) and all(item["done"] for item in weeks[week])
+        if not whole:
+            run = 0
+            previous = day
+            continue
+        run = run + 1 if previous is not None and (day - previous).days == 7 else 1
+        best = max(best, run)
+        previous = day
+    return best
+
+
+def _finished_a_week_on_monday(quests: list[dict[str, Any]]) -> bool:
+    """Bir haftanin butun emirleri o haftanin pazartesisi bitti mi."""
+    weeks: dict[str, list[dict[str, Any]]] = {}
+    for quest in quests:
+        weeks.setdefault(quest["week_start"], []).append(quest)
+    for week, items in weeks.items():
+        if not items or not all(item["done"] for item in items):
+            continue
+        if all(local_day(item["done_at"]) == week for item in items):
+            return True
+    return False
+
+
+def _full_month(marks: dict[str, str], active_days: set[str]) -> bool:
+    """Bir takvim ayinin HER is gununde etkinlik var mi.
+
+    Icinde bulunulan ay sayilmaz: ay bitmeden "dolu" denemez. Gun ya seri
+    isaretiyle ya da deftere dusmus bir olayla dolu sayilir.
+    """
+    filled = set(marks) | set(active_days)
+    months = {day[:7] for day in filled if len(day) >= 7}
+    if not months:
+        return False
+    newest = max(months)
+    for month in sorted(months):
+        if month == newest:
+            continue
+        first = parse_day(month + "-01")
+        if first is None:
+            continue
+        cursor = first
+        whole = True
+        while cursor.isoformat()[:7] == month:
+            if is_workday(cursor) and cursor.isoformat() not in filled:
+                whole = False
+                break
+            cursor += timedelta(days=1)
+        if whole:
+            return True
+    return False
+
+
+def _worked_year_opening(active_days: set[str]) -> bool:
+    """Yilin ILK is gununde deftere bir sey dustu mu."""
+    for day in active_days:
+        parsed = parse_day(day)
+        if parsed is None or not is_workday(parsed):
+            continue
+        opening = date(parsed.year, 1, 1)
+        while not is_workday(opening):
+            opening += timedelta(days=1)
+        if parsed == opening:
+            return True
+    return False
 
 
 def _asked_count(context: Any, campaign: dict[str, Any]) -> int:
@@ -1006,6 +1647,7 @@ def _clean_days(context: Any, overdue: int, now: datetime | None) -> int:
         settings.set(SETTING_CLEAN_SINCE, day)
         return 1
     return max(1, days_between(since, day) + 1)
+
 
 
 # --- silme ve yeniden degerlendirme --------------------------------------
@@ -1106,18 +1748,61 @@ def week_stats(context: Any, campaign: dict[str, Any], now: datetime | None) -> 
     return {"week_start": week, "tasks_done": closed, "issues_left": left, "xp": points}
 
 
-def badge_wall(context: Any, campaign: dict[str, Any], now: datetime | None) -> list[dict[str, Any]]:
+def _painted_badges() -> set[str]:
+    """Elle cizilmis PNG'si OLAN rozetler.
+
+    Hepsinin PNG'si yok (54 rozete 54 resim cizilmedi); olmayan icin arayuz
+    rozetin kendi SVG simgesini gosterir. Dosya varligi burada bir kez okunur,
+    yoksa her cizimde 40 tane bos istek atilirdi.
+    """
+    global _PAINTED
+    if _PAINTED is None:
+        folder = Path(__file__).resolve().parent / "static" / "img" / "gamify"
+        try:
+            names = {item.name for item in folder.iterdir()}
+        except OSError:
+            names = set()
+        _PAINTED = {code for code in BADGE_CODES if f"badge-{code}.png" in names}
+    return _PAINTED
+
+
+_PAINTED: set[str] | None = None
+
+
+def badge_wall(
+    context: Any, campaign: dict[str, Any], now: datetime | None
+) -> list[dict[str, Any]]:
+    """Rozet duvari: kazanilmis / kilitli, kategori, nadirlik, ilerleme.
+
+    Kilitli kutucuk da bilgi tasir: ipucu ("nasil kazanilir") ve "12/25"
+    ilerlemesi. Boylece duvar bir gorev listesi gibi de okunur.
+    """
     earned = store.earned_badges(context.connection(), campaign["id"])
+    facts = badge_facts(context, campaign, now)
+    painted = _painted_badges()
     wall: list[dict[str, Any]] = []
     for badge in BADGES:
+        code = badge["code"]
+        value, need = badge_progress(code, facts)
+        won = code in earned
         wall.append(
             {
-                "code": badge["code"],
+                "code": code,
                 "label": badge["label"],
                 "hint": badge["hint"],
-                "image": f"{IMAGE_DIR}badge-{badge['code']}.png",
-                "earned": badge["code"] in earned,
-                "earned_at": earned.get(badge["code"], ""),
+                "category": badge["category"],
+                "category_label": CATEGORY_LABELS.get(badge["category"], badge["category"]),
+                "rarity": badge["rarity"],
+                "rarity_label": RARITY_LABELS.get(badge["rarity"], badge["rarity"]),
+                "icon": f"{ICON_DIR}{code}.svg",
+                "image": f"{IMAGE_DIR}badge-{code}.png" if code in painted else "",
+                "earned": won,
+                "earned_at": earned.get(code, ""),
+                "progress": need if won else value,
+                "target": need,
+                # Tek adimlik rozette "1/1" bilgi tasimaz; cubuk gizlenir.
+                "show_progress": need > 1,
+                "percent": 100 if won else (min(100, round(value * 100 / need)) if need else 0),
             }
         )
     return wall
@@ -1257,6 +1942,10 @@ def panel(context: Any, now: datetime | None = None) -> dict[str, Any]:
         "quests": store.list_quests(conn, campaign["id"], week),
         "week": week_stats(context, campaign, now),
         "badges": badge_wall(context, campaign, now),
+        "badge_categories": [dict(item) for item in BADGE_CATEGORIES],
+        "rarities": [
+            {"code": item["code"], "label": item["label"]} for item in RARITIES
+        ],
         "ledger": ledger(context, limit=store.LEDGER_LIMIT, now=now),
         "sources": [{"id": name, "label": SOURCE_LABELS[name]} for name in SOURCES],
         "source_totals": store.source_totals(conn, campaign["id"]),

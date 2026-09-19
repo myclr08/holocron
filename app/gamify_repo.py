@@ -503,6 +503,49 @@ def delete_events_by_ref(
     return cursor.rowcount or 0
 
 
+# --- etkinlik defteri (rozet kosullari icin) ----------------------------
+#
+# `xp_events` puan defteridir: yalnizca puan veren, sefere bagli olaylar oraya
+# yazilir. Burasi ise sefere bagli OLMAYAN kucuk is izleridir: "Duzelt" kac kez
+# calistirildi, kac kez Excel'e dokuldu. Rozet kosullari bunlari okur.
+
+ACTIVITY_FIX = "duzelt"
+ACTIVITY_EXCEL = "excel"
+ACTIVITY_KINDS: tuple[str, ...] = (ACTIVITY_FIX, ACTIVITY_EXCEL)
+
+
+def log_activity(
+    conn: sqlite3.Connection, kind: str, ref: str = "", at: str | None = None
+) -> None:
+    """Tek satirlik is izi. Bilinmeyen tur sessizce yok sayilir.
+
+    Cagrildigi yerler kullanicinin bekledigi isi yapmakla mesgul (Excel
+    uretimi, Copilot cagrisi); buradaki bir hata o isi DUSURMEMELI, o yuzden
+    yazma hatasi yutulur.
+    """
+    if kind not in ACTIVITY_KINDS:
+        return
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO gamify_events (kind, at, ref) VALUES (?, ?, ?)",
+                (kind, at or now_iso(), str(ref or "") or None),
+            )
+    except sqlite3.Error:
+        return
+
+
+def activity_stamps(conn: sqlite3.Connection, kind: str) -> list[str]:
+    """Bir turun butun damgalari, eskiden yeniye."""
+    try:
+        rows = conn.execute(
+            "SELECT at FROM gamify_events WHERE kind = ? ORDER BY at, id", (kind,)
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    return [str(row["at"] or "") for row in rows if row["at"]]
+
+
 # --- haftalik emirler ---------------------------------------------------
 
 
