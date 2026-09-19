@@ -17,6 +17,7 @@ from app.lifecycle import Heartbeat  # noqa: E402
 from app.mail.fake import FakeMailSource  # noqa: E402
 from app.secrets import SecretBox  # noqa: E402
 from app.settings_store import SettingsStore  # noqa: E402
+from tests.fake_copilot import SahteCopilot  # noqa: E402
 from tests.fake_jira import FakeJira  # noqa: E402
 
 
@@ -70,13 +71,20 @@ def fake_mail():
 
 
 @pytest.fixture
-def context(conn, store, client_factory, fake_mail):
+def fake_copilot():
+    """Bellek ici Copilot; hicbir test gercek Copilot CLI'yi calistirmaz."""
+    return SahteCopilot()
+
+
+@pytest.fixture
+def context(conn, store, client_factory, fake_mail, fake_copilot):
     return AppContext(
         conn=conn,
         settings=store,
         heartbeat=Heartbeat(),
         client_factory=client_factory,
         mail_factory=lambda body_limit=None: fake_mail,
+        copilot_factory=lambda ayarlar: fake_copilot,
     )
 
 

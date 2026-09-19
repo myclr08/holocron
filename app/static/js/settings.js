@@ -82,6 +82,7 @@ async function loadSettings() {
   fillForm(settings);
   fillMail(settings);
   fillTeams(settings);
+  fillCopilot(settings);
   fillAppearance(settings);
 }
 
@@ -690,6 +691,99 @@ function saveTeams() {
   );
 }
 
+
+// --- Copilot CLI --------------------------------------------------------
+//
+// Kart Copilot'un kendisini yapilandirir: nerede duruyor, hangi vekilden
+// cikiyor, hangi modeller sirayla denenecek. Sinama ucu `/api/copilot/sina`
+// kucucuk bir istek atar ve calisan modeli "son calisan" olarak saklar.
+
+function copilotField(id) {
+  return document.getElementById(id);
+}
+
+function copilotStatus() {
+  return document.getElementById("copilot-status");
+}
+
+function fillCopilot(settings) {
+  copilotField("copilot-yol").value = settings["copilot.yolu"] || "";
+  copilotField("copilot-proxy").value = settings["copilot.proxy"] || "";
+  copilotField("copilot-modeller").value = modelListText(settings["copilot.modeller"]);
+  const son = settings["copilot.son_model"] || "";
+  copilotField("copilot-son-model").textContent = son
+    ? "Son çalışan model: " + son
+    : "Copilot henüz hiç çalıştırılmadı.";
+  // Otomatik bulunan yol ipucu olarak durur: kullanici ne calistigini gorur.
+  const sonYol = settings["copilot.yolu_son"] || "";
+  copilotField("copilot-sonuc").textContent = sonYol ? "Son bulunan: " + sonYol : "";
+}
+
+/** Ayar JSON listesi de olabilir, virgullu metin de: ikisi de okunur. */
+function modelListText(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(text);
+      return Array.isArray(parsed) ? parsed.join(", ") : text;
+    } catch (err) {
+      return text;
+    }
+  }
+  return text;
+}
+
+function collectCopilot() {
+  const modeller = copilotField("copilot-modeller")
+    .value.split(",")
+    .map((ad) => ad.trim())
+    .filter(Boolean);
+  return {
+    "copilot.yolu": copilotField("copilot-yol").value.trim(),
+    "copilot.proxy": copilotField("copilot-proxy").value.trim(),
+    "copilot.modeller": JSON.stringify(modeller),
+  };
+}
+
+async function saveCopilot() {
+  try {
+    const data = await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify(collectCopilot()),
+    });
+    fillCopilot(data.settings || {});
+    setStatus(copilotStatus(), "Copilot ayarları kaydedildi.", "ok");
+  } catch (err) {
+    setStatus(copilotStatus(), err.message, "error");
+  }
+}
+
+/** Sinama: alandaki yol KAYDEDILMEDEN denenebilsin diye uca yollanir. */
+async function testCopilot() {
+  const button = copilotField("copilot-test");
+  const box = copilotField("copilot-sonuc");
+  button.disabled = true;
+  box.textContent = "Sınanıyor...";
+  setStatus(copilotStatus(), "Copilot CLI sınanıyor...", null);
+  try {
+    const sonuc = await api("/api/copilot/sina", {
+      method: "POST",
+      body: JSON.stringify({ yol: copilotField("copilot-yol").value.trim() }),
+    });
+    box.textContent = sonuc.mesaj || "";
+    setStatus(copilotStatus(), sonuc.mesaj || "", sonuc.calisiyor ? "ok" : "error");
+    if (sonuc.calisiyor) {
+      copilotField("copilot-son-model").textContent = "Son çalışan model: " + sonuc.model;
+    }
+  } catch (err) {
+    box.textContent = err.message;
+    setStatus(copilotStatus(), err.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   bindShell();
   document.getElementById("mode").addEventListener("change", applyModeVisibility);
@@ -716,6 +810,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("template-add").addEventListener("click", addTemplate);
   document.getElementById("teams-gal").addEventListener("click", importGal);
   document.getElementById("teams-save").addEventListener("click", saveTeams);
+  document.getElementById("copilot-save").addEventListener("click", saveCopilot);
+  document.getElementById("copilot-test").addEventListener("click", testCopilot);
   document.getElementById("clear-secret").addEventListener("click", async () => {
     const status = document.getElementById("status");
     if (!confirm("Kayıtlı sır silinsin mi?")) return;

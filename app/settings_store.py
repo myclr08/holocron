@@ -65,6 +65,26 @@ DEFAULTS: dict[str, str] = {
     "mailsend.mode": "display",
     # Teams: grup sohbetinin konu adi bicimi (sablon yer tutuculari gecerli).
     "teams.topic_format": "{key}",
+    # --- Copilot CLI --------------------------------------------------
+    # Copilot CLI'nin tam yolu (bos = otomatik ara). `holocron.bat` uygulamayi
+    # pythonw ile actigi icin surec, terminaldeki PATH'i gormeyebilir: "where
+    # copilot" ciktisi buraya yazilir. "son" alani otomatik bulunani saklar.
+    "copilot.yolu": "",
+    "copilot.yolu_son": "",
+    # Copilot CLI'nin vekil sunucusu. Kurumda Copilot vekilden cikiyor, Jira
+    # dogrudan goruluyor: bu deger YALNIZCA alt surecin ortamina yazilir,
+    # Holocron'un kendi Jira istekleri ondan etkilenmez.
+    "copilot.proxy": "",
+    # Sirali model listesi (JSON) ve son calisan model. Sahadan 19 Eylul
+    # 2026: gpt-5, claude-sonnet-4.5, gpt-4.1 kullanicinin hesabinda
+    # reddedildi; varsayilan simdi claude-sonnet-5, yedek sirada gpt-5-mini
+    # ve claude-haiku-4.5 var. Eski adlar da listede kalir, baska hesapta
+    # calisabilirler. Bu deger yalniz ayar hic yazilmamissa gecerli.
+    "copilot.modeller": (
+        '["claude-sonnet-5", "gpt-5-mini", "claude-haiku-4.5", '
+        '"claude-sonnet-4.5", "gpt-5"]'
+    ),
+    "copilot.son_model": "",
     # Kurum rehberi en son ne zaman cekildi (bos = hic).
     "teams.gal_synced_at": "",
     # Sefer (oyunlastirma): seri korumasinin harcandigi ay, "gecikmis gorev

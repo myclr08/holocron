@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import replace
 from typing import Any
 
 from fastapi import APIRouter, Body, Request
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse, Response
 
 from . import (
     __version__,
+    copilot,
     db,
     desktop,
     export,
@@ -882,6 +884,48 @@ def _render_issue_message(context: AppContext, conn: Any, key: str, body: str) -
         base_url,
         schemas=repository.field_schemas(conn),
     )
+
+
+# --- Copilot CLI ---------------------------------------------------------
+#
+# Copilot'un kendisi kullanicinin makinesinde kurulu bir aractir; Holocron
+# yalnizca onu bulur ve calistirir. Vekil adresi YALNIZCA alt surecin
+# ortamina yazilir: Holocron'un Jira baglantisi ondan etkilenmez.
+
+
+@router.post("/copilot/sina")
+def test_copilot(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
+    """Copilot CLI kisa bir istekle sinanir (secili model, yol ve vekil ile).
+
+    "Copilot yolu" alani KAYDEDILMEDEN denenebilsin diye ekrandan gelen deger
+    ayarin onune gecer. Calisan cozumleme "son bulunan" olarak saklanir:
+    kullanici bir dahaki sefere ne bulundugunu ayarda gorur.
+    """
+    context = get_context(request)
+    ayarlar = copilot.load_config(context.settings)
+    if "yol" in payload:
+        ayarlar = replace(ayarlar, yolu=str(payload.get("yol") or "").strip())
+    fabrika = context.copilot_factory
+    calistirici = (
+        fabrika(ayarlar)
+        if fabrika is not None
+        else copilot.default_calistirici(
+            proxy=ayarlar.proxy,
+            jira_base_url=ayarlar.jira_base_url,
+            yol=ayarlar.yolu,
+            # Sinama kucucuk bir istek: uzun isin zaman asimini beklemesin.
+            zaman_asimi=copilot.SINAMA_ZAMAN_ASIMI,
+        )
+    )
+    sonuc = copilot.sina(calistirici, ayarlar.model_sirasi(), ayarlar.kok())
+    if sonuc["calisiyor"]:
+        # Calisan model bir sonraki istekte basa alinir.
+        context.settings.set("copilot.son_model", str(sonuc["model"]))
+        if sonuc.get("yol"):
+            context.settings.set("copilot.yolu_son", str(sonuc["yol"]))
+    # Vekil adresi ekrana geri yazilmaz: yalnizca "ayarli mi" bilgisi doner.
+    sonuc["proxy_ayarli"] = bool(ayarlar.proxy)
+    return sonuc
 
 
 # --- yerel alanlar ------------------------------------------------------

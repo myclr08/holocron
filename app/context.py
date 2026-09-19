@@ -27,6 +27,9 @@ ClientFactory = Callable[[JiraConfig], BaseJiraClient]
 MailFactory = Callable[..., Any]
 # Posta gondericisi fabrikasi: uretimde Outlook, testlerde sahte gonderici.
 SenderFactory = Callable[..., Any]
+# Copilot calistiricisi: uretimde alt surec, testlerde sahte calistirici.
+# Hicbir test gercek Copilot CLI'yi kosturmaz.
+CopilotFactory = Callable[..., Any]
 
 
 @dataclass
@@ -39,6 +42,8 @@ class AppContext:
     refresh: RefreshManager = field(default_factory=RefreshManager)
     mail_factory: MailFactory = field(default=default_source)
     sender_factory: SenderFactory = field(default=default_sender)
+    # Ayar verilerek cagrilir; None ise uretim calistiricisi kurulur.
+    copilot_factory: CopilotFactory | None = None
     # Yazma islemleri bu kilitle sirayla girer (okumalar paralel kalabilir).
     db_lock: threading.RLock = field(default_factory=threading.RLock)
 

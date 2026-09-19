@@ -270,6 +270,61 @@
         <div class="status" id="teams-status" hidden></div>
       </div>
 
+      <div class="card" id="copilot-card">
+        <h2>Copilot</h2>
+        <p class="hint">
+          Holocron, makinenizde kurulu olan <strong>Copilot CLI</strong>'yi bulup
+          çalıştırabilir. Buradaki ayarlar aracın nerede olduğunu ve hangi modelin
+          deneneceğini söyler. Copilot yoksa hiçbir şey bozulmaz.
+        </p>
+
+        <div class="field">
+          <label for="copilot-yol">Copilot yolu (boş = otomatik bul)</label>
+          <input type="text" id="copilot-yol" placeholder="%APPDATA%\npm\copilot.cmd" />
+          <p class="hint">
+            "Copilot CLI bulunamadı" diyorsa komut istemine <code>where copilot</code>
+            yazıp çıkan <strong>tam yolu</strong> (<code>.cmd</code> ya da
+            <code>.exe</code> uzantısıyla) buraya kopyalayın. Holocron
+            <code>pythonw.exe</code> ile açıldığı için terminalinizin PATH'ini
+            görmeyebilir; alan boşken PATH, npm klasörü ve kayıt defterindeki
+            PATH sırayla denenir.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="copilot-proxy">Vekil sunucu (boş = sistem ortamı)</label>
+          <input type="text" id="copilot-proxy" placeholder="http://vekil.kurum.local:8080" />
+          <p class="hint">
+            Terminalde <code>set HTTPS_PROXY=...</code> ile yazdığınız adresi buraya
+            yazın. Bu değer YALNIZCA Copilot alt sürecine verilir: Holocron'un Jira
+            bağlantısı "doğrudan bağlan" kipinde kalır, Jira sunucusu alt sürecin
+            muafiyet listesine eklenir.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="copilot-modeller">Model sırası (sırayla denenir, virgülle ayırın)</label>
+          <input
+            type="text"
+            id="copilot-modeller"
+            placeholder="claude-sonnet-5, gpt-5-mini, claude-haiku-4.5"
+          />
+          <p class="hint">
+            Hesabınızda hangi modellerin açık olduğundan emin değilseniz Copilot
+            CLI'nin kendi listesine bakın; reddedilen bir model burada dururken
+            sıradaki otomatik denenir.
+          </p>
+          <p class="hint" id="copilot-son-model"></p>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="copilot-save">Kaydet</button>
+          <button id="copilot-test">Copilot'u sına</button>
+        </div>
+        <p class="hint" id="copilot-sonuc"></p>
+        <div class="status" id="copilot-status" hidden></div>
+      </div>
+
       <div class="card" id="mailsend-card">
         <h2>E-posta şablonları</h2>
         <p class="hint">

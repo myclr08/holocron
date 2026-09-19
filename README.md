@@ -28,6 +28,7 @@ Güncel sürüm: **v0.10.7** (bkz. [Sürüm notları](#sürüm-notları)).
 | **Outlook e-postasından görev** (Windows) | Kimden / Kime / CC listelerine uyan postalar **Yapılacak** sütununa düşer; bir konuşmadan tek görev çıkar. |
 | **Teams'e mesaj** | Kayda iliştirilen kişilere tek tıkla mesaj: Graph API ve IT izni yok, `msteams:` derin bağlantısı. Gönder'e siz basarsınız. |
 | **E-posta ile gönder** (Windows) | Grubun kayıtlarını seçili sütunlarla Excel'e çevirip şablonlu bir postaya ekler; Kime/CC şablondan gelir, posta Outlook'ta açılır ya da gönderilir. |
+| **Copilot** | Makinenizde kurulu **Copilot CLI**'yi bulup çalıştırabilen köprü: yol, vekil sunucu ve model sırası Ayarlar'dan yönetilir, **Copilot'u sına** gerçekten çalışıp çalışmadığını söyler. |
 | **Sefer** | Bitiş tarihi olan XP hedefi: görev kapatmak, kaydın filodan düşmesi ve durum geçişleri puan verir; rütbe, rozetler, haftalık emirler ve "ne için puan aldım" defteri (yanlış satır silinebilir). |
 | **Excel'e aktarma** | Gruplar, görevler ve XP defteri için gerçek tarih/sayı hücreli, köprülü `.xlsx` dosyaları. |
 | **Tema** | Koyu Star Wars atmosferi: yıldız alanı, ışın kılıcı renkleri, açılış akışı — hepsi kapatılabilir. Dış kaynak, CDN, izleme yok. |
@@ -193,7 +194,13 @@ listelerinden en az birine adres yazın, klasörleri seçin. Ayrıntı:
 yönetirsiniz. Windows'ta **Rehberi Outlook'tan yenile** kurum adres listesini
 tek geçişte içeri alır. Ayrıntı: [Teams'e mesaj](#teamse-mesaj-kayıttan-tek-tıkla).
 
-### 5. E-posta şablonları (gönderim)
+### 5. Copilot (isteğe bağlı)
+
+**Ayarlar → Copilot** kartı makinenizdeki Copilot CLI'yi yapılandırır. Kurulu
+değilse burayı atlayın; hiçbir şey bozulmaz. Ayrıntı:
+[Copilot](#copilot-isteğe-bağlı-1).
+
+### 6. E-posta şablonları (gönderim)
 
 **Ayarlar → E-posta şablonları** kartında Kime/CC/konu/gövde birlikte saklanır
 ve gönderim kipi seçilir. Ayrıntı: [E-posta ile gönder](#e-posta-ile-gönder-yalnız-windows).
@@ -548,6 +555,45 @@ düğmeler pasiftir; uçlar `feature_unavailable` döner. `pywin32` yalnızca Wi
 paketine girer (`requirements.txt` içinde `sys_platform == "win32"` işaretçisi
 vardır), Linux zip'ine alınmaz. Ayrı bir `pywin32_postinstall` adımı
 **gerekmez**: `win32com` site-packages'tan olduğu gibi çalışır.
+
+### Copilot (isteğe bağlı)
+
+Holocron, makinenizde zaten kurulu olan **Copilot CLI**'yi bulup
+çalıştırabilir. Aracın kendisini Holocron kurmaz, güncellemez ve hesabınıza
+dokunmaz; yalnızca alt süreç olarak çağırır.
+
+**Copilot nerede?** Alan boşken sırayla `PATH`, Windows'un bilinen yerleri
+(`%APPDATA%\npm\copilot.cmd` başta olmak üzere npm, WinGet, Program Files,
+`%USERPROFILE%\.local\bin`) ve **kayıt defterinden taze okunan** kullanıcı/makine
+PATH'i denenir. `holocron.bat` uygulamayı `pythonw.exe` ile açtığı için süreç,
+terminalinizin güncel PATH'ini görmeyebilir: terminalde `where copilot` yazıp
+çıkan **tam yolu** (`.cmd` ya da `.exe` uzantısıyla) **Copilot yolu** alanına
+yapıştırın. Bulunan yol loga yazılır ve kartta "Son bulunan: ..." diye durur.
+
+npm'in bıraktığı `copilot.cmd` dosyasını Windows doğrudan çalıştıramadığı için
+(`CreateProcess` `.cmd` açamaz) bu dosyalar `cmd.exe /c` ile çağrılır; cmd
+komut satırını yeniden ayrıştırdığından istem metni **argüman olarak geçmez**,
+çalışma klasörüne dosya olarak yazılıp modele okutulur.
+
+**Vekil sunucu.** Kurumda Copilot vekil sunucudan çıkarken Jira doğrudan
+görülebiliyor. Vekil adresi **yalnızca Copilot alt sürecinin ortamına** yazılır
+(`HTTPS_PROXY`, `HTTP_PROXY` ve küçük harfli eşleri), Jira sunucusunun adı da o
+sürecin `NO_PROXY` listesine eklenir. Holocron'un kendi Jira bağlantısı
+"doğrudan bağlan" kipinde kalır, `os.environ` hiç değişmez.
+
+**Model sırası.** Copilot CLI hesap başına farklı modelleri açar. Modeller
+sırayla denenir; biri reddedilirse ("Model ... from --model flag is not
+available") sıradakine geçilir, çalışan model "son çalışan" olarak saklanır ve
+bir dahaki sefere başa alınır. Hepsi reddedilirse hata tek satırda hangi
+modellerin kapalı olduğunu söyler.
+
+**Copilot'u sına.** Küçük bir istek atar: modelden bir çalışma dosyasına
+`{"hazir": true}` yazması istenir ve cevap **o dosyadan** okunur. Yani
+"çalışıyor" yazısı aynı zamanda `--allow-tool=read --allow-tool=write`
+izinlerinin verildiğini de kanıtlar. Sınamanın zaman aşımı 300 saniyedir.
+Başarısız olursa Copilot'un ham çıktısının son 400 karakteri ekranda,
+2000 karakteri `holocron.log`'da durur; parola/anahtar benzeri diziler
+maskelenir.
 
 ### Sağ çekmeceleri genişletme
 
