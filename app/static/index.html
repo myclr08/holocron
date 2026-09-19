@@ -243,12 +243,21 @@
       </div>
       <button id="drawer-close" title="Kapat (Esc)">✕</button>
     </header>
-    <label class="checkbox drawer-toggle">
-      <input type="checkbox" id="drawer-empty" />
-      Boş alanları da göster
-    </label>
-    <div class="drawer-toggle">
-      <button id="drawer-fields" type="button">Alanları seç</button>
+    <div class="drawer-toolbar">
+      <button id="drawer-fields" type="button" class="drawer-fields-btn">
+        <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M2 4.4h6.4M10.8 4.4H14M2 8h3.4M7.8 8H14M2 11.6h8.4M12.8 11.6H14" />
+          <circle cx="8.7" cy="4.4" r="1.5" />
+          <circle cx="5.4" cy="8" r="1.5" />
+          <circle cx="11.4" cy="11.6" r="1.5" />
+        </svg>
+        <span class="drawer-fields-label">Alanları seç</span>
+        <span class="drawer-fields-badge" id="drawer-fields-badge" hidden></span>
+      </button>
+      <button id="drawer-empty" type="button" class="switch" role="switch" aria-checked="false">
+        <span class="switch-label">Boş alanları da göster</span>
+        <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+      </button>
     </div>
     <div class="drawer-body" id="drawer-body"></div>
   </aside>

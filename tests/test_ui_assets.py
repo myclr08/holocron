@@ -79,6 +79,79 @@ def test_jira_detail_field_picker_is_group_scoped_and_keeps_other_sections(api_c
     assert "renderDrawerTeams(body);" in script
 
 
+def test_drawer_toolbar_is_compact_and_single_row(api_client):
+    """Saha geri bildirimi (Mustafa, 20 Eyl 2026): 'Alanları seç' ve 'Boş
+    alanları da göster' alt alta güzel durmuyordu; tek satırlık kompakt bir
+    araç çubuğunda, sağa yaslı ve erişilebilir durmalılar."""
+    home = api_client.get("/").text
+    assert '<div class="drawer-toolbar">' in home
+    assert 'id="drawer-fields-badge"' in home
+    assert 'role="switch"' in home
+    assert 'aria-checked="false"' in home
+    assert "Boş alanları da göster" in home
+    assert "Alanları seç" in home
+    # Eski dikey duzenin kalintisi kalmasin: cekmece yeniden alt alta durmasin.
+    assert 'class="checkbox drawer-toggle"' not in home
+
+    css = api_client.get("/static/css/app.css").text
+    assert ".drawer-toolbar {" in css
+    assert "justify-content: flex-end" in css
+    assert ".switch-track" in css
+    assert ".drawer-fields-badge" in css
+    # Etiketler dar cekmecede kisalsin diye tasarli, ama Turkce metin buyuk
+    # harfe zorlanmasin (proje kurali).
+    toolbar_css = css[css.index(".drawer-toolbar"):css.index(".detail-row {")]
+    assert "text-transform" not in toolbar_css
+
+    script = api_client.get("/static/js/app.js").text
+    assert 'setAttribute("aria-checked"' in script
+    assert "renderDrawerFieldsBadge" in script
+
+
+def test_drawer_field_badge_reflects_selection_count_via_real_javascript():
+    """renderDrawerFieldsBadge secili/toplam alan oranini gercek js ile hesaplar."""
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node yok")
+    script = (STATIC / "js" / "app.js").read_text(encoding="utf-8")
+    probe = r"""
+const badge = { hidden: true, textContent: "" };
+const emptyToggle = { attrs: {}, setAttribute(name, value) { this.attrs[name] = value; } };
+globalThis.document = {
+  addEventListener() {},
+  getElementById(id) {
+    if (id === "drawer-fields-badge") return badge;
+    if (id === "drawer-empty") return emptyToggle;
+    return null;
+  },
+};
+function count(selection, totalJira, totalLocal) {
+  state.group = { detail_fields: selection };
+  state.drawerFields = Array.from({ length: totalJira }, (_, i) => ({ field: "f" + i }));
+  state.drawerLocal = Array.from({ length: totalLocal }, (_, i) => ({ field: "local:" + i }));
+  renderDrawerFieldsBadge();
+  return { hidden: badge.hidden, text: badge.textContent };
+}
+process.stdout.write(JSON.stringify([
+  count(null, 20, 4),
+  count(["f1", "f2"], 20, 4),
+  count(null, 0, 0),
+]));
+"""
+    setup, exercise = probe.split("function count", 1)
+    result = subprocess.run(
+        [node], input=setup + script + "\nfunction count" + exercise,
+        capture_output=True, text=True, check=True)
+    parsed = json.loads(result.stdout)
+    assert parsed[0] == {"hidden": False, "text": "24/24"}
+    assert parsed[1] == {"hidden": False, "text": "2/24"}
+    assert parsed[2]["hidden"] is True
+
+
 def test_local_detail_visibility_runs_in_the_real_javascript():
     """Gerçek render fonksiyonu null/[]/local:id ayrımını uygular."""
     import json

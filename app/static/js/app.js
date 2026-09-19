@@ -662,9 +662,24 @@ async function openDrawer(key) {
   }
 }
 
+function renderDrawerFieldsBadge() {
+  const badge = el("drawer-fields-badge");
+  const total = (state.drawerFields || []).length + (state.drawerLocal || []).length;
+  if (!total) {
+    badge.hidden = true;
+    return;
+  }
+  const selected = state.group && state.group.detail_fields;
+  const count = selected === null || selected === undefined ? total : selected.length;
+  badge.hidden = false;
+  badge.textContent = `${count}/${total}`;
+}
+
 function renderDrawerBody() {
   const body = el("drawer-body");
   clear(body);
+  el("drawer-empty").setAttribute("aria-checked", String(state.drawerShowEmpty));
+  renderDrawerFieldsBadge();
   if (state.drawerFetchedAt) {
     body.appendChild(h("p", { class: "hint", text: "Çekilme: " + stamp(state.drawerFetchedAt) }));
   } else {
@@ -2882,8 +2897,9 @@ function bindEvents() {
   el("modal-close").addEventListener("click", closeModal);
   el("drawer-close").addEventListener("click", closeDrawer);
   el("drawer-fields").addEventListener("click", drawerFieldsModal);
-  el("drawer-empty").addEventListener("change", (event) => {
-    state.drawerShowEmpty = event.target.checked;
+  el("drawer-empty").addEventListener("click", () => {
+    state.drawerShowEmpty = !state.drawerShowEmpty;
+    el("drawer-empty").setAttribute("aria-checked", String(state.drawerShowEmpty));
     renderDrawerBody();
   });
 
