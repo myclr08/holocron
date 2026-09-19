@@ -527,11 +527,27 @@ HAFTALIK_EMIRLER: tuple[tuple[str, str, int, int], ...] = (
     (gamify.QUEST_STALE_ASK, "Bayatlamış 5 kaydın son durumunu sor", 5, 25),
 )
 
+# Demoda kazanilmis gorunen rozetler. Katalogda 50'den fazla rozet var; demo
+# duvarin nasil doldugunu gostermek icin bir avucunu isaretler, geri kalani
+# kilitli ve ilerleme cubuklu kalir ("9/25" gibi) -- ekran hem dolu hem de
+# "daha var" duygusu versin.
 KAZANILAN_ROZETLER: tuple[str, ...] = (
+    gamify.BADGE_FIRST_TASK,
+    gamify.BADGE_TASK_10,
+    gamify.BADGE_FIRST_ISSUE,
     gamify.BADGE_STREAK_5,
-    gamify.BADGE_CLOSER,
-    gamify.BADGE_ENVOY,
+    gamify.BADGE_FIRST_QUEST,
+    gamify.BADGE_FIRST_FLEET,
+    gamify.BADGE_FIRST_LOCAL_FIELD,
+    gamify.BADGE_FIRST_FIX,
+    gamify.BADGE_FIRST_EXCEL,
+    gamify.BADGE_CARTOGRAPHER,
 )
+
+# Ilerlemesi yarida gorunsun diye birakilan is izleri: 12 "Duzelt" (Metin
+# Ustasi 12/25) ve 3 Excel dokumu.
+DEMO_DUZELTME = 12
+DEMO_EXCEL = 3
 
 
 def seferi_kur(context: Any, an: datetime | None = None) -> dict[str, Any] | None:
@@ -603,10 +619,23 @@ def seferi_kur(context: Any, an: datetime | None = None) -> dict[str, Any] | Non
                 at=f"{isaretli}T18:00:00+00:00",
             )
 
+    # Is izleri: "Duzelt" ve Excel hicbir tabloda gorunmedigi icin kendi
+    # defterlerine yazilir; rozet ilerlemesi bunlardan okunur.
+    for sira in range(DEMO_DUZELTME):
+        gamify_repo.log_activity(
+            conn, gamify_repo.ACTIVITY_FIX, f"demo-{sira}",
+            at=_damga(simdi - timedelta(days=18 - sira)),
+        )
+    for sira in range(DEMO_EXCEL):
+        gamify_repo.log_activity(
+            conn, gamify_repo.ACTIVITY_EXCEL, f"demo-{sira}",
+            at=_damga(simdi - timedelta(days=14 - sira * 5)),
+        )
+
     # Rozetler: kosullari yeniden hesaplamadan dogrudan yazilir (demo).
     rozet_kurali = kurallar.get(gamify.KIND_BADGE_EARNED)
     for sira, kod in enumerate(KAZANILAN_ROZETLER):
-        kazanildi = _damga(simdi - timedelta(days=12 - sira * 4))
+        kazanildi = _damga(simdi - timedelta(days=18 - sira))
         gamify_repo.earn_badge(conn, sefer["id"], kod, at=kazanildi)
         if rozet_kurali:
             gamify_repo.add_event(
@@ -614,9 +643,10 @@ def seferi_kur(context: Any, an: datetime | None = None) -> dict[str, Any] | Non
                 sefer["id"],
                 gamify.SOURCE_BADGE,
                 gamify.KIND_BADGE_EARNED,
-                int(rozet_kurali["points"]),
-                ref=f"badge-{kod}",
-                title=f"Rozet kazanıldı: {kod}",
+                int(rozet_kurali["points"])
+                * gamify.RARITY_MULTIPLIERS.get(gamify.BADGES_BY_CODE[kod]["rarity"], 1),
+                ref=f"badge:{kod}",
+                title=f"Rozet kazanıldı: {gamify.BADGES_BY_CODE[kod]['label']}",
                 at=kazanildi,
             )
 

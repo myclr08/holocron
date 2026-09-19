@@ -21,6 +21,7 @@ const SOURCE_ICONS = {
 const campaignState = {
   data: null,
   source: "",
+  badgeTab: "",
   digestTimer: null,
   request: 0,
 };
@@ -104,7 +105,7 @@ function renderCampaign() {
   renderHero(data);
   renderQuests(data.quests || []);
   renderWeek(data);
-  renderBadgeWall(data.badges || []);
+  renderBadgeWall(data.badges || [], data.badge_categories || []);
   renderLedgerFilter(data.sources || []);
   renderLedger(data.ledger || []);
   renderDigest(data.digest);
@@ -252,27 +253,101 @@ function weekCount(value, label) {
   ]);
 }
 
-/** Rozet duvarı: kazanılan renkli, kazanılmayan gri hologram. */
-function renderBadgeWall(badges) {
+/** Rozet duvarı: kategori sekmeleri, kazanılmış / kilitli ayrımı, ilerleme.
+ *
+ * Kilitli kutucuk da bilgi taşır: soluk durur ama "nasıl kazanılır" ipucunu ve
+ * "12/25" ilerlemesini gösterir — duvar bir hedef listesi gibi de okunur.
+ */
+function renderBadgeWall(badges, categories) {
+  renderBadgeTabs(badges, categories || []);
   const box = el("campaign-badges");
   clear(box);
-  badges.forEach((badge) => {
-    const art = h("div", { class: "badge-art" });
-    const image = h("img", { src: badge.image, alt: badge.label, draggable: "false" });
-    image.addEventListener("error", () => {
-      clear(art);
-      art.appendChild(badgeHologram(badge.code));
-    });
-    art.appendChild(image);
+
+  const won = badges.filter((badge) => badge.earned).length;
+  el("badge-score").textContent = `${won} / ${badges.length}`;
+
+  const groups = (categories || []).filter(
+    (category) => !campaignState.badgeTab || campaignState.badgeTab === category.code
+  );
+  groups.forEach((category) => {
+    const mine = badges.filter((badge) => badge.category === category.code);
+    if (!mine.length) return;
+    const earnedHere = mine.filter((badge) => badge.earned).length;
     box.appendChild(
-      h("div", {
-        class: "badge-tile" + (badge.earned ? " earned" : " locked"),
-        title: badge.earned
-          ? `${badge.hint} · kazanıldı: ${shortStamp(badge.earned_at)}`
-          : badge.hint,
-      }, [art, h("span", { class: "badge-name", text: badge.label })])
+      h("div", { class: "badge-group-head" }, [
+        h("span", { text: category.label }),
+        h("span", { class: "badge-group-count", text: `${earnedHere}/${mine.length}` }),
+      ])
+    );
+    const wall = h("div", { class: "badge-wall" });
+    mine.forEach((badge) => wall.appendChild(badgeTile(badge)));
+    box.appendChild(wall);
+  });
+}
+
+/** Kategori sekmeleri: "Tümü" ve her kategori için kazanılan/toplam. */
+function renderBadgeTabs(badges, categories) {
+  const box = el("badge-tabs");
+  clear(box);
+  const all = [{ code: "", label: "Tümü" }].concat(categories);
+  all.forEach((category) => {
+    const mine = category.code
+      ? badges.filter((badge) => badge.category === category.code)
+      : badges;
+    box.appendChild(
+      h("button", {
+        class: campaignState.badgeTab === category.code ? "on" : "",
+        text: `${category.label} ${mine.filter((badge) => badge.earned).length}/${mine.length}`,
+        onclick: () => {
+          campaignState.badgeTab = category.code;
+          renderBadgeWall(badges, categories);
+        },
+      })
     );
   });
+}
+
+function badgeTile(badge) {
+  const art = h("div", { class: "badge-art" });
+  // Elle çizilmiş PNG varsa onu sunucu bildirir; yoksa rozetin kendi SVG
+  // simgesi çizilir. İkisi de okunamazsa hologram: ekran boş kalmaz.
+  const painted = !!badge.image;
+  const image = h("img", {
+    src: badge.image || badge.icon,
+    alt: "",
+    draggable: "false",
+    class: painted ? "" : "badge-svg",
+  });
+  image.addEventListener("error", () => {
+    clear(art);
+    art.appendChild(badgeHologram(badge.code));
+  });
+  art.appendChild(image);
+
+  const parts = [art, h("span", { class: "badge-name", text: badge.label })];
+  parts.push(
+    h("span", { class: "badge-rarity rarity-" + badge.rarity, text: badge.rarity_label })
+  );
+  if (badge.earned) {
+    parts.push(h("span", { class: "badge-when", text: shortStamp(badge.earned_at) }));
+  } else {
+    parts.push(h("span", { class: "badge-hint", text: badge.hint }));
+    if (badge.show_progress) {
+      const bar = h("div", { class: "badge-bar" }, [h("div", { class: "badge-fill" })]);
+      bar.firstChild.style.width = Math.min(100, badge.percent) + "%";
+      parts.push(bar);
+      parts.push(
+        h("span", { class: "badge-count", text: `${badge.progress}/${badge.target}` })
+      );
+    }
+  }
+
+  return h("div", {
+    class: "badge-tile " + (badge.earned ? "earned" : "locked") + " rarity-" + badge.rarity,
+    title: badge.earned
+      ? `${badge.hint} · kazanıldı: ${shortStamp(badge.earned_at)}`
+      : `${badge.hint} · ${badge.progress}/${badge.target}`,
+  }, parts);
 }
 
 function badgeHologram(code) {
