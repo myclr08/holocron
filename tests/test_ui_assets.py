@@ -375,6 +375,154 @@ globalThis.api = async () => ({
     assert "çözüldü" in report["text"], report
 
 
+# --- alan gecmisi popover: eskiden yeniye, ok kalibi yok, katlama --------
+#
+# Saha geri bildirimi (Mustafa, 20 Eyl 2026): "gecmis 'suna su oldu' yerine
+# eskiden yeniye olsun, sadece popup'ta". Asagidaki testler yalnizca
+# `history-popover` icerigini (renderHistory) denetler; cekmecedeki
+# `.history-line` satir ici gorunumune dokunulmadi.
+
+
+def _run_history_probe(fake_entries_js: str, probe_js: str) -> dict:
+    """app.js + campaign.js'i gercek Node ile yukleyip history popover'ini calistirir."""
+    import json
+    import re
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node yok")
+
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    scripts = [
+        name
+        for name in re.findall(r'<script src="/static/js/([^"]+)"', page)
+        if name in {"app.js", "campaign.js"}
+    ]
+    assert "app.js" in scripts and "campaign.js" in scripts
+
+    shim = (
+        r"""
+const nodes = {};
+function fakeNode(id) {
+  return {
+    id: id || "", hidden: false, style: {}, children: [], firstChild: null, textContent: "",
+    disabled: false, className: "",
+    classList: {
+      add(name) { this._c = this._c || new Set(); this._c.add(name); },
+      contains(name) { return !!(this._c && this._c.has(name)); },
+    },
+    _listeners: {},
+    appendChild(child) { this.children.push(child); this.firstChild ||= child; return child; },
+    removeChild() { this.children.shift(); this.firstChild = this.children[0] || null; },
+    setAttribute() {}, focus() {},
+    addEventListener(type, cb) { this._listeners[type] = cb; },
+    click() { if (this._listeners.click) this._listeners.click(); },
+    getBoundingClientRect() { return { left: 0, top: 0, bottom: 0, right: 0 }; },
+    text() { return this.children.map((kid) => kid.textContent || (kid.text ? kid.text() : "")).join(" "); },
+  };
+}
+globalThis.window = { innerWidth: 1200, innerHeight: 800, addEventListener() {} };
+globalThis.document = {
+  addEventListener() {}, createElement() { return fakeNode(); },
+  createTextNode(text) { return { textContent: text }; },
+  getElementById(id) { return (nodes[id] ||= fakeNode(id)); },
+};
+"""
+        + fake_entries_js
+    )
+    source = "\n".join((STATIC / "js" / name).read_text(encoding="utf-8") for name in scripts)
+    result = subprocess.run(
+        [node], input=shim + source + probe_js, capture_output=True, text=True, check=True
+    )
+    return json.loads(result.stdout)
+
+
+def test_history_popover_orders_entries_oldest_to_newest_without_arrows():
+    fake_entries = r"""
+globalThis.api = async () => ({
+  entries: [
+    { id: 3, old_text: "b", new_text: "c", changed_at: "2026-01-03T10:00:00+00:00" },
+    { id: 2, old_text: "a", new_text: "b", changed_at: "2026-01-02T10:00:00+00:00" },
+    { id: 1, old_text: "", new_text: "a", changed_at: "2026-01-01T10:00:00+00:00" },
+  ],
+});
+"""
+    probe = r"""
+(async () => {
+  await openHistory(document.getElementById("clock"), "DEMO-1", { id: 1, name: "Durum" });
+  const body = document.getElementById("history-body");
+  process.stdout.write(JSON.stringify({
+    count: body.children.length,
+    values: body.children.map((c) => c.children[1].textContent),
+    firstBadge: body.children[0].text(),
+    lastClass: body.children[body.children.length - 1].className,
+    html: body.text(),
+  }));
+})();
+"""
+    report = _run_history_probe(fake_entries, probe)
+    assert report["count"] == 3, report
+    assert report["values"] == ["a", "b", "c"], report
+    assert "ilk değer" in report["firstBadge"], report
+    assert "current" in report["lastClass"], report
+    assert "→" not in report["html"], report
+    assert "şu oldu" not in report["html"], report
+
+
+def test_history_popover_shows_empty_value_placeholder():
+    fake_entries = r"""
+globalThis.api = async () => ({
+  entries: [
+    { id: 1, old_text: "", new_text: "", changed_at: "2026-01-01T10:00:00+00:00" },
+  ],
+});
+"""
+    probe = r"""
+(async () => {
+  await openHistory(document.getElementById("clock"), "DEMO-1", { id: 1, name: "Not" });
+  const body = document.getElementById("history-body");
+  process.stdout.write(JSON.stringify({ value: body.children[0].children[1].textContent }));
+})();
+"""
+    report = _run_history_probe(fake_entries, probe)
+    assert report["value"] == "— (boş)", report
+
+
+def test_history_popover_folds_long_lists_behind_a_toggle():
+    fake_entries = r"""
+const chrono = Array.from({ length: 25 }, (_, i) => ({
+  id: i + 1,
+  old_text: i === 0 ? "" : `v${i}`,
+  new_text: `v${i + 1}`,
+  changed_at: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00+00:00`,
+}));
+globalThis.api = async () => ({ entries: chrono.slice().reverse() });
+"""
+    probe = r"""
+(async () => {
+  await openHistory(document.getElementById("clock"), "DEMO-1", { id: 1, name: "Not" });
+  const body = document.getElementById("history-body");
+  const beforeCount = body.children.length;
+  const beforeText = body.text();
+  const toggle = body.children[0];
+  toggle.click();
+  process.stdout.write(JSON.stringify({
+    beforeCount,
+    hasFoldLink: /önceki \d+ değişikliği göster/.test(beforeText),
+    afterCount: body.children.length,
+    afterHasFoldLink: /önceki \d+ değişikliği göster/.test(body.text()),
+  }));
+})();
+"""
+    report = _run_history_probe(fake_entries, probe)
+    assert report["hasFoldLink"], report
+    assert report["beforeCount"] == 21, report  # 1 katlama baglantisi + 20 gorunur girdi
+    assert not report["afterHasFoldLink"], report
+    assert report["afterCount"] == 25, report
+
+
 def test_starfield_respects_the_motion_preference(api_client):
     script = api_client.get("/static/js/starfield.js").text
     assert "prefers-reduced-motion: reduce" in script

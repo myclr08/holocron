@@ -1062,31 +1062,61 @@ async function openHistory(anchor, key, field) {
   }
 }
 
+// Sunucu en yeniden en eskiye yollar (bkz. repository.list_local_history); popover
+// icin zaman cizelgesi olarak eskiden yeniye cevrilir.
+const HISTORY_FOLD_AT = 20;
+const HISTORY_FOLD_TAIL = 20;
+
 function renderHistory(entries) {
   const body = el("history-body");
-  clear(body);
   el("history-clear").disabled = entries.length === 0;
+  clear(body);
   if (!entries.length) {
     body.appendChild(h("p", { class: "hint", text: "Bu hücrede henüz değişim yok." }));
     return;
   }
-  entries.forEach((entry) => body.appendChild(historyLine(entry)));
+  paintHistory(body, entries.slice().reverse());
 }
 
-function historyLine(entry) {
-  return h("div", { class: "history-line" }, [
-    h("span", { class: "when", text: stamp(entry.changed_at) }),
-    h("span", { class: "what" }, [
-      h("span", { class: "old", text: entry.old_text || "—" }),
-      document.createTextNode(" → "),
-      h("span", { class: "new", text: entry.new_text || "—" }),
+/** chrono: eskiden yeniye sirali girdiler. Cok girdi varsa en eskiler katlanir. */
+function paintHistory(body, chrono, expanded) {
+  clear(body);
+  const total = chrono.length;
+  const showAll = expanded || total <= HISTORY_FOLD_AT;
+  const visible = showAll ? chrono : chrono.slice(total - HISTORY_FOLD_TAIL);
+  const hiddenCount = total - visible.length;
+  if (hiddenCount > 0) {
+    body.appendChild(
+      h("button", {
+        class: "history-fold",
+        text: `… önceki ${hiddenCount} değişikliği göster`,
+        onclick: () => paintHistory(body, chrono, true),
+      })
+    );
+  }
+  visible.forEach((entry, index) => {
+    const position = hiddenCount + index;
+    body.appendChild(historyBlock(entry, position === 0, position === total - 1));
+  });
+}
+
+function historyBlock(entry, isFirst, isLast) {
+  const who = entry.changed_by || entry.actor || entry.who || "";
+  const meta = [stamp(entry.changed_at)];
+  if (who) meta.push(who);
+  const value = entry.new_text || "";
+  return h("div", { class: "history-entry" + (isLast ? " current" : "") }, [
+    h("div", { class: "history-meta" }, [
+      h("span", { class: "when", text: meta.join(" · ") }),
+      isFirst ? h("span", { class: "history-badge", text: "ilk değer" }) : null,
+      h("button", {
+        class: "drop",
+        text: "×",
+        title: "Bu satırı sil",
+        onclick: () => dropHistoryEntry(entry.id),
+      }),
     ]),
-    h("button", {
-      class: "drop",
-      text: "×",
-      title: "Bu satırı sil",
-      onclick: () => dropHistoryEntry(entry.id),
-    }),
+    h("div", { class: "history-value", text: value || "— (boş)" }),
   ]);
 }
 

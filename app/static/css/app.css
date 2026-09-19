@@ -1165,7 +1165,7 @@ html.server-gone-open body {
 .popover {
   position: fixed;
   z-index: 35;
-  width: min(340px, 92vw);
+  width: clamp(min(360px, 92vw), 40vw, 560px);
   max-height: 60vh;
   display: flex;
   flex-direction: column;
@@ -1190,6 +1190,7 @@ html.server-gone-open body {
 .popover-foot { justify-content: flex-end; border-top: 1px solid var(--line); }
 .popover-body { padding: 6px 12px; overflow-y: auto; }
 
+/* Cekmecedeki satir ici gecmis (drawer-local): eski "-> " gorunumu burada kalir. */
 .history-line {
   display: flex;
   align-items: baseline;
@@ -1204,8 +1205,67 @@ html.server-gone-open body {
 .history-line .what { flex: 1; word-break: break-word; }
 .history-line .old { color: var(--muted); }
 .history-line .new { color: var(--text); }
-.history-line .drop { background: none; border: 0; color: var(--muted); padding: 0 2px; }
-.history-line .drop:hover { color: var(--saber-red); background: none; }
+
+/* Ust alan gecmisi popover'i: her girdi eskiden yeniye kendi bloguyla, ok/"->" kalibi yok. */
+.history-entry {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.history-entry:last-child { border-bottom: 0; }
+
+.history-entry.current { background: var(--panel-soft, rgba(255, 255, 255, 0.03)); }
+
+.history-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.history-meta .when { color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+
+.history-badge {
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: none;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.history-meta .drop {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  padding: 0 2px;
+}
+
+.history-meta .drop:hover { color: var(--saber-red); background: none; }
+
+.history-value {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.history-fold {
+  display: block;
+  width: 100%;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font-size: 12px;
+  text-align: left;
+  padding: 6px 0;
+  cursor: pointer;
+}
+
+.history-fold:hover { text-decoration: underline; }
 
 /* --- cekmecedeki yerel bolum ------------------------------------------- */
 
