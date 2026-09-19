@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.10.4** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.10.5** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -805,6 +805,21 @@ istemcisinin davranışı hiç değişmez. **Copilot'u sına** düğmesi seçili
 ve vekille kısa bir istek atar; model reddedilirse yedek sıradaki denenir ve
 çalışan model "son çalışan" olarak saklanır.
 
+**Hangi model?** Copilot CLI hesap başına farklı modelleri açar; sahadan 19
+Eylül 2026'da gelen örnekte `gpt-5`, `claude-sonnet-4.5` ve `gpt-4.1` "Model
+"gpt-4.1" from --model flag is not available" diyerek reddedildi, oysa aynı
+hesapta `claude-sonnet-5` ve `gpt-5-mini` (yedeği `claude-haiku-4.5`)
+çalışıyordu. Bu yüzden varsayılan **özet modelleri** sırası artık
+`claude-sonnet-5, gpt-5-mini, claude-haiku-4.5, claude-sonnet-4.5, gpt-5`
+olarak geliyor: önce hesabınızda çalışması beklenen modeller denenir, eski
+adlar yedekte kalır. **Ayarlar → Görüşme notları → Özet modelleri** alanına
+virgülle kendi sıranızı yazabilirsiniz; daha önce bir sıra kaydettiyseniz o
+sıra hiç değişmez, bu yeni varsayılan yalnızca ayar hiç yazılmamış
+kurulumlarda geçerlidir. Bir model reddedilirse hata metninde reddedilen
+modellerin tümü tek satırda listelenir (ör. "Copilot modelleri reddetti:
+gpt-5, claude-sonnet-4.5, gpt-4.1 — Ayarlar'dan hesabında olan bir model
+seçin (ör. claude-sonnet-5).").
+
 **Copilot nerede aranır?** Holocron `pythonw.exe` ile açıldığı için
 terminalinizin PATH'ini görmeyebilir: npm'in global klasörü çoğu kez yalnızca
 kullanıcı PATH'indedir ve o PATH oturum açıldıktan sonra değişmiş olabilir.
@@ -1305,6 +1320,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.10.5** | 19 Eylül 2026 | Sahadan gelen beşinci hata: özet modelleri `gpt-5`, `claude-sonnet-4.5`, `gpt-4.1` Copilot CLI tarafından "Model "gpt-4.1" from --model flag is not available" diyerek reddedildi, oysa aynı hesapta `claude-sonnet-5` ve `gpt-5-mini` (yedeği `claude-haiku-4.5`) çalışıyordu. Varsayılan özet modeli sırası `claude-sonnet-5, gpt-5-mini, claude-haiku-4.5, claude-sonnet-4.5, gpt-5` oldu (yalnızca ayar hiç yazılmamış kurulumlarda geçerli, kaydedilmiş ayarlar değişmez). Model reddi tespiti bu yeni hata metnini de tanıyor; reddedilen bütün modeller artık tek satırda listeleniyor ("Copilot modelleri reddetti: ... — Ayarlar'dan hesabında olan bir model seçin"). Ayarlar'daki Özet modelleri alanının ipucu güncel model adlarını gösteriyor |
 | **v0.10.4** | 19 Eylül 2026 | Sahadan gelen dördüncü hata: VDI'da özet adımı "Özet alınamadı: Copilot CLI bulunamadı (copilot)" diyordu, oysa kullanıcı aynı makinede terminalde `copilot` çalıştırabiliyordu. Sebep PATH: `holocron.bat` uygulamayı `start "" pythonw.exe` ile açar, o süreç kullanıcının **güncel** PATH'ini görmez (npm'in global klasörü çoğu kez yalnızca kullanıcı PATH'indedir ve o PATH oturum açıldıktan sonra değişmiştir). Copilot artık sırayla aranıyor: **Ayarlar → Görüşme notları → Copilot yolu** alanı, `PATH` (`PATHEXT` ile `.cmd`/`.exe` çözülür), Windows'un bilinen yerleri (`%APPDATA%\npm\copilot.cmd` başta olmak üzere npm, WinGet, Program Files, `%USERPROFILE%\.local\bin`) ve **kayıt defterinden taze okunan** kullanıcı/makine PATH'i. Bulunan tam yol loga yazılır, **Copilot'u sına** onu ekranda gösterir ("çalışıyor · `<yol>` · model X · N sn") ve ayara "son bulunan" olarak saklar; hiçbiri yoksa hata metni **denenen yerleri tek tek sayar** ve ne yapılacağını söyler. npm kurulumunun bıraktığı `copilot.cmd` dosyasını Windows doğrudan çalıştıramadığı için (`CreateProcess` `.cmd` açamaz) bu dosyalar `cmd.exe /c` ile çağrılıyor; cmd komut satırını yeniden ayrıştırdığından istem metni **argüman olarak geçmiyor**, transkriptin yanına dosya olarak yazılıp modele okutuluyor (tırnak, `%` ve `&` komutu bölemez). Vekil ve `NO_PROXY` mantığı aynen duruyor |
 | **v0.10.3** | 19 Eylül 2026 | Sahadan gelen üçüncü hata: VDI'da model zip'i açılıp yolu **Model klasörü** alanına yazılınca yazıya dökme `ConnectTimeout ... cannot find the appropriate snapshot folder` diye düşüyordu — klasör Hugging Face **önbellek kökü** sanılıp `download_root`a veriliyordu, oysa faster-whisper açılmış model klasörünü DOĞRUDAN kabul eder. Klasör artık sırayla çözümleniyor: klasörün kendisi (`model.bin` içeriyorsa), `<klasör>/<model adı>` ya da `<klasör>/faster-whisper-<model adı>` alt klasörü, ya da HF önbellek düzeni (`models--Systran--faster-whisper-<ad>/snapshots/*`, `local_files_only` ile). **Klasör yazılıysa ağa hiç çıkılmıyor**: model bulunamazsa dakikalarca zaman aşımı yerine anında "Model klasöründe model.bin bulunamadı: `<yol>`; beklenen düzen ..." deniyor. Model yükleme hataları tek satırlık Türkçeye iniyor ("Model yüklenemedi: ...", ilk 200 karakter), satır kesin olarak **hata** durumuna geçiyor ve takip şeridindeki "işleniyor" sayacı sıfırlanıyor; yarım kalan satırlar açılışta kuyruğa dönüyor. Ayarlar'a **Modeli sına** düğmesi geldi: modeli yüklemeyi dener, `hazır: <yol>, N sn` ya da temiz hata yazar, kuyruğu bloklamaz |
 | **v0.10.2** | 19 Eylül 2026 | Sahadan gelen ikinci hata: VDI'da **Deneme kaydı** HTTP 500 veriyordu — döngü aygıtı 10 saniye boyunca tek çerçeve vermemiş, WAV 0 bayt kalmış, okuma `EOFError` atmıştı. Kayıt artık bloklayan `read` yerine **geri çağrı (callback)** kipinde çalışıyor: susan bir aygıt kayıt iş parçacığını kilitleyemiyor, dosya her durumda geçerli başlıkla kapanıyor. Deneme kaydı hiçbir durumda 500 dönmüyor; kanal başına aygıt adı, açıldı mı, kaç çerçeve geldi, ses var mı ve hata metni gösteriliyor, altında öneri duruyor. Döngü kanalını beslemek için deneme boyunca hoparlöre duyulmayan (-60 dB) bir sinyal çalınıyor. Akış açılamazsa 44100/2 ile yeniden deneniyor; döngü aygıtı kendi kanal sayısı ve hızıyla açılıyor. Gerçek kayıtta veri gelmeyen parça "boş" işaretlenip birleştirmede atlanıyor, not "hata: Ses alınamadı (mikrofon: veri gelmedi)" diye düşüyor ve ses klasörü silinmiyor. Boş, eksik ya da bozuk WAV artık istisna yerine 0 çerçeve dönüyor |

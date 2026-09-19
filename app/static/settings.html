@@ -352,7 +352,16 @@
 
         <div class="field">
           <label for="gorusme-modeller">Özet modelleri (sırayla denenir, virgülle ayırın)</label>
-          <input type="text" id="gorusme-modeller" placeholder="gpt-5, claude-sonnet-4.5, gpt-4.1" />
+          <input
+            type="text"
+            id="gorusme-modeller"
+            placeholder="claude-sonnet-5, gpt-5-mini, claude-haiku-4.5"
+          />
+          <p class="hint">
+            Hesabınızda hangi modellerin çalıştığından emin değilseniz Copilot CLI'nin
+            kendi listesine bakın; reddedilen bir model burada dururken sıradaki
+            otomatik denenir.
+          </p>
           <p class="hint" id="gorusme-son-model"></p>
           <label for="gorusme-copilot-proxy">Copilot vekil sunucusu (boş = sistem ortamı)</label>
           <input type="text" id="gorusme-copilot-proxy" placeholder="http://vekil.kurum.local:8080" />

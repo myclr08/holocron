@@ -42,6 +42,7 @@ from app.gorusme.source import (
     KANAL_HOP,
     KANAL_MIK,
     GorusmeHatasi,
+    OzetCikti,
     Parca,
     Segment,
     calisma_koku,
@@ -466,7 +467,7 @@ def test_the_pipeline_produces_a_ready_note_and_cleans_the_audio(context, fake_g
     kayit = depo.require_not(context.conn, not_id)
     assert kayit["durum"] == DURUM_HAZIR
     assert kayit["baslik"] == sahte.ORNEK_OZET["baslik"]
-    assert kayit["model"] == "gpt-5"
+    assert kayit["model"] == "claude-sonnet-5"
     # Ses ve ara dosyalar silindi.
     assert not klasor.exists()
 
@@ -522,17 +523,17 @@ def test_half_finished_work_returns_to_the_queue_on_startup(context, fake_gorusm
 def test_a_rejected_model_falls_through_to_the_next_one(context, fake_gorusme):
     saat = Saat()
     not_id = hazirla_not(context, fake_gorusme, saat)
-    fake_gorusme["ozetleyici"] = sahte.SahteOzetleyici(reddedilen=["gpt-5"])
+    fake_gorusme["ozetleyici"] = sahte.SahteOzetleyici(reddedilen=["claude-sonnet-5"])
 
     kuyruk = kur_kuyruk(context, fake_gorusme)
     kuyruk.sirayi_isle()
 
     kayit = depo.require_not(context.conn, not_id)
     assert kayit["durum"] == DURUM_HAZIR
-    assert kayit["model"] == "claude-sonnet-4.5"
+    assert kayit["model"] == "gpt-5-mini"
     # Son calisan ayara yazildi: sonraki gorusme oradan baslar.
-    assert context.settings.get("calls.ozet_model_son") == "claude-sonnet-4.5"
-    assert gorusme_intake.load_config(context.settings).model_sirasi()[0] == "claude-sonnet-4.5"
+    assert context.settings.get("calls.ozet_model_son") == "gpt-5-mini"
+    assert gorusme_intake.load_config(context.settings).model_sirasi()[0] == "gpt-5-mini"
 
 
 def test_a_failed_stage_keeps_the_audio_and_can_be_retried(context, fake_gorusme):
@@ -633,6 +634,35 @@ def test_model_order_puts_the_last_working_model_first():
     assert ozet.modelleri_coz('["a", "b", "c"]', son_calisan="c") == ["c", "a", "b"]
     assert ozet.modelleri_coz("", son_calisan="") == list(ozet.VARSAYILAN_MODELLER)
     assert ozet.modelleri_coz("bozuk json [", son_calisan="") == ["bozuk json ["]
+
+
+def test_the_default_model_is_the_one_working_on_the_users_account():
+    # Sahadan 19 Eylul 2026: gpt-5, claude-sonnet-4.5, gpt-4.1 reddedildi;
+    # varsayilan sirali liste artik hesapta calisan modelle basliyor.
+    assert ozet.VARSAYILAN_MODELLER[0] == "claude-sonnet-5"
+    assert "gpt-5-mini" in ozet.VARSAYILAN_MODELLER
+    assert "claude-haiku-4.5" in ozet.VARSAYILAN_MODELLER
+
+
+def test_the_copilot_cli_model_flag_rejection_is_recognized():
+    """Sahadan gelen tam metin: `Model "gpt-4.1" from --model flag is not available`."""
+    cikti = OzetCikti(kod=1, metin="", hata='Model "gpt-4.1" from --model flag is not available')
+    assert ozet.reddedildi_mi(cikti)
+
+
+def test_rejected_models_are_summarized_on_one_line():
+    ozetleyici = sahte.SahteOzetleyici(reddedilen=["gpt-5", "claude-sonnet-4.5", "gpt-4.1"])
+    sonuc = ozet.calistir(
+        ozetleyici,
+        Path("transkript.txt"),
+        ["gpt-5", "claude-sonnet-4.5", "gpt-4.1"],
+        "istem",
+    )
+    assert not sonuc.basarili
+    assert sonuc.hata == (
+        "Copilot modelleri reddetti: gpt-5, claude-sonnet-4.5, gpt-4.1 — "
+        "Ayarlar'dan hesabında olan bir model seçin (ör. claude-sonnet-5)."
+    )
 
 
 def test_the_prompt_keeps_the_json_schema_intact(tmp_path):
@@ -1487,7 +1517,7 @@ def test_the_settings_endpoints_answer_without_windows(api_client):
 
     sablon = api_client.get("/api/gorusme/ayar/sablon").json()
     assert '"aksiyonlar"' in sablon["varsayilan"]
-    assert sablon["modeller"][0] == "gpt-5"
+    assert sablon["modeller"][0] == "claude-sonnet-5"
 
 
 def test_the_trial_endpoint_returns_the_diagnosis_instead_of_a_500(api_client, context):
@@ -1535,11 +1565,11 @@ def test_the_trial_endpoint_explains_a_missing_capture_package(api_client, conte
 
 
 def test_copilot_can_be_tested_from_the_settings_page(api_client, context, fake_gorusme):
-    fake_gorusme["ozetleyici"].reddedilen = {"gpt-5"}
+    fake_gorusme["ozetleyici"].reddedilen = {"claude-sonnet-5"}
     yanit = api_client.post("/api/gorusme/ayar/copilot-sina").json()
     assert yanit["calisiyor"] is True
-    assert yanit["model"] == "claude-sonnet-4.5"
-    assert context.settings.get("calls.ozet_model_son") == "claude-sonnet-4.5"
+    assert yanit["model"] == "gpt-5-mini"
+    assert context.settings.get("calls.ozet_model_son") == "gpt-5-mini"
     # Vekil adresi asla geri yazilmaz, yalnizca "ayarli mi" bilgisi doner.
     assert yanit["proxy_ayarli"] is False
     assert "proxy" not in yanit["mesaj"].lower()

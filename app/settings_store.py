@@ -90,7 +90,15 @@ DEFAULTS: dict[str, str] = {
     "calls.whisper_model": "small",
     "calls.whisper_klasor": "",
     # Ozet: sirali model listesi (JSON), son calisan model, sablon.
-    "calls.ozet_modelleri": '["gpt-5", "claude-sonnet-4.5", "gpt-4.1"]',
+    # Sahadan 19 Eylul 2026: gpt-5, claude-sonnet-4.5, gpt-4.1 kullanicinin
+    # hesabinda reddedildi; varsayilan simdi claude-sonnet-5, yedek sirada
+    # gpt-5-mini ve claude-haiku-4.5 var. Eski adlar da listede kalir, baska
+    # hesapta calisabilirler. Bu deger yalniz ayar hic yazilmamissa gecerli;
+    # mevcut kullanicilarin kaydettigi sira degismez.
+    "calls.ozet_modelleri": (
+        '["claude-sonnet-5", "gpt-5-mini", "claude-haiku-4.5", '
+        '"claude-sonnet-4.5", "gpt-5"]'
+    ),
     "calls.ozet_model_son": "",
     "calls.ozet_sablon": "",
     # Copilot CLI'nin vekil sunucusu. Kurumda Copilot vekilden cikiyor, Jira

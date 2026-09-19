@@ -43,7 +43,17 @@ from .source import BOLUM_AKSIYON, OzetCikti
 log = logging.getLogger("holocron.gorusme.ozet")
 
 KOMUT = "copilot"
-VARSAYILAN_MODELLER: tuple[str, ...] = ("gpt-5", "claude-sonnet-4.5", "gpt-4.1")
+# Sahadan 19 Eylul 2026: gpt-5, claude-sonnet-4.5 ve gpt-4.1 kullanicinin
+# hesabinda "not available" diye reddedildi; calisan modeller claude-sonnet-5
+# ve gpt-5-mini (yedek claude-haiku-4.5). Varsayilan model basa alinir, eski
+# adlar da yedek sirada tutulur; baska hesapta calisabilirler.
+VARSAYILAN_MODELLER: tuple[str, ...] = (
+    "claude-sonnet-5",
+    "gpt-5-mini",
+    "claude-haiku-4.5",
+    "claude-sonnet-4.5",
+    "gpt-5",
+)
 # Copilot bir soruya takilirsa is parcacigi sonsuza kadar beklemesin.
 ZAMAN_ASIMI = 900
 
@@ -57,6 +67,9 @@ RED_IZLERI: tuple[str, ...] = (
     "not entitled",
     "rate limit",
     "quota exceeded",
+    # Sahadan 19 Eylul 2026 (Copilot CLI --model bayragi): "Model "gpt-4.1"
+    # from --model flag is not available".
+    "from --model flag is not available",
 )
 
 SABLON_DOSYASI = Path(__file__).resolve().parent / "sablon.txt"
@@ -96,6 +109,19 @@ def reddedildi_mi(cikti: OzetCikti) -> bool:
         return True
     metin = f"{cikti.metin}\n{cikti.hata}".lower()
     return any(iz in metin for iz in RED_IZLERI)
+
+
+def reddedilenler_mesaji(modeller: Sequence[str]) -> str:
+    """Reddedilen modelleri tek satirda listeler, ayara yonlendirir.
+
+    Kullanici hangi modelin calistigini bilmiyorsa hesabinda GECERLI bir ad
+    goremez; ornek olarak varsayilan modeli gosteririz.
+    """
+    liste = ", ".join(str(ad).strip() for ad in modeller if str(ad).strip())
+    return (
+        f"Copilot modelleri reddetti: {liste} — Ayarlar'dan hesabında olan "
+        f"bir model seçin (ör. {VARSAYILAN_MODELLER[0]})."
+    )
 
 
 # Alt surece verilen vekil degiskenleri: buyuk ve kucuk harfli yazimlarin
@@ -488,11 +514,13 @@ def calistir(
 ) -> OzetSonucu:
     """Modelleri sirayla dener; ilk gecerli JSON kazanir."""
     denenen: list[str] = []
+    reddedilenler: list[str] = []
     son_hata = "Özetleyici hiç çalıştırılamadı."
     for model in modeller:
         denenen.append(model)
         cikti = ozetleyici.ozetle(transkript, model, istem)
         if reddedildi_mi(cikti):
+            reddedilenler.append(model)
             son_hata = (cikti.hata or cikti.metin or "model reddedildi").strip()[:500]
             log.info("Özet modeli reddedildi: %s", model)
             continue
@@ -501,6 +529,10 @@ def calistir(
             son_hata = "Model JSON döndürmedi."
             continue
         return OzetSonucu(veri=veri, model=model, denenen=tuple(denenen))
+    if reddedilenler:
+        # Tek tek model hatalari yerine tek satirlik ozet: kullanici hangi
+        # modellerin hesabinda kapali oldugunu bir bakista gorur.
+        son_hata = reddedilenler_mesaji(reddedilenler)
     return OzetSonucu(veri={}, denenen=tuple(denenen), hata=son_hata)
 
 
@@ -667,6 +699,7 @@ def sina(ozetleyici: Any, modeller: Sequence[str], klasor: Path) -> dict[str, An
     dosya = klasor / SINAMA_DOSYASI
     dosya.write_text("Bu bir bağlantı sınamasıdır.\n", encoding="utf-8")
     denenen: list[str] = []
+    reddedilenler: list[str] = []
     son_hata = "Copilot CLI hiç çalıştırılamadı."
     try:
         for model in modeller:
@@ -675,6 +708,7 @@ def sina(ozetleyici: Any, modeller: Sequence[str], klasor: Path) -> dict[str, An
             cikti = ozetleyici.ozetle(dosya, model, SINAMA_ISTEMI)
             gecen = time.monotonic() - basladi
             if reddedildi_mi(cikti):
+                reddedilenler.append(model)
                 son_hata = temizle(cikti.hata or cikti.metin or "model reddedildi")
                 continue
             # Bulunan tam yol ekranda durur: kullanici hangi Copilot'un
@@ -697,6 +731,8 @@ def sina(ozetleyici: Any, modeller: Sequence[str], klasor: Path) -> dict[str, An
             dosya.unlink()
         except OSError:
             pass
+    if reddedilenler:
+        son_hata = temizle(reddedilenler_mesaji(reddedilenler))
     return {
         "calisiyor": False,
         "model": "",
