@@ -127,6 +127,12 @@ adrese getirilir ("Zaten calisiyor: http://127.0.0.1:8765/").
 Hepsi **Ayarlar** ekranındadır ve sırayla yapılması en kolayıdır. Yalnızca ilk
 adım zorunludur; geri kalanı kullanmadığınız özellikleri kapalı bırakır.
 
+Ayarlar ekranı **gruplara** bölünmüştür: solda dikey bir menü (Jira bağlantısı,
+Ağ, Kişiler, E-posta, Teams, Copilot, Sefer, Görünüm), sağda yalnızca seçili
+grubun kartları. Seçim adreste `#grup` olarak durur (`/settings#copilot` gibi
+bir bağlantı doğrudan o grubu açar) ve tarayıcıda hatırlanır, sayfayı
+yenileyince aynı yerde kalırsınız.
+
 ### 1. Jira bağlantısı
 
 Kimlik bilgileri `settings` tablosunda şifreli durur; şifreleme anahtarı

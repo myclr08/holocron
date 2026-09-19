@@ -1,4 +1,71 @@
 // Ayarlar ekrani: yukle, kaydet, baglantiyi sina, alan katalogunu cek.
+//
+// Sayfa GRUPLARA bolunmustur (soldaki dikey sekmeler). Her grup kendi
+// bolumudur; ayni anda yalnizca biri gorunur. Secim `#grup` ile adreslenir
+// ve localStorage'da hatirlanir, boylece kaydettikten sonra donen kullanici
+// yine ayni yerde olur.
+
+const GROUP_KEY = "holocron.settings.group";
+const DEFAULT_GROUP = "jira";
+
+function groupTabs() {
+  return Array.from(document.querySelectorAll(".settings-tab"));
+}
+
+function groupNames() {
+  return groupTabs().map((tab) => tab.dataset.group);
+}
+
+/** Depolama kapali/dolu olabilir: okuma da yazma da sessizce basarisiz olur. */
+function rememberedGroup() {
+  try {
+    return localStorage.getItem(GROUP_KEY) || "";
+  } catch (err) {
+    return "";
+  }
+}
+
+function rememberGroup(name) {
+  try {
+    localStorage.setItem(GROUP_KEY, name);
+  } catch (err) {
+    /* gizli sekme ya da kapali depolama: hatirlamak zorunlu degil */
+  }
+}
+
+/** Secili grubu gosterir; digerleri gizlenir, sekme vurgusu tasinir. */
+function showGroup(name, options) {
+  const names = groupNames();
+  const target = names.includes(name) ? name : names[0] || DEFAULT_GROUP;
+  groupTabs().forEach((tab) => {
+    const on = tab.dataset.group === target;
+    tab.classList.toggle("on", on);
+    tab.setAttribute("aria-current", on ? "page" : "false");
+  });
+  document.querySelectorAll(".settings-group").forEach((section) => {
+    section.hidden = section.dataset.group !== target;
+  });
+  rememberGroup(target);
+  if (!options || options.updateHash !== false) {
+    // Adres cubugu gecmisi sismesin: aynı grup icin yeni giris acilmaz.
+    if (window.location.hash !== "#" + target) {
+      window.history.replaceState(null, "", "#" + target);
+    }
+  }
+  return target;
+}
+
+function bindGroups() {
+  groupTabs().forEach((tab) => {
+    tab.addEventListener("click", () => showGroup(tab.dataset.group));
+  });
+  window.addEventListener("hashchange", () => {
+    showGroup(window.location.hash.replace("#", ""), { updateHash: false });
+  });
+  const wanted = window.location.hash.replace("#", "") || rememberedGroup() || DEFAULT_GROUP;
+  showGroup(wanted);
+}
+
 const FIELD_IDS = {
   "jira.mode": "mode",
   "jira.base_url": "base-url",
@@ -113,8 +180,10 @@ async function replayCrawl() {
   }
 }
 
-async function saveSettings() {
-  const status = document.getElementById("status");
+/** Jira ve Ag alanlari TEK yuke gider: iki kartin Kaydet dugmesi de ayni
+ *  payload'u yazar, yalnizca durum satiri farkli kutuya duser. */
+async function saveSettings(statusId) {
+  const status = document.getElementById(statusId || "status");
   try {
     const data = await api("/api/settings", {
       method: "PUT",
@@ -128,8 +197,8 @@ async function saveSettings() {
   }
 }
 
-async function testConnection() {
-  const status = document.getElementById("status");
+async function testConnection(statusId) {
+  const status = document.getElementById(statusId || "status");
   setStatus(status, "Bağlantı deneniyor...", null);
   try {
     await api("/api/settings", { method: "PUT", body: JSON.stringify(collectForm()) });
@@ -150,8 +219,8 @@ async function testConnection() {
 }
 
 /** Teshis sonucunu adim listesi olarak cizer; kirmizi adimda oneri metni durur. */
-function renderDiagnosis(result) {
-  const box = document.getElementById("diagnosis");
+function renderDiagnosis(result, boxId) {
+  const box = document.getElementById(boxId || "diagnosis");
   box.textContent = "";
 
   const head = document.createElement("p");
@@ -202,16 +271,16 @@ function renderDiagnosis(result) {
   box.hidden = false;
 }
 
-async function diagnose() {
-  const status = document.getElementById("status");
-  const box = document.getElementById("diagnosis");
+async function diagnose(statusId, boxId) {
+  const status = document.getElementById(statusId || "status");
+  const box = document.getElementById(boxId || "diagnosis");
   box.hidden = true;
   setStatus(status, "Teşhis çalışıyor, her adım en çok beş saniye sürer...", null);
   try {
     await api("/api/settings", { method: "PUT", body: JSON.stringify(collectForm()) });
     document.getElementById("secret").value = "";
     const result = await api("/api/settings/diagnose", { method: "POST" });
-    renderDiagnosis(result);
+    renderDiagnosis(result, boxId || "diagnosis");
     setStatus(status, result.ok ? "Teşhis bitti: engel yok." : "Teşhis bitti.", result.ok ? "ok" : "error");
     await loadSettings();
   } catch (err) {
@@ -489,7 +558,7 @@ function galStamp(iso) {
 
 /** Kurum rehberini ceker; sonuc sayilari durum satirinda yazar. */
 async function importGal() {
-  const status = teamsStatus();
+  const status = contactsStatus();
   setStatus(status, "Kurum rehberi okunuyor, büyük rehberde birkaç saniye sürebilir...", null);
   try {
     const data = await api("/api/contacts/import-gal", { method: "POST" });
@@ -607,6 +676,21 @@ function teamsStatus() {
   return document.getElementById("teams-status");
 }
 
+/** Kisiler grubu ayri bir karttir: rehber ve kisi islemleri oraya yazar. */
+function contactsStatus() {
+  return document.getElementById("contacts-status");
+}
+
+async function contactsAction(run, message) {
+  try {
+    await run();
+    await loadTeamsLists();
+    setStatus(contactsStatus(), message, "ok");
+  } catch (err) {
+    setStatus(contactsStatus(), err.message, "error");
+  }
+}
+
 async function teamsAction(run, message) {
   try {
     await run();
@@ -663,7 +747,7 @@ function addTemplate() {
 }
 
 function saveContact(email, payload) {
-  return teamsAction(
+  return contactsAction(
     () =>
       api(`/api/contacts/${encodeURIComponent(email)}`, {
         method: "PUT",
@@ -676,7 +760,7 @@ function saveContact(email, payload) {
 function dropContact(contact) {
   const label = contact.name || contact.email;
   if (!confirm(`"${label}" adres defterinden ve bütün kayıtlardan silinsin mi?`)) return;
-  teamsAction(
+  contactsAction(
     () => api(`/api/contacts/${encodeURIComponent(contact.email)}`, { method: "DELETE" }),
     "Kişi silindi."
   );
@@ -786,11 +870,17 @@ async function testCopilot() {
 
 document.addEventListener("DOMContentLoaded", () => {
   bindShell();
+  bindGroups();
   document.getElementById("mode").addEventListener("change", applyModeVisibility);
   document.getElementById("auth-type").addEventListener("change", applyModeVisibility);
-  document.getElementById("save").addEventListener("click", saveSettings);
-  document.getElementById("test").addEventListener("click", testConnection);
-  document.getElementById("diagnose").addEventListener("click", diagnose);
+  document.getElementById("save").addEventListener("click", () => saveSettings("status"));
+  document.getElementById("test").addEventListener("click", () => testConnection("status"));
+  document.getElementById("diagnose").addEventListener("click", () => diagnose("status", "diagnosis"));
+  // Ag karti ayni yuku yazar, sonucu kendi kutusuna koyar.
+  document.getElementById("net-save").addEventListener("click", () => saveSettings("net-status"));
+  document
+    .getElementById("net-diagnose")
+    .addEventListener("click", () => diagnose("net-status", "net-diagnosis"));
   document.getElementById("fields").addEventListener("click", refreshFields);
   document
     .getElementById("ui-starfield")

@@ -620,6 +620,131 @@ def test_the_drawer_can_be_widened_and_remembers_it(api_client):
     assert "animation: none" in resizing
 
 
+# --- Ayarlar duzeni: gruplar, dikey sekmeler, iki sutunlu alanlar -------
+#
+# Kullanici sikayeti (19 Eylul 2026): "ayarlar kismi cok karisik, sola
+# sikisik". Sayfa artik gruplara bolunmus, genis ekranin tamamini kullaniyor
+# ve her kartta alanlar iki sutuna diziliyor.
+
+# Sekmelerin sirasi kullanicinin verdigi siradir; degistirmeden once sorulmali.
+SETTINGS_GROUPS = (
+    ("jira", "Jira bağlantısı"),
+    ("ag", "Ağ"),
+    ("kisiler", "Kişiler"),
+    ("eposta", "E-posta"),
+    ("teams", "Teams"),
+    ("copilot", "Copilot"),
+    ("sefer", "Sefer"),
+    ("gorunum", "Görünüm"),
+)
+
+
+def test_the_settings_page_is_split_into_groups_in_order(api_client):
+    page = api_client.get("/settings").text
+    nav = page.split('id="settings-nav"', 1)[1].split("</nav>", 1)[0]
+    for name, label in SETTINGS_GROUPS:
+        assert f'data-group="{name}"' in nav, name
+        assert f">{label}<" in nav, label
+        assert f'id="grup-{name}"' in page, name
+    # Sira menude kullanicinin istedigi gibi durmali.
+    yerler = [nav.index(f'data-group="{name}"') for name, _ in SETTINGS_GROUPS]
+    assert yerler == sorted(yerler)
+    # Her grubun bir cumlelik tanimi var.
+    assert page.count('class="group-lead"') == len(SETTINGS_GROUPS)
+
+
+def test_every_card_sits_in_exactly_one_group(api_client):
+    """Kart bir gruba ait olmali; grupsuz kart ekranda kaybolurdu."""
+    page = api_client.get("/settings").text
+    govde = page.split('class="settings-panes"', 1)[1]
+    for kart in ("mail-card", "mailsend-card", "teams-card", "contacts-card",
+                 "copilot-card", "campaign-card", "appearance", "net-card"):
+        assert f'id="{kart}"' in govde, kart
+    # Gruplarin disinda kart kalmadi.
+    assert page.split('class="settings-panes"', 1)[0].count('class="card"') == 0
+
+
+def test_the_contacts_group_owns_the_address_book(api_client):
+    """Kullanici "Kişiler ayrı grup olsun" dedi: rehber Teams kartindan cikti."""
+    page = api_client.get("/settings").text
+    kisiler = page.split('id="grup-kisiler"', 1)[1].split("</section>", 1)[0]
+    for marker in ('id="teams-contacts"', 'id="teams-gal"', "Rehberi Outlook'tan yenile",
+                   'id="teams-gal-unsupported"', "Adres defteri"):
+        assert marker in kisiler, marker
+    # Teams grubunda artik yalnizca mesajlasma var.
+    teams = page.split('id="grup-teams"', 1)[1].split("</section>", 1)[0]
+    assert 'id="teams-templates"' in teams
+    assert 'id="teams-contacts"' not in teams
+
+
+def test_the_mail_group_carries_both_cards(api_client):
+    page = api_client.get("/settings").text
+    eposta = page.split('id="grup-eposta"', 1)[1].split("</section>", 1)[0]
+    assert 'id="mail-card"' in eposta
+    assert 'id="mailsend-card"' in eposta
+
+
+def test_the_group_menu_is_sticky_and_the_page_uses_the_width(api_client):
+    css = api_client.get("/static/css/app.css").text
+    shell = css.split(".settings-shell {", 1)[1].split("}", 1)[0]
+    assert "max-width: 1180px" in shell
+    assert "margin: 0 auto" in shell
+    assert "grid-template-columns: 208px minmax(0, 1fr)" in shell
+    main = css.split(".settings-main {", 1)[1].split("}", 1)[0]
+    assert "32px" in main
+    nav = css.split(".settings-nav {", 1)[1].split("}", 1)[0]
+    assert "position: sticky" in nav
+    # Secili sekme sari serit tasir.
+    on = css.split(".settings-tab.on {", 1)[1].split("}", 1)[0]
+    assert "var(--accent)" in on
+
+
+def test_card_fields_are_two_columns_and_collapse_on_narrow_screens(api_client):
+    css = api_client.get("/static/css/app.css").text
+    grid = css.split(".field-grid {", 1)[1].split("}", 1)[0]
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in grid
+    dar = css.split("@media (max-width: 760px) {", 1)[1]
+    assert ".field-grid { grid-template-columns: 1fr" in dar
+    # Kaydet/sina dugmeleri kartin sag altinda.
+    actions = css.split(".settings-panes .card .actions {", 1)[1].split("}", 1)[0]
+    assert "justify-content: flex-end" in actions
+
+
+def test_settings_headings_are_not_forced_to_uppercase(api_client):
+    """Turkce metne `text-transform: uppercase` uygulanmaz."""
+    css = api_client.get("/static/css/app.css").text
+    baslik = css.split(".settings-panes .card h2 {", 1)[1].split("}", 1)[0]
+    assert "text-transform: none" in baslik
+
+
+def test_the_selected_group_is_deep_linked_and_remembered(api_client):
+    script = api_client.get("/static/js/settings.js").text
+    for marker in (
+        'GROUP_KEY = "holocron.settings.group"',
+        "function showGroup",
+        "function bindGroups",
+        "localStorage.getItem",
+        "localStorage.setItem",
+        "window.history.replaceState",
+        "hashchange",
+        'window.location.hash.replace("#", "")',
+    ):
+        assert marker in script, marker
+    # Depolama kapali olabilir: okuma da yazma da try/catch icinde.
+    gezinme = script.split("function rememberedGroup", 1)[1].split("function showGroup", 1)[0]
+    assert gezinme.count("try {") == 2
+
+
+def test_the_network_card_saves_and_diagnoses_into_its_own_box(api_client):
+    page = api_client.get("/settings").text
+    ag = page.split('id="grup-ag"', 1)[1].split("</section>", 1)[0]
+    for marker in ('id="net-save"', 'id="net-diagnose"', 'id="net-status"', 'id="net-diagnosis"'):
+        assert marker in ag, marker
+    script = api_client.get("/static/js/settings.js").text
+    assert 'saveSettings("net-status")' in script
+    assert 'diagnose("net-status", "net-diagnosis")' in script
+
+
 # --- Ag teshisi: kurum agi denetimleri ----------------------------------
 
 

@@ -21,415 +21,529 @@
       </div>
     </header>
 
-    <main class="main">
-      <div class="card">
-        <h2>Jira bağlantısı</h2>
-        <p class="hint">
-          Kimlik bilgileri yalnızca bu bilgisayarda, şifreli olarak saklanır. Kaydedilen token
-          bir daha ekranda gösterilmez.
-        </p>
+    <main class="main settings-main">
+      <div class="settings-shell">
+        <!-- Sol dikey sekmeler: seçili grup vurgulu, sayfa kaydıkça yerinde kalır. -->
+        <nav class="settings-nav" id="settings-nav" aria-label="Ayar grupları">
+          <button class="settings-tab" type="button" data-group="jira">Jira bağlantısı</button>
+          <button class="settings-tab" type="button" data-group="ag">Ağ</button>
+          <button class="settings-tab" type="button" data-group="kisiler">Kişiler</button>
+          <button class="settings-tab" type="button" data-group="eposta">E-posta</button>
+          <button class="settings-tab" type="button" data-group="teams">Teams</button>
+          <button class="settings-tab" type="button" data-group="copilot">Copilot</button>
+          <button class="settings-tab" type="button" data-group="sefer">Sefer</button>
+          <button class="settings-tab" type="button" data-group="gorunum">Görünüm</button>
+        </nav>
 
-        <div class="row">
-          <div class="field">
-            <label for="mode">Mod</label>
-            <select id="mode">
-              <option value="server">Jira Server / Data Center</option>
-              <option value="cloud">Jira Cloud</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="base-url">Jira adresi</label>
-            <input type="url" id="base-url" placeholder="https://jira.example.com" />
-          </div>
-        </div>
+        <div class="settings-panes">
 
-        <div id="server-fields">
-          <div class="row">
-            <div class="field">
-              <label for="auth-type">Kimlik türü</label>
-              <select id="auth-type">
-                <option value="pat">Kişisel erişim anahtarı (PAT)</option>
-                <option value="basic">Kullanıcı adı ve parola</option>
-              </select>
+          <!-- 1. Jira bağlantısı ------------------------------------------>
+          <section class="settings-group" id="grup-jira" data-group="jira" hidden>
+            <p class="group-lead">
+              Holocron'un hangi Jira'ya, hangi kimlikle bağlanacağı. Bu bağlantı kurulmadan
+              filolar boş kalır.
+            </p>
+
+            <div class="card">
+              <h2>Sunucu ve kimlik</h2>
+              <p class="hint">
+                Kimlik bilgileri yalnızca bu bilgisayarda, şifreli olarak saklanır. Kaydedilen
+                token bir daha ekranda gösterilmez.
+              </p>
+
+              <div class="field-grid">
+                <div class="field">
+                  <label for="mode">Mod</label>
+                  <select id="mode">
+                    <option value="server">Jira Server / Data Center</option>
+                    <option value="cloud">Jira Cloud</option>
+                  </select>
+                  <p class="hint">Kurumsal kurulumların çoğu Server / Data Center'dır.</p>
+                </div>
+                <div class="field">
+                  <label for="base-url">Jira adresi</label>
+                  <input type="url" id="base-url" placeholder="https://jira.example.com" />
+                  <p class="hint">Tarayıcıda açtığınız adresin kökü.</p>
+                </div>
+
+                <div class="field" id="server-fields">
+                  <label for="auth-type">Kimlik türü</label>
+                  <select id="auth-type">
+                    <option value="pat">Kişisel erişim anahtarı (PAT)</option>
+                    <option value="basic">Kullanıcı adı ve parola</option>
+                  </select>
+                  <p class="hint">PAT destekleniyorsa parolaya gerek yoktur.</p>
+                </div>
+                <div class="field" id="server-username" hidden>
+                  <label for="username">Kullanıcı adı</label>
+                  <input type="text" id="username" placeholder="kullanici.adi" />
+                  <p class="hint">Yalnızca "kullanıcı adı ve parola" kipinde gerekir.</p>
+                </div>
+
+                <div class="field" id="cloud-fields" hidden>
+                  <label for="email">Atlassian e-postası</label>
+                  <input type="text" id="email" placeholder="kullanici@example.com" />
+                  <p class="hint">Cloud'da API token bu adresle eşleşir.</p>
+                </div>
+
+                <div class="field">
+                  <label for="secret"><span id="secret-label">Kişisel erişim anahtarı (PAT)</span>
+                    <span class="badge" id="secret-state">ayarsız</span></label>
+                  <input type="password" id="secret" autocomplete="off" placeholder="Değer girin" />
+                  <p class="hint">Şifrelenip saklanır, bir daha ekranda gösterilmez.</p>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button id="fields">Alan kataloğunu çek</button>
+                <button class="danger" id="clear-secret">Kayıtlı sırrı sil</button>
+                <button id="diagnose">Teşhis</button>
+                <button id="test">Bağlantıyı sına</button>
+                <button class="primary" id="save">Kaydet</button>
+              </div>
+              <div class="status" id="status" hidden></div>
+              <div class="diagnosis" id="diagnosis" hidden></div>
             </div>
-            <div class="field" id="server-username" hidden>
-              <label for="username">Kullanıcı adı</label>
-              <input type="text" id="username" placeholder="kullanici.adi" />
+          </section>
+
+          <!-- 2. Ağ ------------------------------------------------------->
+          <section class="settings-group" id="grup-ag" data-group="ag" hidden>
+            <p class="group-lead">
+              Kurum ağı araya giriyorsa: vekil sunucu, sertifika ve ad çözümleme davranışı.
+            </p>
+
+            <div class="card" id="net-card">
+              <h2>Vekil sunucu ve sertifika</h2>
+              <p class="hint">
+                Kurum ağı vekil sunucu ya da özel sertifika kullanıyorsa buraya yazın. Bu
+                ayarlar Jira bağlantısıyla birlikte kaydedilir.
+              </p>
+
+              <div class="field">
+                <span class="label-text">Vekil sunucu</span>
+                <div class="choice-group" id="proxy-mode">
+                  <label class="checkbox">
+                    <input type="radio" name="proxy-mode" value="system" checked />
+                    Sistem ayarını kullan (ortam değişkeni ya da Windows kayıt defteri)
+                  </label>
+                  <label class="checkbox">
+                    <input type="radio" name="proxy-mode" value="manual" />
+                    Aşağıdaki alanları kullan
+                  </label>
+                  <label class="checkbox">
+                    <input type="radio" name="proxy-mode" value="direct" />
+                    Doğrudan bağlan (vekil sunucu yok)
+                  </label>
+                </div>
+                <p class="hint">
+                  Jira iç ağdaysa kurumsal vekil sunucu onu göremez ve tünel zaman aşımına uğrar.
+                  O durumda <strong>Doğrudan bağlan</strong> seçin: <code>https_proxy</code> gibi
+                  ortam değişkenleri yok sayılır.
+                </p>
+              </div>
+
+              <div class="field-grid">
+                <div class="field">
+                  <label for="proxy-http">HTTP vekil sunucu</label>
+                  <input type="text" id="proxy-http" placeholder="http://proxy.example.com:8080" />
+                  <p class="hint">Yalnızca "aşağıdaki alanları kullan" kipinde okunur.</p>
+                </div>
+                <div class="field">
+                  <label for="proxy-https">HTTPS vekil sunucu</label>
+                  <input type="text" id="proxy-https" placeholder="http://proxy.example.com:8080" />
+                  <p class="hint">Çoğu kurumda HTTP ile aynı adrestir.</p>
+                </div>
+                <div class="field">
+                  <label for="no-proxy">Vekil sunucudan muaf adresler</label>
+                  <input type="text" id="no-proxy" placeholder="jira.example.com, .kurum.local" />
+                  <p class="hint">Virgülle ayırın. İç ağdaki adresler vekile uğramadan çıkar.</p>
+                </div>
+                <div class="field">
+                  <label for="ca-file">Özel CA dosyası yolu</label>
+                  <input type="text" id="ca-file" placeholder="C:\sertifika\kurum-ca.pem" />
+                  <p class="hint">Kurum kök sertifikası PEM dosyası olarak verilir.</p>
+                </div>
+              </div>
+
+              <label class="checkbox">
+                <input type="checkbox" id="verify-ssl" checked />
+                SSL sertifikasını doğrula (kapatmak güvenliği düşürür)
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" id="ipv4-first" checked />
+                Önce IPv4 dene (IPv6 kaydı olup IPv6 yolu kapalı ağlarda beklemeyi keser)
+              </label>
+
+              <div class="actions">
+                <button id="net-diagnose">Teşhis</button>
+                <button class="primary" id="net-save">Kaydet</button>
+              </div>
+              <div class="status" id="net-status" hidden></div>
+              <div class="diagnosis" id="net-diagnosis" hidden></div>
             </div>
-          </div>
-        </div>
+          </section>
 
-        <div id="cloud-fields" hidden>
-          <div class="field">
-            <label for="email">Atlassian e-postası</label>
-            <input type="text" id="email" placeholder="kullanici@example.com" />
-          </div>
-        </div>
+          <!-- 3. Kişiler -------------------------------------------------->
+          <section class="settings-group" id="grup-kisiler" data-group="kisiler" hidden>
+            <p class="group-lead">
+              Kayıtlara ilişen kişiler ve nereden geldikleri. Mesaj ve posta pencerelerindeki
+              tamamlama listesi buradan beslenir.
+            </p>
 
-        <div class="field">
-          <label for="secret"><span id="secret-label">Kişisel erişim anahtarı (PAT)</span>
-            <span class="badge" id="secret-state">ayarsız</span></label>
-          <input type="password" id="secret" autocomplete="off" placeholder="Değer girin" />
-        </div>
-      </div>
+            <div class="card" id="contacts-card">
+              <h2>Adres defteri</h2>
+              <p class="hint">
+                Kayıtlara girdiğiniz kişiler buraya düşer ve bir daha yazarken tamamlanır.
+                Buradan silinen kişi bütün kayıtlardan da çıkar. Dağıtım listeleri
+                <strong>liste</strong> rozetiyle görünür.
+              </p>
 
-      <div class="card">
-        <h2>Ağ</h2>
-        <p class="hint">Kurum ağı vekil sunucu ya da özel sertifika kullanıyorsa buraya yazın.</p>
+              <div class="field">
+                <span class="label-text">Kayıtlı kişiler</span>
+                <div class="teams-list" id="teams-contacts"></div>
+              </div>
 
-        <div class="field">
-          <span class="label-text">Vekil sunucu</span>
-          <div class="choice-group" id="proxy-mode">
-            <label class="checkbox">
-              <input type="radio" name="proxy-mode" value="system" checked />
-              Sistem ayarını kullan (ortam değişkeni ya da Windows kayıt defteri)
-            </label>
-            <label class="checkbox">
-              <input type="radio" name="proxy-mode" value="manual" />
-              Aşağıdaki alanları kullan
-            </label>
-            <label class="checkbox">
-              <input type="radio" name="proxy-mode" value="direct" />
-              Doğrudan bağlan (vekil sunucu yok)
-            </label>
-          </div>
-          <p class="hint">
-            Jira iç ağdaysa kurumsal vekil sunucu onu göremez ve tünel zaman aşımına uğrar.
-            O durumda <strong>Doğrudan bağlan</strong> seçin: <code>https_proxy</code> gibi
-            ortam değişkenleri yok sayılır.
-          </p>
-        </div>
+              <div class="field">
+                <span class="label-text">Kurum rehberi (Outlook adres listeleri)</span>
+                <p class="hint">
+                  Outlook'un adres listelerini tek geçişte içeri alır: kişiler ve dağıtım
+                  listeleri defterde birikir. Ağa çıkılmaz, Outlook'un açık oturumu kullanılır.
+                </p>
+                <p class="warn-note" id="teams-gal-unsupported" hidden>
+                  Kurum rehberi yalnız Windows'ta Outlook ile okunabilir.
+                </p>
+                <p class="hint" id="teams-gal-when"></p>
+              </div>
 
-        <div class="row">
-          <div class="field">
-            <label for="proxy-http">HTTP vekil sunucu</label>
-            <input type="text" id="proxy-http" placeholder="http://proxy.example.com:8080" />
-          </div>
-          <div class="field">
-            <label for="proxy-https">HTTPS vekil sunucu</label>
-            <input type="text" id="proxy-https" placeholder="http://proxy.example.com:8080" />
-          </div>
-        </div>
-        <div class="field">
-          <label for="no-proxy">Vekil sunucudan muaf adresler</label>
-          <input type="text" id="no-proxy" placeholder="jira.example.com, .kurum.local" />
-          <p class="hint">Virgülle ayırın. İç ağdaki adresler vekil sunucuya uğramadan çıkar.</p>
-        </div>
-        <div class="field">
-          <label for="ca-file">Özel CA dosyası yolu</label>
-          <input type="text" id="ca-file" placeholder="C:\sertifika\kurum-ca.pem" />
-        </div>
-        <label class="checkbox">
-          <input type="checkbox" id="verify-ssl" checked />
-          SSL sertifikasını doğrula (kapatmak güvenliği düşürür)
-        </label>
-        <label class="checkbox">
-          <input type="checkbox" id="ipv4-first" checked />
-          Önce IPv4 dene (IPv6 kaydı olup IPv6 yolu kapalı ağlarda beklemeyi keser)
-        </label>
+              <div class="actions">
+                <button id="teams-gal">Rehberi Outlook'tan yenile</button>
+              </div>
+              <div class="status" id="contacts-status" hidden></div>
+            </div>
+          </section>
 
-        <div class="actions">
-          <button class="primary" id="save">Kaydet</button>
-          <button id="test">Bağlantıyı sına</button>
-          <button id="diagnose">Teşhis</button>
-          <button id="fields">Alan kataloğunu çek</button>
-          <button class="danger" id="clear-secret">Kayıtlı sırrı sil</button>
+          <!-- 4. E-posta -------------------------------------------------->
+          <section class="settings-group" id="grup-eposta" data-group="eposta" hidden>
+            <p class="group-lead">
+              Gelen postaların göreve dönmesi ve giden postaların şablonları. İkisi de
+              Outlook'un açık oturumunu kullanır, yalnız Windows'ta çalışır.
+            </p>
+
+            <div class="card" id="mail-card">
+              <h2>E-postadan görev üretme</h2>
+              <p class="hint">
+                Kimden, Kime ya da CC alanında aşağıdaki adreslerden biri geçen her e-posta
+                <strong>Görevlerim → Yapılacak</strong> sütununa düşer: konu görevin adı, gövde
+                açıklaması olur. Aynı konuşmadan tek görev çıkar, takvim davetleri atlanır.
+              </p>
+              <p class="warn-note" id="mail-unsupported" hidden>
+                Bu özellik yalnız Windows'ta Outlook ile çalışır.
+              </p>
+
+              <label class="checkbox">
+                <input type="checkbox" id="mail-enabled" />
+                E-postadan görev üret
+              </label>
+
+              <div class="field-grid">
+                <div class="field">
+                  <label for="mail-from">Kimden</label>
+                  <input type="text" id="mail-from" placeholder="patron@example.com, *@example.com" />
+                  <p class="hint">Gönderen bu adreslerden biriyse.</p>
+                </div>
+                <div class="field">
+                  <label for="mail-to">Kime</label>
+                  <input type="text" id="mail-to" placeholder="ornek@example.com" />
+                  <p class="hint">Alıcılar arasında bu adreslerden biri varsa.</p>
+                </div>
+                <div class="field">
+                  <label for="mail-cc">CC</label>
+                  <input type="text" id="mail-cc" placeholder="ekip@example.com" />
+                  <p class="hint">CC'de bu adreslerden biri varsa.</p>
+                </div>
+                <div class="field">
+                  <span class="label-text">Eşleşme kuralı</span>
+                  <p class="hint">
+                    Üçü ayrı çalışır, biri tutması yeter. Virgülle ayırın;
+                    <code>*@example.com</code> yazarsanız o alan adının tamamı sayılır.
+                    Üçü de boşsa tarama "adres tanımlı değil" der ve hiçbir posta eşleşmez.
+                  </p>
+                </div>
+
+                <div class="field">
+                  <label for="mail-days">Kaç günlük geçmiş taransın</label>
+                  <input type="number" id="mail-days" min="1" max="365" step="1" />
+                  <p class="hint">Tarama bu pencereden eski postalara bakmaz.</p>
+                </div>
+                <div class="field">
+                  <label for="mail-body-limit">Açıklama sınırı (karakter)</label>
+                  <input type="number" id="mail-body-limit" min="200" max="100000" step="100" />
+                  <p class="hint">Uzun gövdeler bu sınırda kırpılır.</p>
+                </div>
+              </div>
+
+              <label class="checkbox">
+                <input type="checkbox" id="mail-scan-on-refresh" />
+                Güncelle çalışırken e-postaları da tara
+              </label>
+
+              <div class="field">
+                <span class="label-text">Klasörler</span>
+                <div class="folder-tree" id="mail-folders"></div>
+                <p class="hint" id="mail-folders-hint">
+                  Seçilen: Gelen Kutusu. Başka klasör eklemek için <strong>Klasörleri getir</strong>.
+                </p>
+              </div>
+
+              <div class="actions">
+                <button id="mail-folders-fetch">Klasörleri getir</button>
+                <button id="mail-scan">Şimdi tara</button>
+                <button id="mail-test">Bağlantıyı sına</button>
+                <button class="primary" id="mail-save">Kaydet</button>
+              </div>
+              <div class="status" id="mail-status" hidden></div>
+            </div>
+
+            <div class="card" id="mailsend-card">
+              <h2>E-posta şablonları</h2>
+              <p class="hint">
+                Ana ekrandaki <strong>E-posta ile gönder</strong> penceresi bu şablonları kullanır:
+                Kime, CC, konu ve gövde birlikte saklanır, böylece "her hafta aynı kişilere aynı
+                başlıkla" işi tek seçimle biter. Grubun kayıtları seçili sütunlarla Excel'e çevrilip
+                postaya eklenir.
+              </p>
+              <p class="warn-note" id="mailsend-unsupported" hidden>
+                Bu özellik yalnız Windows'ta Outlook ile çalışır.
+              </p>
+
+              <div class="field">
+                <span class="label-text">Kayıtlı şablonlar</span>
+                <div class="teams-list" id="mailsend-templates"></div>
+                <p class="hint" id="mailsend-placeholders"></p>
+              </div>
+
+              <div class="field-grid">
+                <div class="field">
+                  <label for="mailsend-name">Yeni şablon adı</label>
+                  <input type="text" id="mailsend-name" placeholder="Haftalık liste" />
+                  <p class="hint">Gönderim penceresinde bu adla görünür.</p>
+                </div>
+                <div class="field">
+                  <label for="mailsend-new-subject">Konu</label>
+                  <input type="text" id="mailsend-new-subject"
+                    placeholder="{grup} — {tarih} ({adet} kayıt)" />
+                  <p class="hint">Yer tutucular konuda da geçerlidir.</p>
+                </div>
+                <div class="field">
+                  <span class="label-text">Kime</span>
+                  <div id="mailsend-new-to"></div>
+                  <p class="hint">
+                    Adresler <code>,</code> <code>;</code> ya da satır sonuyla ayrılır; boşluk
+                    ayırıcı değildir.
+                  </p>
+                </div>
+                <div class="field">
+                  <span class="label-text">CC</span>
+                  <div id="mailsend-new-cc"></div>
+                  <p class="hint">
+                    <code>Ad Soyad &lt;ornek@example.com&gt;</code> biçimi de yazılabilir.
+                  </p>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="mailsend-new-body">Gövde</label>
+                <textarea id="mailsend-new-body" rows="4"
+                  placeholder="Merhaba,&#10;&#10;{grup} listesinin {tarih} tarihli hâli ektedir.&#10;&#10;{tablo}"></textarea>
+              </div>
+
+              <div class="field">
+                <span class="label-text">Gönderim kipi</span>
+                <div class="choice-group" id="mailsend-mode">
+                  <label class="checkbox">
+                    <input type="radio" name="mailsend-mode" value="display" checked />
+                    Outlook'ta aç (Gönder'e siz basarsınız)
+                  </label>
+                  <label class="checkbox">
+                    <input type="radio" name="mailsend-mode" value="send" />
+                    Doğrudan gönder
+                  </label>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button id="mailsend-add">Şablon ekle</button>
+                <button class="primary" id="mailsend-save">Kaydet</button>
+              </div>
+              <div class="status" id="mailsend-status" hidden></div>
+            </div>
+          </section>
+
+          <!-- 5. Teams ---------------------------------------------------->
+          <section class="settings-group" id="grup-teams" data-group="teams" hidden>
+            <p class="group-lead">
+              Kayıttan tek tıkla Teams mesajı: derin bağlantı, konu adı biçimi ve hazır
+              mesaj şablonları.
+            </p>
+
+            <div class="card" id="teams-card">
+              <h2>Mesaj şablonları</h2>
+              <p class="hint">
+                Kayıtlara Teams kişileri iliştirip tek tıkla "bu kaydın son durumu ne?" mesajı
+                hazırlayabilirsiniz. Tek kişide doğrudan sohbet, birden fazla kişide grup sohbeti
+                açılır.
+                <strong>Mesaj Teams'te hazır açılır, göndermek için Gönder'e basmanız gerekir.</strong>
+              </p>
+
+              <div class="field">
+                <span class="label-text">Kayıtlı şablonlar</span>
+                <div class="teams-list" id="teams-templates"></div>
+                <p class="hint" id="teams-placeholders"></p>
+              </div>
+
+              <div class="field-grid">
+                <div class="field">
+                  <label for="template-name">Yeni şablon adı</label>
+                  <input type="text" id="template-name" placeholder="Son durum" />
+                  <p class="hint">Kayıt çekmecesinde bu adla görünür.</p>
+                </div>
+                <div class="field">
+                  <label for="teams-topic">Konu adı biçimi</label>
+                  <input type="text" id="teams-topic" placeholder="{key}" />
+                  <p class="hint">Grup sohbeti açılırken konu adı bu biçimden kurulur.</p>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="template-body">Yeni şablon gövdesi</label>
+                <textarea id="template-body" rows="3"
+                  placeholder="{key} için kısa bir güncelleme rica ederim. {url}"></textarea>
+              </div>
+
+              <div class="actions">
+                <button id="template-add">Şablon ekle</button>
+                <button class="primary" id="teams-save">Kaydet</button>
+              </div>
+              <div class="status" id="teams-status" hidden></div>
+            </div>
+          </section>
+
+          <!-- 6. Copilot -------------------------------------------------->
+          <section class="settings-group" id="grup-copilot" data-group="copilot" hidden>
+            <p class="group-lead">
+              Makinenizde kurulu Copilot CLI'ye giden köprü. Copilot yoksa burayı atlayın;
+              hiçbir şey bozulmaz.
+            </p>
+
+            <div class="card" id="copilot-card">
+              <h2>Copilot CLI</h2>
+              <p class="hint">
+                Holocron aracı kurmaz, güncellemez ve hesabınıza dokunmaz; yalnızca bulup alt
+                süreç olarak çağırır. Buradaki ayarlar aracın nerede olduğunu ve hangi modelin
+                deneneceğini söyler.
+              </p>
+
+              <div class="field-grid">
+                <div class="field">
+                  <label for="copilot-yol">Copilot yolu (boş = otomatik bul)</label>
+                  <input type="text" id="copilot-yol" placeholder="%APPDATA%\npm\copilot.cmd" />
+                  <p class="hint">
+                    "Copilot CLI bulunamadı" diyorsa komut istemine <code>where copilot</code>
+                    yazıp çıkan <strong>tam yolu</strong> (<code>.cmd</code> ya da
+                    <code>.exe</code> uzantısıyla) buraya kopyalayın. Holocron
+                    <code>pythonw.exe</code> ile açıldığı için terminalinizin PATH'ini
+                    görmeyebilir; alan boşken PATH, npm klasörü ve kayıt defterindeki PATH
+                    sırayla denenir.
+                  </p>
+                </div>
+                <div class="field">
+                  <label for="copilot-proxy">Vekil sunucu (boş = sistem ortamı)</label>
+                  <input type="text" id="copilot-proxy" placeholder="http://vekil.kurum.local:8080" />
+                  <p class="hint">
+                    Terminalde <code>set HTTPS_PROXY=...</code> ile yazdığınız adresi buraya
+                    yazın. Bu değer YALNIZCA Copilot alt sürecine verilir: Holocron'un Jira
+                    bağlantısı "doğrudan bağlan" kipinde kalır, Jira sunucusu alt sürecin
+                    muafiyet listesine eklenir.
+                  </p>
+                </div>
+                <div class="field">
+                  <label for="copilot-modeller">Model sırası (sırayla denenir, virgülle ayırın)</label>
+                  <input
+                    type="text"
+                    id="copilot-modeller"
+                    placeholder="claude-sonnet-5, gpt-5-mini, claude-haiku-4.5"
+                  />
+                  <p class="hint">
+                    Hesabınızda hangi modellerin açık olduğundan emin değilseniz Copilot
+                    CLI'nin kendi listesine bakın; reddedilen bir model burada dururken
+                    sıradaki otomatik denenir.
+                  </p>
+                </div>
+                <div class="field">
+                  <span class="label-text">Durum</span>
+                  <p class="hint" id="copilot-son-model"></p>
+                  <p class="hint" id="copilot-sonuc"></p>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button id="copilot-test">Copilot'u sına</button>
+                <button class="primary" id="copilot-save">Kaydet</button>
+              </div>
+              <div class="status" id="copilot-status" hidden></div>
+            </div>
+          </section>
+
+          <!-- 7. Sefer ---------------------------------------------------->
+          <section class="settings-group" id="grup-sefer" data-group="sefer" hidden>
+            <p class="group-lead">
+              Oyunlaştırma: hangi iş kaç XP veriyor. Değişiklik geçmişe dokunmaz.
+            </p>
+
+            <div class="card" id="campaign-card">
+              <h2>XP kuralları</h2>
+              <p class="hint">
+                Sefer, bitiş tarihi olan bir XP hedefidir. Buradaki puanlar ne yaptığınızda kaç XP
+                kazandığınızı belirler; kapatılan kural hiç puan vermez. Değişiklik geçmişe dokunmaz,
+                bundan sonraki olaylara uygulanır.
+              </p>
+              <div class="teams-list" id="campaign-rules"></div>
+              <p class="hint" id="campaign-grace"></p>
+              <div class="actions">
+                <button class="primary" id="campaign-rules-save">Kaydet</button>
+              </div>
+              <div class="status" id="campaign-status" hidden></div>
+            </div>
+          </section>
+
+          <!-- 8. Görünüm -------------------------------------------------->
+          <section class="settings-group" id="grup-gorunum" data-group="gorunum" hidden>
+            <p class="group-lead">
+              Atmosfer: yıldız alanı, hareketler ve açılış akışı. Anında uygulanır.
+            </p>
+
+            <div class="card" id="appearance">
+              <h2>Tema ve hareket</h2>
+              <p class="hint">
+                Atmosfer ayarları anında uygulanır ve bu bilgisayarda saklanır. İşletim sisteminizde
+                "hareketi azalt" açıksa yıldızlar zaten durur.
+              </p>
+              <label class="checkbox">
+                <input type="checkbox" id="ui-starfield" checked />
+                Yıldız alanı
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" id="ui-motion" checked />
+                Hareketler
+              </label>
+              <div class="actions">
+                <button id="replay-crawl">Açılışı tekrar göster</button>
+              </div>
+              <div class="status" id="appearance-status" hidden></div>
+            </div>
+          </section>
+
         </div>
-        <div class="status" id="status" hidden></div>
-        <div class="diagnosis" id="diagnosis" hidden></div>
-      </div>
-
-      <div class="card" id="mail-card">
-        <h2>E-posta</h2>
-        <p class="hint">
-          Kimden, Kime ya da CC alanında aşağıdaki adreslerden biri geçen her e-posta
-          <strong>Görevlerim → Yapılacak</strong> sütununa düşer: konu görevin adı, gövde
-          açıklaması olur. Aynı konuşmadan tek görev çıkar, takvim davetleri atlanır.
-          Outlook'un açık oturumu kullanılır; parola sorulmaz, saklanmaz.
-        </p>
-        <p class="warn-note" id="mail-unsupported" hidden>
-          Bu özellik yalnız Windows'ta Outlook ile çalışır.
-        </p>
-
-        <label class="checkbox">
-          <input type="checkbox" id="mail-enabled" />
-          E-postadan görev üret
-        </label>
-
-        <div class="field">
-          <label for="mail-from">Kimden</label>
-          <input type="text" id="mail-from" placeholder="patron@example.com, *@example.com" />
-          <p class="hint">Gönderen bu adreslerden biriyse.</p>
-        </div>
-
-        <div class="field">
-          <label for="mail-to">Kime</label>
-          <input type="text" id="mail-to" placeholder="ornek@example.com" />
-          <p class="hint">Alıcılar arasında bu adreslerden biri varsa.</p>
-        </div>
-
-        <div class="field">
-          <label for="mail-cc">CC</label>
-          <input type="text" id="mail-cc" placeholder="ekip@example.com" />
-          <p class="hint">CC'de bu adreslerden biri varsa.</p>
-        </div>
-
-        <p class="hint">
-          Üçü ayrı çalışır, biri tutması yeter. Virgülle ayırın;
-          <code>*@example.com</code> yazarsanız o alan adının tamamı sayılır.
-          Üçü de boşsa tarama "adres tanımlı değil" der ve hiçbir posta eşleşmez.
-        </p>
-
-        <div class="row">
-          <div class="field">
-            <label for="mail-days">Kaç günlük geçmiş taransın</label>
-            <input type="number" id="mail-days" min="1" max="365" step="1" />
-          </div>
-          <div class="field">
-            <label for="mail-body-limit">Açıklama sınırı (karakter)</label>
-            <input type="number" id="mail-body-limit" min="200" max="100000" step="100" />
-          </div>
-        </div>
-
-        <label class="checkbox">
-          <input type="checkbox" id="mail-scan-on-refresh" />
-          Güncelle çalışırken e-postaları da tara
-        </label>
-
-        <div class="field">
-          <span class="label-text">Klasörler</span>
-          <div class="folder-tree" id="mail-folders"></div>
-          <p class="hint" id="mail-folders-hint">
-            Seçilen: Gelen Kutusu. Başka klasör eklemek için <strong>Klasörleri getir</strong>.
-          </p>
-        </div>
-
-        <div class="actions">
-          <button class="primary" id="mail-save">Kaydet</button>
-          <button id="mail-folders-fetch">Klasörleri getir</button>
-          <button id="mail-test">Bağlantıyı sına</button>
-          <button id="mail-scan">Şimdi tara</button>
-        </div>
-        <div class="status" id="mail-status" hidden></div>
-      </div>
-
-      <div class="card" id="teams-card">
-        <h2>Teams</h2>
-        <p class="hint">
-          Kayıtlara Teams kişileri iliştirip tek tıkla "bu kaydın son durumu ne?" mesajı
-          hazırlayabilirsiniz. Tek kişide doğrudan sohbet, birden fazla kişide grup sohbeti
-          açılır.
-          <strong>Mesaj Teams'te hazır açılır, göndermek için Gönder'e basmanız gerekir.</strong>
-        </p>
-
-        <div class="field">
-          <span class="label-text">Mesaj şablonları</span>
-          <div class="teams-list" id="teams-templates"></div>
-          <p class="hint" id="teams-placeholders"></p>
-        </div>
-
-        <div class="row">
-          <div class="field">
-            <label for="template-name">Yeni şablon adı</label>
-            <input type="text" id="template-name" placeholder="Son durum" />
-          </div>
-          <div class="field">
-            <label for="teams-topic">Konu adı biçimi</label>
-            <input type="text" id="teams-topic" placeholder="{key}" />
-          </div>
-        </div>
-        <div class="field">
-          <label for="template-body">Yeni şablon gövdesi</label>
-          <textarea id="template-body" rows="3"
-            placeholder="{key} için kısa bir güncelleme rica ederim. {url}"></textarea>
-        </div>
-        <div class="actions">
-          <button id="template-add">Şablon ekle</button>
-        </div>
-
-        <div class="field">
-          <span class="label-text">Adres defteri</span>
-          <div class="teams-list" id="teams-contacts"></div>
-          <p class="hint">
-            Kayıtlara girdiğiniz kişiler buraya düşer ve bir daha yazarken tamamlanır.
-            Buradan silinen kişi bütün kayıtlardan da çıkar. Dağıtım listeleri
-            <strong>liste</strong> rozetiyle görünür.
-          </p>
-          <p class="warn-note" id="teams-gal-unsupported" hidden>
-            Kurum rehberi yalnız Windows'ta Outlook ile okunabilir.
-          </p>
-          <div class="actions">
-            <button id="teams-gal">Rehberi Outlook'tan yenile</button>
-            <span class="hint" id="teams-gal-when"></span>
-          </div>
-        </div>
-
-        <div class="actions">
-          <button class="primary" id="teams-save">Kaydet</button>
-        </div>
-        <div class="status" id="teams-status" hidden></div>
-      </div>
-
-      <div class="card" id="copilot-card">
-        <h2>Copilot</h2>
-        <p class="hint">
-          Holocron, makinenizde kurulu olan <strong>Copilot CLI</strong>'yi bulup
-          çalıştırabilir. Buradaki ayarlar aracın nerede olduğunu ve hangi modelin
-          deneneceğini söyler. Copilot yoksa hiçbir şey bozulmaz.
-        </p>
-
-        <div class="field">
-          <label for="copilot-yol">Copilot yolu (boş = otomatik bul)</label>
-          <input type="text" id="copilot-yol" placeholder="%APPDATA%\npm\copilot.cmd" />
-          <p class="hint">
-            "Copilot CLI bulunamadı" diyorsa komut istemine <code>where copilot</code>
-            yazıp çıkan <strong>tam yolu</strong> (<code>.cmd</code> ya da
-            <code>.exe</code> uzantısıyla) buraya kopyalayın. Holocron
-            <code>pythonw.exe</code> ile açıldığı için terminalinizin PATH'ini
-            görmeyebilir; alan boşken PATH, npm klasörü ve kayıt defterindeki
-            PATH sırayla denenir.
-          </p>
-        </div>
-
-        <div class="field">
-          <label for="copilot-proxy">Vekil sunucu (boş = sistem ortamı)</label>
-          <input type="text" id="copilot-proxy" placeholder="http://vekil.kurum.local:8080" />
-          <p class="hint">
-            Terminalde <code>set HTTPS_PROXY=...</code> ile yazdığınız adresi buraya
-            yazın. Bu değer YALNIZCA Copilot alt sürecine verilir: Holocron'un Jira
-            bağlantısı "doğrudan bağlan" kipinde kalır, Jira sunucusu alt sürecin
-            muafiyet listesine eklenir.
-          </p>
-        </div>
-
-        <div class="field">
-          <label for="copilot-modeller">Model sırası (sırayla denenir, virgülle ayırın)</label>
-          <input
-            type="text"
-            id="copilot-modeller"
-            placeholder="claude-sonnet-5, gpt-5-mini, claude-haiku-4.5"
-          />
-          <p class="hint">
-            Hesabınızda hangi modellerin açık olduğundan emin değilseniz Copilot
-            CLI'nin kendi listesine bakın; reddedilen bir model burada dururken
-            sıradaki otomatik denenir.
-          </p>
-          <p class="hint" id="copilot-son-model"></p>
-        </div>
-
-        <div class="actions">
-          <button class="primary" id="copilot-save">Kaydet</button>
-          <button id="copilot-test">Copilot'u sına</button>
-        </div>
-        <p class="hint" id="copilot-sonuc"></p>
-        <div class="status" id="copilot-status" hidden></div>
-      </div>
-
-      <div class="card" id="mailsend-card">
-        <h2>E-posta şablonları</h2>
-        <p class="hint">
-          Ana ekrandaki <strong>E-posta ile gönder</strong> penceresi bu şablonları kullanır:
-          Kime, CC, konu ve gövde birlikte saklanır, böylece "her hafta aynı kişilere aynı
-          başlıkla" işi tek seçimle biter. Grubun kayıtları seçili sütunlarla Excel'e çevrilip
-          postaya eklenir; Outlook'un açık oturumu kullanılır, parola sorulmaz.
-        </p>
-        <p class="warn-note" id="mailsend-unsupported" hidden>
-          Bu özellik yalnız Windows'ta Outlook ile çalışır.
-        </p>
-
-        <div class="field">
-          <span class="label-text">Şablonlar</span>
-          <div class="teams-list" id="mailsend-templates"></div>
-          <p class="hint" id="mailsend-placeholders"></p>
-        </div>
-
-        <div class="row">
-          <div class="field">
-            <label for="mailsend-name">Yeni şablon adı</label>
-            <input type="text" id="mailsend-name" placeholder="Haftalık liste" />
-          </div>
-          <div class="field">
-            <label for="mailsend-new-subject">Konu</label>
-            <input type="text" id="mailsend-new-subject"
-              placeholder="{grup} — {tarih} ({adet} kayıt)" />
-          </div>
-        </div>
-        <div class="row">
-          <div class="field">
-            <span class="label-text">Kime</span>
-            <div id="mailsend-new-to"></div>
-          </div>
-          <div class="field">
-            <span class="label-text">CC</span>
-            <div id="mailsend-new-cc"></div>
-          </div>
-        </div>
-        <p class="hint">
-          Adresler <code>,</code> <code>;</code> ya da satır sonuyla ayrılır; boşluk ayırıcı
-          değildir. <code>Ad Soyad &lt;ornek@example.com&gt;</code> biçimi de yazılabilir.
-        </p>
-        <div class="field">
-          <label for="mailsend-new-body">Gövde</label>
-          <textarea id="mailsend-new-body" rows="4"
-            placeholder="Merhaba,&#10;&#10;{grup} listesinin {tarih} tarihli hâli ektedir.&#10;&#10;{tablo}"></textarea>
-        </div>
-        <div class="actions">
-          <button id="mailsend-add">Şablon ekle</button>
-        </div>
-
-        <div class="field">
-          <span class="label-text">Gönderim kipi</span>
-          <div class="choice-group" id="mailsend-mode">
-            <label class="checkbox">
-              <input type="radio" name="mailsend-mode" value="display" checked />
-              Outlook'ta aç (Gönder'e siz basarsınız)
-            </label>
-            <label class="checkbox">
-              <input type="radio" name="mailsend-mode" value="send" />
-              Doğrudan gönder
-            </label>
-          </div>
-        </div>
-
-        <div class="actions">
-          <button class="primary" id="mailsend-save">Kaydet</button>
-        </div>
-        <div class="status" id="mailsend-status" hidden></div>
-      </div>
-
-      <div class="card" id="campaign-card">
-        <h2>Sefer</h2>
-        <p class="hint">
-          Sefer, bitiş tarihi olan bir XP hedefidir. Buradaki puanlar ne yaptığınızda kaç XP
-          kazandığınızı belirler; kapatılan kural hiç puan vermez. Değişiklik geçmişe dokunmaz,
-          bundan sonraki olaylara uygulanır.
-        </p>
-        <div class="teams-list" id="campaign-rules"></div>
-        <p class="hint" id="campaign-grace"></p>
-        <div class="actions">
-          <button class="primary" id="campaign-rules-save">Kaydet</button>
-        </div>
-        <div class="status" id="campaign-status" hidden></div>
-      </div>
-
-      <div class="card" id="appearance">
-        <h2>Görünüm</h2>
-        <p class="hint">
-          Atmosfer ayarları anında uygulanır ve bu bilgisayarda saklanır. İşletim sisteminizde
-          "hareketi azalt" açıksa yıldızlar zaten durur.
-        </p>
-        <label class="checkbox">
-          <input type="checkbox" id="ui-starfield" checked />
-          Yıldız alanı
-        </label>
-        <label class="checkbox">
-          <input type="checkbox" id="ui-motion" checked />
-          Hareketler
-        </label>
-        <div class="actions">
-          <button id="replay-crawl">Açılışı tekrar göster</button>
-        </div>
-        <div class="status" id="appearance-status" hidden></div>
       </div>
     </main>
   </div>
