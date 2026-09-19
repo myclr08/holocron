@@ -805,6 +805,34 @@ def _migration_0016_gorusme_ve_aramalar_kaldirildi(conn: sqlite3.Connection) -> 
     )
 
 
+
+def _migration_0017_rozet_etkinlikleri(conn: sqlite3.Connection) -> None:
+    """Rozet kosullarinin okudugu kucuk etkinlik defteri (`gamify_events`).
+
+    Rozetlerin buyuk cogunlugu zaten var olan tablolardan hesaplanir (gorevler,
+    XP defteri, filolar, kisiler, gonderilen mesajlar). Iki is ise hicbir yerde
+    iz birakmiyordu: Copilot ile metin "Duzelt" ve Excel'e disa aktarim. Ikisi
+    de tek satirlik bir kayit olmadan olculemez, o yuzden bu tablo var.
+
+    Tablo sefere BAGLI DEGILDIR: kullanicinin is gecmisidir, sefer degisince
+    silinmez. Sefere ait sayim, satirin gunu seferin baslangicindan sonraysa
+    yapilir (`gamify.badge_facts`). Boylece gecmis veriden hak edilmis rozetler
+    geriye donuk verilebilir.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS gamify_events (
+            id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            at   TEXT NOT NULL,
+            ref  TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_gamify_events_kind ON gamify_events(kind, at);
+        """
+    )
+
+
 # Eski `calls.copilot_*` / ozet anahtarlarinin yeni `copilot.*` karsiliklari.
 COPILOT_AYAR_GOCU: tuple[tuple[str, str], ...] = (
     ("calls.copilot_yolu", "copilot.yolu"),
@@ -833,6 +861,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (14, "teams calls without meetings", _migration_0014_calls_without_meetings),
     (15, "meeting notes", _migration_0015_gorusme_notlari),
     (16, "drop teams calls and meeting notes", _migration_0016_gorusme_ve_aramalar_kaldirildi),
+    (17, "gamify activity log", _migration_0017_rozet_etkinlikleri),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

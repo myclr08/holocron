@@ -80,6 +80,7 @@ def export_ledger(request: Request, source: str = ""):
     context = get_context(request)
     clean = source if source in gamify.SOURCES else ""
     with context.db_lock:
+        store.log_activity(context.connection(), store.ACTIVITY_EXCEL, "ledger")
         payload = export.build_ledger_workbook(context, source=clean)
     return Response(
         content=payload,

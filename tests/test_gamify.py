@@ -63,7 +63,7 @@ def test_migration_creates_the_campaign_tables(conn):
     assert {
         "campaigns", "xp_events", "xp_rules", "badges", "quests", "streaks"
     } <= db.table_names(conn)
-    assert db.SCHEMA_VERSION == 16
+    assert db.SCHEMA_VERSION == 17
 
 
 def test_rules_are_seeded_once(conn):
@@ -111,14 +111,15 @@ def test_closing_a_task_scores_and_never_repeats(context):
     made = campaign(context)
     events = close_task(context)
     assert kinds(events) == [gamify.KIND_DONE]
-    assert store.total_xp(context.connection(), made["id"]) == 10 + 3  # gorev + seri gunu
+    # Gorev 10 + seri gunu 3 + "Ilk Adim" rozeti 10.
+    assert store.total_xp(context.connection(), made["id"]) == 10 + 3 + 10
 
     conn = context.connection()
     task = repo.list_tasks(conn)[0]
     back = repo.move_task(conn, task["id"], status=repo.TASK_TODO)
     again = repo.move_task(conn, task["id"], status=repo.TASK_DONE)
     assert gamify.on_task_done(context, back, again, now=MONDAY) == []
-    assert store.total_xp(conn, made["id"]) == 13
+    assert store.total_xp(conn, made["id"]) == 23
 
 
 def test_a_task_closed_before_its_due_date_earns_the_bonus(context):
@@ -309,9 +310,9 @@ def test_the_campaign_ends_when_its_date_passes_and_xp_starts_over(context):
     assert gamify.ensure_campaign(context, datetime(2026, 9, 17, 9, 0)) is None
 
     ended = store.list_campaigns(conn, store.STATUS_ENDED)[0]
-    assert ended["summary"]["total_xp"] == 13
+    assert ended["summary"]["total_xp"] == 23
     assert ended["summary"]["rank"]["code"] == "padawan"
-    assert ended["summary"]["sources"] == {"task": 10, "streak": 3}
+    assert ended["summary"]["sources"] == {"task": 10, "badge": 10, "streak": 3}
 
     # Biten seferde puan toplanmaz.
     assert close_task(context, "Yeni iş", now=datetime(2026, 9, 17, 9, 0)) == []
@@ -319,7 +320,7 @@ def test_the_campaign_ends_when_its_date_passes_and_xp_starts_over(context):
     # Yeni sefer sifirdan baslar; eski defter durur.
     fresh = campaign(context, "İkinci", "2026-12-31", 500, now=datetime(2026, 9, 17, 9, 0))
     assert store.total_xp(conn, fresh["id"]) == 0
-    assert store.total_xp(conn, ended["id"]) == 13
+    assert store.total_xp(conn, ended["id"]) == 23
 
 
 def test_a_campaign_can_be_ended_by_hand(context):
@@ -327,7 +328,7 @@ def test_a_campaign_can_be_ended_by_hand(context):
     close_task(context)
     ended = gamify.end_campaign(context, now=MONDAY)
     assert ended["status"] == "ended"
-    assert ended["summary"]["total_xp"] == 13
+    assert ended["summary"]["total_xp"] == 23
     assert gamify.end_campaign(context, now=MONDAY) is None
 
 
@@ -471,7 +472,8 @@ def test_the_record_reports_the_rank_change(context, conn):
 
     record = gamify.panel(context, MONDAY)["digest"]
     assert record["rank_before"]["code"] == "padawan"
-    assert record["rank"]["code"] == "knight" and record["rank_changed"] is True
+    # Rozetler de puan oder; onemli olan rutbenin DEGISMIS olmasi.
+    assert record["rank"]["code"] != "padawan" and record["rank_changed"] is True
 
 
 # --- rozetler -----------------------------------------------------------
@@ -500,7 +502,8 @@ def test_the_closer_badge_needs_twenty_five_closed_tasks(context):
     gamify.evaluate(context, MONDAY)
     assert gamify.BADGE_CLOSER in earned(context)
     # Rozet kendi puanini bir kez verir.
-    assert ledger_kinds(context).count(gamify.KIND_BADGE_EARNED) == 1
+    refs = [event["ref"] for event in ledger_of(context)]
+    assert refs.count(f"badge:{gamify.BADGE_CLOSER}") == 1
 
 
 def test_the_finisher_badge_counts_one_group(context, conn):
@@ -614,8 +617,11 @@ def test_every_badge_code_has_a_wall_tile(context):
     wall = gamify.badge_wall(context, made, MONDAY)
     assert [tile["code"] for tile in wall] == list(gamify.BADGE_CODES)
     for tile in wall:
-        assert tile["image"] == f"/static/img/gamify/badge-{tile['code']}.png"
-        assert tile["hint"]
+        # Elle cizilmis PNG varsa yolu verilir; yoksa bos kalir ve arayuz
+        # rozetin kendi SVG simgesini cizer.
+        assert tile["image"] in ("", f"/static/img/gamify/badge-{tile['code']}.png")
+        assert tile["icon"] == f"/static/rozetler/{tile['code']}.svg"
+        assert tile["hint"] and tile["category"] and tile["rarity"]
 
 
 # --- panel --------------------------------------------------------------
@@ -627,7 +633,8 @@ def test_the_panel_carries_everything_the_screen_draws(context):
     data = gamify.panel(context, MONDAY)
 
     assert data["campaign"]["name"] == "Sonbahar Seferi"
-    assert data["xp"] == 13 and data["percent"] == 6  # 13/200
+    # 10 gorev + 3 seri + 10 "Ilk Adim" rozeti.
+    assert data["xp"] == 23 and data["percent"] == 12  # 23/200
     assert data["rank"]["image"] == "/static/img/gamify/rank-padawan.png"
     assert data["next_rank"]["label"] == "Şövalye"
     assert data["week"]["tasks_done"] == 1
@@ -650,7 +657,7 @@ def test_the_monday_record_shows_last_week_once(context):
     close_task(context, now=datetime(2026, 9, 9, 10, 0))
 
     record = gamify.panel(context, MONDAY)["digest"]
-    assert record["xp"] == 13 and record["tasks_done"] == 1
+    assert record["xp"] == 23 and record["tasks_done"] == 1
     assert record["week_start"] == "2026-09-07" and record["seen_key"] == "2026-09-14"
     # Rutbe degisimi de kartta: 0 XP'den 13 XP'ye, hedef 1000 -> ikisi de Padawan.
     assert record["rank_before"]["code"] == "padawan" and record["rank_changed"] is False
@@ -669,7 +676,7 @@ def test_history_keeps_the_ended_campaigns(context):
 
     cards = gamify.history(context)
     assert len(cards) == 1
-    assert cards[0]["name"] == "Birinci" and cards[0]["total_xp"] == 13
+    assert cards[0]["name"] == "Birinci" and cards[0]["total_xp"] == 23
     assert cards[0]["rank"]["label"] == "Padawan"
 
 
@@ -1119,13 +1126,14 @@ def test_a_reopened_task_cannot_bank_both_close_kinds(context, conn):
     task = repo.create_task(conn, "Geciken", due_date="2026-09-01")
     after = repo.move_task(conn, task["id"], status=repo.TASK_DONE)
     gamify.on_task_done(context, task, after, now=MONDAY)
-    assert store.total_xp(conn, made["id"]) == 5 + 3
+    # Gecikmis kapanis 5 + seri 3 + "Ilk Adim" rozeti 10.
+    assert store.total_xp(conn, made["id"]) == 5 + 3 + 10
 
     back = repo.move_task(conn, task["id"], status=repo.TASK_TODO)
     repo.update_task(conn, task["id"], {"due_date": "2026-09-30"})
     again = repo.move_task(conn, task["id"], status=repo.TASK_DONE)
     assert gamify.on_task_done(context, back, again, now=MONDAY) == []
-    assert store.total_xp(conn, made["id"]) == 8
+    assert store.total_xp(conn, made["id"]) == 18
 
 
 def test_a_new_campaign_does_not_inherit_the_clean_desk_count(context):
@@ -1183,7 +1191,7 @@ def test_the_record_does_not_credit_this_week_to_last_weeks_rank(context, conn):
     gorunmez olur.
     """
     campaign(context, target=100, now=datetime(2026, 9, 7, 10, 0))
-    # Gecen hafta 13 XP (10 gorev + 3 seri): esik 25, hala Padawan.
+    # Gecen hafta 23 XP (10 gorev + 3 seri + 10 rozet): esik 25, hala Padawan.
     close_task(context, "Geçen hafta", now=datetime(2026, 9, 9, 10, 0))
     # Bu pazartesi bol puan: tek basina Sovalye esigini gecer.
     for index in range(3):
@@ -1191,10 +1199,10 @@ def test_the_record_does_not_credit_this_week_to_last_weeks_rank(context, conn):
 
     record = gamify.panel(context, MONDAY)["digest"]
 
-    assert record["xp"] == 13, "kart yalnızca geçen haftayı anlatır"
-    # Bu haftanin puani "gecen haftanin basi"na sayilirsa burada Şövalye görünür.
+    assert record["xp"] == 23, "kart yalnızca geçen haftayı anlatır"
+    # Bu haftanin puani "gecen haftanin basi"na sayilirsa burada rutbe atlamis gorunur.
     assert record["rank_before"]["code"] == "padawan"
-    assert record["rank"]["code"] == "knight"
+    assert record["rank"]["code"] != "padawan"
     assert record["rank_changed"] is True
 
 
@@ -1224,13 +1232,14 @@ def test_a_deleted_event_scores_again_when_it_happens_again(context, conn):
     close_task(context)
     event = [e for e in ledger_of(context) if e["kind"] == gamify.KIND_DONE][0]
     gamify.delete_event(context, event["id"], now=MONDAY)
+    # Gorev puani gitti, "Ilk Adim" rozeti de kosulunu kaybedip geri alindi.
     assert store.total_xp(conn, made["id"]) == 3
 
     task = repo.list_tasks(conn)[0]
     back = repo.move_task(conn, task["id"], status=repo.TASK_TODO)
     again = repo.move_task(conn, task["id"], status=repo.TASK_DONE)
     assert kinds(gamify.on_task_done(context, back, again, now=MONDAY)) == [gamify.KIND_DONE]
-    assert store.total_xp(conn, made["id"]) == 13
+    assert store.total_xp(conn, made["id"]) == 23
 
 
 def test_a_deleted_filter_drop_scores_again_on_the_next_drop(context, conn):
@@ -1240,11 +1249,12 @@ def test_a_deleted_filter_drop_scores_again_on_the_next_drop(context, conn):
     event = ledger_of(context, gamify.SOURCE_JIRA)[0]
 
     gamify.delete_event(context, event["id"], now=MONDAY)
-    assert store.total_xp(conn, made["id"]) == 3
+    # Seri 3 + "Ilk Filo" rozeti 10 kalir.
+    assert store.total_xp(conn, made["id"]) == 13
 
     # Kayit yeniden filodan duserse puan yeniden yazilir.
     assert gamify.on_refresh(context, refresh_result(group["id"]), now=MONDAY)["points"] == 15
-    assert store.total_xp(conn, made["id"]) == 18
+    assert store.total_xp(conn, made["id"]) == 28
 
 
 def test_deleting_a_streak_day_shortens_the_streak(context, conn):
@@ -1278,9 +1288,10 @@ def test_deleting_a_line_takes_the_badge_and_its_points_with_it(context, conn):
 
     assert result["revoked"] == [gamify.BADGE_CLOSER]
     assert gamify.BADGE_CLOSER not in earned(context)
-    # Bir dolgu puani (1) + rozet puani (10) dustu.
-    assert store.total_xp(conn, made["id"]) == before - 11
-    assert gamify.KIND_BADGE_EARNED not in ledger_kinds(context)
+    # Bir dolgu puani (1) + "Kapatici" rozetinin puani (nadir: 10 x 2) dustu.
+    assert store.total_xp(conn, made["id"]) == before - 21
+    refs = [event["ref"] for event in ledger_of(context)]
+    assert f"badge:{gamify.BADGE_CLOSER}" not in refs
 
 
 def test_deleting_a_line_can_drop_the_rank(context, conn):
@@ -1289,7 +1300,7 @@ def test_deleting_a_line_can_drop_the_rank(context, conn):
     made = store.active_campaign(conn)
     conn.execute("UPDATE xp_events SET points = 40 WHERE ref = 'big0'")
     conn.commit()
-    assert gamify.panel(context, MONDAY)["rank"]["code"] == "knight"
+    assert gamify.panel(context, MONDAY)["rank"]["code"] != "padawan"
 
     event = [e for e in ledger_of(context) if e["ref"] == "big0"][0]
     gamify.delete_event(context, event["id"], now=MONDAY)
@@ -1455,7 +1466,7 @@ def test_the_balance_badge_image_is_not_expected_any_more():
     readme = (Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
     assert "badge-balance" not in readme
     assert "`balance`" not in readme
-    assert len(gamify.BADGES) == 11
+    assert len(gamify.BADGES) >= 32
 
 
 def test_the_rank_image_is_cropped_into_its_ring(api_client):

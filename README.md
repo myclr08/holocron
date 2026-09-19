@@ -682,7 +682,7 @@ açmasanız da sefer doğru günde bitmiş görünür.
 | Son durum soruldu (günde en çok 3) | 2 |
 | Seri: etkin iş günü | 3 |
 | Haftalık emir tamamlandı | 25 |
-| Rozet kazanıldı | 10 |
+| Rozet kazanıldı | 10 (nadirlik çarpanı: yaygın ×1, nadir ×2, efsanevi ×4) |
 
 Filtre filosundan düşme puanı yalnız **Güncelle'nin JQL sonucundan** gelir;
 manuel gruptan kaydı elinizle çıkarmak puan vermez. Bir JQL'i daralttığınızda
@@ -713,9 +713,119 @@ durumundan ölçülür; biten emir 25 XP verir.
 **Bu hafta** şeridi puan vermez, yalnız sayar: bu hafta kapanan görev, düşen
 kayıt ve toplanan XP.
 
-**Rozetler** kazanıldığında renklenir, kazanılmayan gri hologram olarak durur ve
-üzerine gelince koşulu yazar: Temiz Masa, Hızlı Yanıt, Kapatıcı, Bitirici, Beş /
-Yirmi / Altmış Gün, Haritacı, Arşivci, Elçi, Sefer Tamam.
+**Rozetler** sekiz kategoriye ayrılmış 54 madalyadır. Duvarın üstündeki
+sekmeler kategori seçer ve her sekme "kazanılan/toplam" sayısını gösterir.
+Kazanılmış kutucuk renkli durur, altında kazanma tarihi yazar; kilitli kutucuk
+soluktur ve nasıl kazanılacağını, bir de ilerleme çubuğuyla "12/25" sayısını
+gösterir. Her rozetin bir **nadirliği** vardır — yaygın, nadir, efsanevi — ve
+nadirlik hem simgenin halka rengini hem de rozetin ödediği XP'yi belirler:
+"Rozet kazanıldı" kuralındaki puan yaygında ×1, nadirde ×2, efsanevide ×4
+uygulanır.
+
+Koşulların hepsi **gerçek veriden** ölçülür; ayrı bir sayaç tutulmaz. Bu yüzden
+değerlendirme geriye dönüktür: eski bir kurulumda panel ilk açıldığında (ya da
+ilk Güncelle'de) geçmişten hak edilen rozetler topluca düşer ve kazanma tarihi
+mümkünse **eşiği dolduran olayın günü** olur, bugün değil. Defterdeki "Rozet
+kazanıldı" satırı da o tarihte durur.
+
+Copilot ile metin **Düzelt** ve **Excel dışa aktarımı** başka hiçbir tabloda iz
+bırakmadığı için küçük bir etkinlik defterine (`gamify_events`) tek satır
+yazılır; sefere bağlı değildir, sayım seferin başlangıcından sonrasına bakar.
+
+
+**Görev** (11)
+
+| Rozet | Nadirlik | Nasıl kazanılır |
+| --- | --- | --- |
+| İlk Adım | Yaygın | İlk görevi kapat |
+| Onlu Devriye | Yaygın | 10 görev kapat |
+| Kapatıcı | Nadir | 25 görev kapat |
+| Elli Sefer | Nadir | 50 görev kapat |
+| İki Yüz Görev | Efsanevi | 200 görev kapat |
+| Yoğun Uçuş | Nadir | Bir günde 5 görev kapat |
+| Zamanın Önünde | Yaygın | Son tarihinden önce 10 görev bitir |
+| Seyir Defteri | Yaygın | Notu olan 20 görev biriktir |
+| Bağlantı Subayı | Nadir | Jira kaydına bağlı 25 görev |
+| Temiz Masa | Nadir | 7 gün boyunca gecikmiş görev yok |
+| Arşivci | Yaygın | 30 günden eski 20 tamamlanmış görev katlandı |
+
+**Jira akışı** (9)
+
+| Rozet | Nadirlik | Nasıl kazanılır |
+| --- | --- | --- |
+| İlk Kapanış | Yaygın | İlk Jira kaydı tamamlandı |
+| Bitirici | Nadir | Bir filtre filosundan 20 kayıt düştü |
+| Filo Süpürgesi | Yaygın | Filtre filolarından 25 kayıt düştü |
+| Yüz Kayıt | Nadir | Filtre filolarından 100 kayıt düştü |
+| Beş Yüz Kayıt | Efsanevi | Filtre filolarından 500 kayıt düştü |
+| Haftanın Fırtınası | Nadir | Bir hafta içinde 20 kayıt düştü |
+| Arkeolog | Nadir | 30 günden uzun açık kalmış bir kaydı kapat |
+| Üç Cephe | Nadir | Aynı gün üç farklı projeden kayıt ilerlet |
+| Kayıt Tutan | Yaygın | 50 yerel alan hücresi doldur |
+
+**Seri** (6)
+
+| Rozet | Nadirlik | Nasıl kazanılır |
+| --- | --- | --- |
+| Beş Gün | Yaygın | 5 iş günü kesintisiz seri |
+| Yirmi Gün | Nadir | 20 iş günü kesintisiz seri |
+| Otuz Gün | Nadir | 30 iş günü kesintisiz seri |
+| Altmış Gün | Efsanevi | 60 iş günü kesintisiz seri |
+| Güç Kalkanı | Nadir | Güç koruması bir seriyi kurtardı |
+| Küllerinden | Nadir | Seri kırıldıktan sonra yeniden 10 güne çık |
+
+**Haftalık emirler** (3)
+
+| Rozet | Nadirlik | Nasıl kazanılır |
+| --- | --- | --- |
+| İlk Emir | Yaygın | Bir haftalık emri tamamla |
+| Dört Hafta Disiplin | Efsanevi | Dört hafta üst üste o haftanın bütün emirlerini bitir |
+| Pazartesi Fırtınası | Nadir | Bir haftanın bütün emirlerini pazartesi bitir |
+
+**XP ve rütbe** (9)
+
+| Rozet | Nadirlik | Nasıl kazanılır |
+| --- | --- | --- |
+| Bin Işık | Yaygın | Bir seferde 1.000 XP topla |
+| Beş Bin Işık | Nadir | Bir seferde 5.000 XP topla |
+| Yirmi Bin Işık | Efsanevi | Bir seferde 20.000 XP topla |
+| Şövalye Yemini | Yaygın | Şövalye rütbesine çık |
+| Usta Kürsüsü | Nadir | Usta rütbesine çık |
+| Konsey Koltuğu | Nadir | Konsey Üyesi rütbesine çık |
+| Efsane Adı | Efsanevi | Efsane rütbesine çık |
+| Tek Günde Üç Yüz | Nadir | Bir günde 300 XP topla |
+| Sefer Tamam | Nadir | Sefer hedefine ulaşıldı |
+
+**Zaman ve ritim** (4)
+
+| Rozet | Nadirlik | Nasıl kazanılır |
+| --- | --- | --- |
+| Şafak Nöbeti | Nadir | Sabah 08:00'den önce 10 görev kapat |
+| Cuma Kapanışı | Yaygın | Cuma öğleden sonra 5 görev kapat |
+| Dolu Ay | Efsanevi | Bir ayın her iş gününde etkin ol |
+| Yılın İlk Nöbeti | Nadir | Yılın ilk iş gününde etkin ol |
+
+**İletişim** (5)
+
+| Rozet | Nadirlik | Nasıl kazanılır |
+| --- | --- | --- |
+| Elçi | Yaygın | 20 kez son durum soruldu |
+| Posta Kuryesi | Yaygın | E-posta ile 10 kayıt gönder |
+| Kanal Sesi | Yaygın | 10 farklı kayıt için Teams mesajı aç |
+| Adres Defteri | Yaygın | Adres defterinde 20 kişi biriktir |
+| Hızlı Yanıt | Nadir | 10 e-posta görevi 24 saat içinde ele alındı |
+
+**Keşif ve araçlar** (7)
+
+| Rozet | Nadirlik | Nasıl kazanılır |
+| --- | --- | --- |
+| İlk Düzeltme | Yaygın | Copilot ile ilk metin düzeltmesi |
+| Metin Ustası | Nadir | 25 metin düzeltmesi |
+| İlk Döküm | Yaygın | İlk Excel dışa aktarımı |
+| İlk Filo | Yaygın | İlk filoyu yarat |
+| Filo Komutanı | Nadir | 5 filo yönet |
+| İlk Yerel Alan | Yaygın | İlk yerel alanı tanımla |
+| Haritacı | Nadir | Bütün filolarda sütun düzeni tanımlı |
 
 **XP defteri** son 50 olayı tarih, kaynak, açıklama ve puanla listeler; kaynak
 süzgeci vardır ve **Tümünü Excel'e** defterin tamamını `.xlsx` yazar
@@ -734,13 +844,21 @@ normal şekilde yeniden yazılır. (`DELETE /api/campaign/ledger/{id}`)
 emirleri ve serisiyle birlikte siler; geri alınamaz. Süren sefer buradan
 silinmez, onun yolu **Seferi bitir**. (`DELETE /api/campaign/history/{id}`)
 
-Rütbe ve rozet görselleri `app/static/img/gamify/` altında beklenir; dosya adları
-sabittir. Rütbeler: `rank-padawan.png`, `rank-knight.png`, `rank-master.png`,
-`rank-council.png`, `rank-legend.png`. Rozetler `badge-<kod>.png`, kodlar:
-`clean_desk`, `fast_reply`, `closer`, `finisher`, `streak_5`, `streak_20`,
-`streak_60`, `cartographer`, `archivist`, `envoy`, `campaign_complete`.
-Dosya yoksa arayüz kendi çizdiği SVG hologramı gösterir; ekran hiçbir zaman boş
-kalmaz, eksik görsel sonradan eklenebilir.
+Rütbe görselleri `app/static/img/gamify/` altında beklenir; dosya adları
+sabittir: `rank-padawan.png`, `rank-knight.png`, `rank-master.png`,
+`rank-council.png`, `rank-legend.png`.
+
+Rozetlerin **simgesi** `app/static/rozetler/<kod>.svg` altındadır: her rozet için
+ayrı, 24×24 kutuda, çizgi tabanlı, tek renk gövde + nadirlik halkası. Halka deseni
+kategoriyi (Görev düz, Jira kesikli, Seri noktalı, Emir uzun kesikli, Rütbe çift
+halka, Ritim ince kesikli, İletişim nokta-çizgi, Keşif noktalı), halka rengi
+nadirliği (yaygın gri, nadir mavi, efsanevi sarı) söyler. Dosyaları
+`python tools/rozet_simgeleri.py` üretir ve depoya girer; uygulama çalışırken
+hiçbir şey üretmez. Elle çizilmiş bir `badge-<kod>.png` varsa arayüz onu yeğler
+(şimdilik `clean_desk`, `fast_reply`, `closer`, `finisher`, `streak_5`,
+`streak_20`, `streak_60`, `cartographer`, `archivist`, `envoy`,
+`campaign_complete`); ikisi de okunamazsa kendi çizdiği hologramı gösterir, ekran
+hiçbir zaman boş kalmaz.
 
 ### Güncelle
 
@@ -1073,7 +1191,8 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/static/js/campaign.js` | Sefer paneli (kahraman şeridi, emirler, rozetler, defter) |
 | `app/static/js/campaign-settings.js` | Ayarlar → Sefer kartı (XP kuralları, koruma durumu) |
 | `app/static/js/duzelt.js` | "Düzelt" bileşeni: düğme, öneri paneli, kelime düzeyinde fark |
-| `app/static/img/gamify/` | Rütbe ve rozet görselleri (yoksa SVG hologram yedeği) |
+| `app/static/img/gamify/` | Rütbe görselleri ve elle çizilmiş rozet PNG'leri |
+| `app/static/rozetler/` | Rozet simgeleri (`tools/rozet_simgeleri.py` üretir) |
 | `tests/` | pytest testleri, sahte Jira sunucusu |
 | `tools/build_portable.py` | Taşınabilir Windows/Linux paketlerini üretir |
 | `tools/demo/` | Demo ortamı: sahte Jira sunucusu, uydurma veri, tohumlama |
