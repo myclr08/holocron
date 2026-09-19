@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.11.0** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.12.0** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -601,6 +601,54 @@ Başarısız olursa Copilot'un ham çıktısının son 400 karakteri ekranda,
 2000 karakteri `holocron.log`'da durur; parola/anahtar benzeri diziler
 maskelenir.
 
+### Metni düzelt (Copilot)
+
+**Görevlerim** penceresindeki **Açıklama** ve **Not** alanlarının, **Jira kaydı
+çekmecesindeki çok satırlı yerel metin alanlarının** sağ alt köşesinde küçük bir
+**Düzelt** düğmesi durur (alan içinde `Ctrl+Shift+D`). Basınca metin Copilot'a
+gider; imla, yazım, noktalama, anlam düşüklüğü ve bozuk cümle düzeltilir.
+**Anlam, maddeler ve sıra korunur; yeni bilgi eklenmez, madde silinmez**; özel
+adlar, kısaltmalar ve kayıt anahtarları (`PRJ-1432`, `EKAP`) olduğu gibi kalır.
+
+- **Bekliyor.** Alan boşken düğme soluk ve pasiftir, metin yazılınca sarıya
+  döner. Metin 4000 karakteri aşarsa düğme "çok uzun" der.
+- **Çalışıyor.** Alan soluklaşır, düğme dönen bir halkayla "Düzeltiliyor…"
+  olur. Alan kilitlenmez. Aynı anda yalnız bir düzeltme çalışır. Hareketi
+  azaltma tercihi açıksa halka dönmez.
+- **Öneri.** Sonuç alanın yerinde bir **önce/sonra** paneliyle gelir: çıkan
+  kelimeler kırmızı üstü çizili, gelenler yeşil altı çizili. Sağ üstte
+  "model · N sn · M değişiklik" yazar. Fark **tarayıcıda** kelime düzeyinde
+  hesaplanır; Copilot'tan yalnızca düz metin istenir.
+- **Çipler.** "İmla ve noktalama" ile "Anlam düşüklüğü" varsayılan açıktır;
+  "Daha resmi" ve "Kısalt" isteğe bağlıdır. **Yeniden dene** aynı metni seçili
+  çiplerle bir kez daha düzeltir.
+- **Uygula.** Alanı sonuçla değiştirir; **Kaydet'e basana kadar hiçbir şey
+  kaydedilmez** (yerel alanlarda odak alandan çıkınca normal kayıt akışı
+  işler). Küçük bir bildirim "Düzeltme uygulandı · Geri al: Ctrl+Z" der;
+  `Ctrl+Z` eski metni geri getirir.
+- **Vazgeç** paneli kapatır, alandaki metne hiç dokunulmaz.
+
+Copilot ayarlı değilse düğme "Copilot ayarlı değil" der ve **Ayarlar →
+Copilot**'a götürür. Çağrı başarısız olursa panel yerine tek satırlık bir hata
+ile "Ayarlar'da sına" bağlantısı çıkar; **alandaki metin bozulmaz**.
+
+**Ayarlar → Copilot → Metin düzeltme.** Özellik kapatılabilir (kapalıyken düğme
+hiç çizilmez), varsayılan ton seçilir (nötr / daha resmi) ve istem şablonu
+düzenlenebilir. Şablonda `{girdi}` (metnin okunacağı dosya) ve `{cikti}`
+(cevabın yazılacağı dosya) **zorunludur**, `{kurallar}` seçili çiplerin
+satırlarıyla dolar; yer tutucu eksikse gömülü şablona
+(`app/copilot_sablon_duzelt.txt`) dönülür. **Şablonu varsayılana döndür** gömülü
+metni kutuya yazar.
+
+**Nasıl çalışır.** Metin çalışma klasörüne bir dosya olarak yazılır, model
+`--allow-tool=read --allow-tool=write` ile çağrılır ve düzeltilmiş **düz metni**
+ayrı bir dosyaya yazar; Holocron o dosyayı okur (UTF-8/BOM toleranslı), model
+dosyayı yazmadıysa `stdout` yedek yoldur. Cevabın çevresindeki kod bloğu, tırnak
+ve "Düzeltilmiş metin:" gibi ön ekler soyulur. Model sırası ve "son çalışan
+model" mantığı Copilot kartındakiyle aynıdır. Zaman aşımı **30 saniyedir**.
+Uç: `POST /api/copilot/duzelt` → `{"metin": ..., "secenekler": ["imla", "anlam",
+"resmi", "kisa"]}`.
+
 ### Sağ çekmeceleri genişletme
 
 Bütün sağ çekmecelerin sol kenarında ince bir
@@ -967,7 +1015,8 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/gamify.py` | Sefer motoru: XP kuralları, rütbe, rozet, emir, seri (saf mantık) |
 | `app/gamify_repo.py` | Seferler, XP defteri, kurallar, rozetler, emirler, seri (SQL) |
 | `app/api_gamify.py` | Sefer uçları (ayrı router) |
-| `app/copilot.py` | Copilot CLI'yi bulma, çağırma, sınama (genel yardımcı) |
+| `app/copilot.py` | Copilot CLI'yi bulma, çağırma, sınama, metin düzeltme (genel yardımcı) |
+| `app/copilot_sablon_duzelt.txt` | "Metni düzelt" istem şablonu (Ayarlar'dan değiştirilebilir) |
 | `app/static/` | Vanilla HTML/CSS/JS arayüz, dış bağımlılık yok |
 | `app/static/fonts/` | Gömülü OFL yazı tipleri ve lisans metinleri |
 | `app/static/js/starfield.js` | Arka plandaki yıldız alanı (canvas) |
@@ -976,6 +1025,7 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/static/js/mailsend-settings.js` | Ayarlar → E-posta şablonları kartı |
 | `app/static/js/campaign.js` | Sefer paneli (kahraman şeridi, emirler, rozetler, defter) |
 | `app/static/js/campaign-settings.js` | Ayarlar → Sefer kartı (XP kuralları, koruma durumu) |
+| `app/static/js/duzelt.js` | "Düzelt" bileşeni: düğme, öneri paneli, kelime düzeyinde fark |
 | `app/static/img/gamify/` | Rütbe ve rozet görselleri (yoksa SVG hologram yedeği) |
 | `tests/` | pytest testleri, sahte Jira sunucusu |
 | `tools/build_portable.py` | Taşınabilir Windows/Linux paketlerini üretir |
@@ -988,6 +1038,7 @@ git tag v0.7.3 && git push origin v0.7.3
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.12.0** | 20 Eylül 2026 | **Metni düzelt**: Görevlerim penceresindeki Açıklama/Not alanlarının ve Jira kaydı çekmecesindeki çok satırlı yerel metin alanlarının sağ alt köşesinde hap biçimli bir **Düzelt** düğmesi (kısayol `Ctrl+Shift+D`). Metin Copilot'a gider; imla, yazım, noktalama, anlam düşüklüğü ve bozuk cümle düzeltilir, anlam ve maddeler korunur, özel adlar ile kısaltmalar aynen kalır. Sonuç alanın yerinde **önce/sonra** paneliyle gelir: fark **tarayıcıda kelime düzeyinde** (LCS) hesaplanır, çıkan kırmızı üstü çizili, gelen yeşil altı çizili, sağ üstte "model · N sn · M değişiklik". Çipler "İmla ve noktalama" ve "Anlam düşüklüğü" varsayılan açık, "Daha resmi" ile "Kısalt" isteğe bağlı; **Yeniden dene** aynı metni seçili çiplerle tekrarlar. **Uygula** alanı değiştirir ama Kaydet'e kadar kaydetmez, `Ctrl+Z` eski metni geri getirir (önce tarayıcının kendi geri alma yığını denenir). Yeni uç `POST /api/copilot/duzelt` modelden JSON değil **düz metin** ister: metin bir dosyaya yazılır, model düzeltilmişini ayrı bir dosyaya yazar, Holocron oradan okur (yedek yol `stdout`); kod bloğu, tırnak ve "Düzeltilmiş metin:" gibi ön ekler soyulur, model sırası ve "son çalışan" mantığı aynen işler, zaman aşımı **30 sn**, sınır **4000 karakter**. Copilot ayarlı değilse düğme bunu söyleyip Ayarlar'a götürür; hata olursa panel yerine tek satır hata çıkar ve **alandaki metne dokunulmaz**. Ayarlar → Copilot'a **Metin düzeltme** bölümü geldi (açık/kapalı, ton nötr/daha resmi, düzenlenebilir istem şablonu ve "Şablonu varsayılana döndür"). Jira kaydı çekmecesindeki yerel **metin** alanları artık çok satırlı açılıyor: `Enter` yeni satır, `Ctrl+Enter` kaydeder, `Esc` vazgeçer |
 | **v0.11.0** | 19 Eylül 2026 | **Teams Aramalar filosu ve görüşme notları tümden kaldırıldı** (kullanıcı kararı): arama geçmişi okuma, görüşme kaydı, yazıya dökme ve özet üretme koddan, veritabanından, arayüzden ve belgelerden çıktı. Sol menüdeki sabit filo, aramalar ekranı, görüşme notları sekmesi ve iki çekmece gitti; Excel'deki Aramalar/Kişiler/Gruplar/İstatistik/Görüşme notları sayfaları, Güncelle'nin arama tarama adımı ve `/api/calls/*` uçları kalktı. **Göç 0016 veri siler**: `teams_calls` ve bütün `gorusme_*` tabloları düşer, taranmış aramalar ve üretilmiş notlar geri gelmez. `faster-whisper`, `pyaudiowpatch` ve `winotify` `requirements.txt`'ten çıktı; release iş akışındaki whisper ve Teams sondası zip adımları ile başlatıcılardaki `whisper-wheels` satırları da gitti (requirements özet karşılaştırması kalıyor). **Copilot kalıyor**: `ozet.py`'nin genel parçaları yeni `app/copilot.py`'ye taşındı (bulma, `.cmd` → `cmd.exe`, vekil yalnız alt sürece, model sırası, `POST /api/copilot/sina`) ve Ayarlar'da kendi kartını aldı; kullanıcının yazdığı yol ve vekil `calls.*`'tan `copilot.*`'a göçte taşınır. **Ayarlar ekranı yeniden düzenlendi**: sekiz grup (Jira bağlantısı, Ağ, Kişiler, E-posta, Teams, Copilot, Sefer, Görünüm), solda yapışkan dikey menü, sağda seçili grubun kartları, kart içinde iki sütunlu alanlar, `#grup` ile derin bağlantı ve son grubun hatırlanması. Adres defteri Teams kartından çıkıp kendi **Kişiler** grubuna taşındı |
 | **v0.10.7** | 19 Eylül 2026 | Sahadan gelen yedinci hata: görüşme notu özet adımı "Özet alınamadı: Model JSON döndürmedi." diyordu — Copilot CLI bulunuyor, model (`claude-sonnet-5`) kabul ediliyor, süreç dönüyor ama `stdout`'tan JSON çıkmıyordu. Sebep programatik kipin (`-p`) çıktısı: banner, ilerleme satırları, araç kullanım dökümü ve ANSI renk kodları aynı akışa karışıyor, cevap markdown içinde ya da `stderr`'de kalabiliyor. Çözüm TDD Beyin'in kanıtlanmış kalıbı: cevap artık modelin **yazdığı dosyadan** alınıyor. Şablon (`app/gorusme/sablon.txt`) modelden JSON'u transkriptin yanındaki `ozet.json` dosyasına yazmasını istiyor, Copilot `--allow-tool=read --allow-tool=write` ile çağrılıyor ve dosya UTF-8/BOM toleranslı okunuyor; önceki koşudan kalan dosya çağrıdan önce, okunan dosya hemen sonra siliniyor. Dosya oluşmazsa yedek yol devrede: `stdout`+`stderr` birleşiyor, ANSI kaçış dizileri temizleniyor, kod bloğundan ya da düz metinden en dıştaki JSON nesnesi çekiliyor (ilerleme satırındaki küçük `{...}` parçacığı asıl nesnenin önüne geçmiyor). JSON yine yoksa kullanıcı ekranda "Model JSON döndürmedi. Ham çıktı (son 400 karakter): …" görüyor, `holocron.log`'a WARNING ile stdout ve stderr'in son 2000 karakteri düşüyor (parola/anahtar benzeri diziler maskeli); araç izni reddedilmişse metin bunu söylüyor ("Copilot dosyaya yazma izni vermedi; bayraklar: …"). **Copilot'u sına** da aynı dosya yolunu yürüyor (modelden `{"hazir": true}` yazmasını ister), yani "çalışıyor" yazısı yazma izninin de verildiğini kanıtlıyor; sınamanın zaman aşımı 300 sn, özetinki 900 sn ve aşılırsa hata "Copilot 900 sn'de bitmedi" diyor. Alt süreçlerin konsolsuz çalışması (v0.10.6) aynen duruyor |
 | **v0.10.6** | 19 Eylül 2026 | Sahadan gelen altıncı hata: Copilot CLI çağrısı (ve pip ile paket kurulumu) sırasında ekranda kısa süreliğine boş bir konsol penceresi açılıyordu — `holocron.bat` uygulamayı konsolsuz `pythonw.exe` ile açtığı için Windows, alt süreç başlatıldığında kendiliğinden bir pencere yaratıyordu. Ortak bir yardımcı (`app/gorusme/altsurec.py::sessiz_calistir_ayarlari`) artık her alt süreç çağrısına Windows'ta `CREATE_NO_WINDOW` bayrağını ve gizli `STARTUPINFO`yu ekliyor (diğer platformlarda hiçbir şey değişmiyor); ayrıca konsolsuz süreçte hiç var olmayan `stdin` artık `DEVNULL` veriliyor, girdi bekleyen bir CLI takılı kalmıyor |
