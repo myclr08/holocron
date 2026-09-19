@@ -946,6 +946,53 @@ sahte bir sunucuyla değiştirilir (`tests/fake_jira.py`), posta kaynağı ve
 göndericisi bellek içi sahtelerle (`app/mail/fake.py`) takılır. Her test kendi
 geçici veri klasöründe çalışır.
 
+### Demo ortamı
+
+Gerçek Jira'ya bağlanmadan, dolu bir Holocron görmek için:
+
+```bash
+# Linux / macOS
+python tools/demo/demo.py
+
+# Windows
+py tools\demo\demo.py
+```
+
+Tek komut iki sunucu kaldırır:
+
+| Sunucu | Adres | Ne yapar |
+| --- | --- | --- |
+| Sahte Jira Data Center | `http://127.0.0.1:8090` | ~120 uydurma kayıt, 3 proje (PRJ / OPS / MOB), JQL, sayfalama |
+| Holocron | `http://127.0.0.1:8765` | Demo veritabanıyla açılır, tarayıcı kendiliğinden gelir |
+
+Açılışta veritabanı tohumlanır: 4 filo (ikisi JQL filtreli, ikisi elle
+listeli), yerel ek alanlar ve dolu değerler, Görevlerim'de üç sütuna dağılmış
+kartlar, adres defterinde 15 kişi + 2 dağıtım listesi, e-posta/Teams
+şablonları, "Outlook'tan görev" satırları ve yaklaşık üç haftalık XP geçmişi
+olan bir Sefer (rütbe, rozet, haftalık emirler, XP defteri).
+
+**Güncelle**'ye her bastığınızda sahte Jira birkaç kaydın durumunu ve
+güncelleme damgasını oynatır: akış canlı görünür, Sefer puanı işler.
+
+| Bayrak | Ne yapar |
+| --- | --- |
+| `--port 8765` | Holocron portu |
+| `--jira-port 8090` | Sahte Jira portu |
+| `--data-dir <yol>` | Veri klasörü (varsayılan: `~/.local/share/holocron-demo`, Windows'ta `%LOCALAPPDATA%\Holocron-Demo`) |
+| `--reset` | Veritabanını silip sıfırdan tohumlar |
+| `--no-browser` | Tarayıcıyı açma |
+| `--copilot-sahte` | PATH'e sahte bir `copilot` betiği koyar; "Copilot'u sına" ve "Düzelt" gerçek CLI olmadan çalışır |
+| `--kayit-sayisi 120` | Sahte Jira'daki kayıt sayısı |
+
+Veri klasörü gerçek kurulumunuzdan ayrıdır: demo hiçbir zaman sizin
+`holocron.db` dosyanıza dokunmaz. İkinci çalıştırmada aynı veriden devam
+edilir, `--reset` sıfırdan başlatır. `Ctrl+C` her iki sunucuyu da kapatır.
+
+Demo verisinin **tamamı uydurmadır**: kişi adları, projeler ve adresler
+(`@example.com`) gerçek hiçbir kurumla ya da kişiyle ilişkili değildir.
+Tohumlama ham SQL yazmaz, Holocron'un kendi depo katmanından geçer
+(`tools/demo/tohum.py`); şema değişince demo de onunla birlikte taşınır.
+
 ### Paketleme
 
 ```bash
@@ -1029,6 +1076,7 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/static/img/gamify/` | Rütbe ve rozet görselleri (yoksa SVG hologram yedeği) |
 | `tests/` | pytest testleri, sahte Jira sunucusu |
 | `tools/build_portable.py` | Taşınabilir Windows/Linux paketlerini üretir |
+| `tools/demo/` | Demo ortamı: sahte Jira sunucusu, uydurma veri, tohumlama |
 | `holocron.db` | Yerel veritabanı (depoya girmez) |
 | `holocron.key` | Şifreleme anahtarı (depoya girmez, yedekleyin) |
 | `holocron.log` | Çalışma günlüğü (1 MB × 3, depoya girmez) |
