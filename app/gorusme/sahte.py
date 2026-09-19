@@ -177,29 +177,74 @@ ORNEK_OZET: dict[str, Any] = {
 }
 
 
+# Gercek Copilot'un programatik kipte stdout'a bastigi gurultunun taklidi:
+# banner, ilerleme satiri, arac kullanim dokumu ve ANSI renk kodlari.
+COPILOT_GURULTUSU = (
+    "\x1b[1mGitHub Copilot CLI\x1b[0m v0.0.42\n"
+    "\x1b[2m● Reading transcript…\x1b[0m\r"
+    "\x1b[2m● Thinking {step 1}\x1b[0m\n"
+)
+
+
 class SahteOzetleyici:
-    """Copilot CLI yerine hazir JSON dondurur; model reddi taklit edilebilir."""
+    """Copilot CLI yerine hazir JSON dondurur.
+
+    Dort kip taklit edilir (sahadan gorulen davranislar):
+
+    * `"dosya"`   — model JSON'u `ozet.json`a yazar, stdout gurultudur
+      (gercek, calisan yol),
+    * `"stdout"`  — dosyaya yazamaz, JSON'u ANSI'li stdout'a basar (yedek yol
+      devreye girer),
+    * `"bos"`     — hicbir JSON yok, yalnizca gurultu (hata metninde ham
+      ciktinin kuyrugu gorunmeli),
+    * `"izin"`    — arac izni reddedildi ("write tool ... not allowed").
+
+    `reddedilen` ile model reddi de taklit edilir.
+    """
 
     def __init__(
         self,
         cikti: dict[str, Any] | None = None,
         reddedilen: Iterable[str] = (),
         kabuk: str = "İşte not:\n```json\n{govde}\n```\nHazır.",
+        kip: str = "dosya",
     ) -> None:
         self.cikti = ORNEK_OZET if cikti is None else cikti
         self.reddedilen = set(reddedilen)
         self.kabuk = kabuk
+        self.kip = kip
         self.cagrilar: list[tuple[str, Path]] = []
+        self.istemler: list[str] = []
         # Gercek ozetleyici bulunan Copilot yolunu burada tasir; sinama
         # ekrani onu okur. Sahtede bos, test isterse doldurur.
         self.son_yol = ""
 
     def ozetle(self, transkript: Path, model: str, istem: str) -> OzetCikti:
+        from .ozet import cikti_yolu
+
         self.cagrilar.append((model, transkript))
+        self.istemler.append(istem)
         if model in self.reddedilen:
             return OzetCikti(kod=1, metin="", hata=f"model reddedildi: {model}")
         govde = json.dumps(self.cikti, ensure_ascii=False)
-        return OzetCikti(kod=0, metin=self.kabuk.format(govde=govde))
+        if self.kip == "bos":
+            return OzetCikti(kod=0, metin=COPILOT_GURULTUSU + "Üzgünüm, dosyayı bulamadım.")
+        if self.kip == "izin":
+            return OzetCikti(
+                kod=0,
+                metin=COPILOT_GURULTUSU,
+                hata="Error: the write tool is not allowed in this session.",
+            )
+        if self.kip == "stdout":
+            return OzetCikti(kod=0, metin=COPILOT_GURULTUSU + self.kabuk.format(govde=govde))
+        # Birincil yol: model dosyayi yazar, ozetleyici okuyup siler, stdout
+        # yalnizca gurultudur. Gercek `CopilotOzetleyici.ozetle` ile ayni akis.
+        hedef = cikti_yolu(transkript)
+        hedef.parent.mkdir(parents=True, exist_ok=True)
+        hedef.write_text("﻿" + govde, encoding="utf-8")  # BOM: Windows araci birakabilir
+        yazilan = hedef.read_text(encoding="utf-8-sig")
+        hedef.unlink()
+        return OzetCikti(kod=0, metin=COPILOT_GURULTUSU, dosya=yazilan)
 
 
 class SahteBildirimci:

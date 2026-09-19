@@ -18,6 +18,7 @@ Gercek ses karti, faster-whisper ve Copilot CLI hicbir testte calismaz:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -675,6 +676,182 @@ def test_the_prompt_keeps_the_json_schema_intact(tmp_path):
     assert "Örnek Kişi" in istem
     # Sema oldugu gibi durmali: `str.format` kullanilmiyor.
     assert '"aksiyonlar"' in istem and '{"metin"' in istem
+    # Cevabin yazilacagi dosya istemde tam yolla duruyor; yer tutucu kalmadi.
+    assert str(tmp_path / ozet.OZET_DOSYASI) in istem
+    assert "{cikti}" not in istem
+
+
+# --- ozet cevabi: once dosya, sonra stdout --------------------------------
+#
+# Saha hatasi (19 Eylul 2026, Windows): "Özet alınamadı: Model JSON
+# döndürmedi." Copilot bulunuyor, model kabul ediliyor, surec donuyor ama
+# stdout'ta banner, ilerleme satirlari ve ANSI renk kodlari var; JSON ya
+# kayboluyor ya da markdown/stderr icinde kaliyor. Cozum TDD Beyin kalibi:
+# cevabi modelin YAZDIGI dosyadan al, stdout'u yalnizca teshis icin tut.
+
+
+class SahteKosu:
+    """`subprocess.run` sonucunun yerine gecen en kucuk nesne."""
+
+    def __init__(self, kod: int = 0, stdout: str = "", stderr: str = "") -> None:
+        self.returncode = kod
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _transkript(tmp_path: Path) -> Path:
+    yol = tmp_path / "is" / "transkript.txt"
+    yol.parent.mkdir(parents=True, exist_ok=True)
+    yol.write_text("[00:00:01] Sen: merhaba\n", encoding="utf-8")
+    return yol
+
+
+def test_the_answer_is_read_from_the_file_the_model_writes(tmp_path, monkeypatch):
+    """(a) Model dosyayi yazar: stdout gurultu olsa da not cikar."""
+    kopilot = _sahte_copilot(tmp_path / "npm", "copilot.exe")
+    transkript = _transkript(tmp_path)
+    hedef = ozet.cikti_yolu(transkript)
+    # Onceki kosudan kalan BAYAT dosya: taze sanilmamali.
+    hedef.write_text('{"baslik": "eski koşu"}', encoding="utf-8")
+
+    def calistir(self, argumanlar, klasor):
+        # Copilot calistigi anda bayat dosya silinmis olmali.
+        assert not hedef.exists()
+        hedef.write_text(
+            '﻿{"baslik": "Yeni not", "ozet": ["madde"]}', encoding="utf-8"
+        )
+        return SahteKosu(stdout="\x1b[1mGitHub Copilot CLI\x1b[0m\n● Reading…\r● Done\n")
+
+    monkeypatch.setattr(ozet.CopilotOzetleyici, "calistir", calistir)
+    cikti = ozet.CopilotOzetleyici(yol=str(kopilot)).ozetle(transkript, "gpt-5", "istem")
+
+    # BOM'lu dosya da okunur, ANSI stdout'tan silinir, dosya geride kalmaz.
+    assert ozet.veriyi_cek(cikti) == {"baslik": "Yeni not", "ozet": ["madde"]}
+    assert "\x1b" not in cikti.metin
+    assert not hedef.exists()
+
+
+def test_an_ansi_coloured_json_on_stdout_is_the_fallback(tmp_path):
+    """(b) Dosya yok, JSON kod blogu icinde ve ANSI'li: yine de ayiklanir."""
+    ozetleyici = sahte.SahteOzetleyici(kip="stdout")
+    sonuc = ozet.calistir(ozetleyici, tmp_path / "transkript.txt", ["gpt-5"], "istem")
+    assert sonuc.basarili
+    assert sonuc.veri["baslik"] == sahte.ORNEK_OZET["baslik"]
+
+    # Renk kodlari JSON'un TAM ICINE dusse bile ayristirici temizler.
+    boyali = '\x1b[32m{"baslik": \x1b[0m"Renkli", "ozet": []}\x1b[0m'
+    assert ozet.ayristir(boyali) == {"baslik": "Renkli", "ozet": []}
+    # Ilerleme satirindaki kucuk suslu parantez asil nesnenin onune gecmez.
+    gurultu = '● Thinking {step 1}\n{"baslik": "Asıl", "ozet": ["a"]}\n● Done {ok}'
+    assert ozet.ayristir(gurultu)["baslik"] == "Asıl"
+
+
+def test_a_model_that_returns_no_json_shows_the_raw_output_tail(tmp_path, caplog):
+    """(c) Hic JSON yok: kullanici ham ciktinin kuyrugunu ekranda gorur."""
+    ozetleyici = sahte.SahteOzetleyici(kip="bos")
+    with caplog.at_level(logging.WARNING, logger="holocron.gorusme.ozet"):
+        sonuc = ozet.calistir(ozetleyici, tmp_path / "transkript.txt", ["gpt-5"], "istem")
+
+    assert not sonuc.basarili
+    assert sonuc.hata.startswith("Model JSON döndürmedi. Ham çıktı (son 400 karakter): ")
+    assert "Üzgünüm, dosyayı bulamadım." in sonuc.hata
+    # Ekranda ANSI kodu gorunmez.
+    assert "\x1b" not in sonuc.hata
+    # Teshis loga da duser.
+    assert any("Özet JSON'u çıkmadı" in kayit.message for kayit in caplog.records)
+
+
+def test_the_error_shows_the_end_of_a_long_output_not_the_beginning(tmp_path, caplog):
+    """Hatanin sebebi hep SONDA: kirpma baştan değil sondan sayılır."""
+
+    class Geveze:
+        son_yol = ""
+
+        def ozetle(self, transkript, model, istem):
+            return OzetCikti(kod=0, metin="A" * 5000 + " SON SÖZ: dosyayı yazamadım")
+
+    with caplog.at_level(logging.WARNING, logger="holocron.gorusme.ozet"):
+        sonuc = ozet.calistir(Geveze(), tmp_path / "transkript.txt", ["gpt-5"], "istem")
+
+    assert sonuc.hata.endswith("SON SÖZ: dosyayı yazamadım")
+    # Tam 400 karakterlik kuyruk: bastaki "AAA…" yigini ekrani doldurmaz.
+    onek = "Model JSON döndürmedi. Ham çıktı (son 400 karakter): "
+    assert len(sonuc.hata) == len(onek) + 400
+    # Logdaki kuyruk daha uzun ama o da SONDAN sayilir.
+    assert ozet.son_karakterler("A" * 5000 + " son", 2000).endswith(" son")
+
+
+def test_a_denied_tool_permission_is_named_instead_of_blaming_the_json(tmp_path):
+    """(d) Izin reddi: "Model JSON döndürmedi" demek kullaniciyi yaniltir."""
+    ozetleyici = sahte.SahteOzetleyici(kip="izin")
+    sonuc = ozet.calistir(ozetleyici, tmp_path / "transkript.txt", ["gpt-5"], "istem")
+
+    assert not sonuc.basarili
+    assert sonuc.hata == (
+        "Copilot dosyaya yazma izni vermedi; bayraklar: "
+        "--allow-tool=read --allow-tool=write"
+    )
+    assert ozet.izin_reddi("hepsi yolunda") == ""
+
+
+def test_a_valid_answer_survives_a_grumpy_exit_code(tmp_path):
+    """Copilot cevabi yazip sifir olmayan kodla cikabiliyor; not kaybolmasin."""
+
+    class Huysuz:
+        son_yol = ""
+
+        def ozetle(self, transkript, model, istem):
+            return OzetCikti(kod=1, metin="", dosya='{"baslik": "Var", "ozet": []}')
+
+    sonuc = ozet.calistir(Huysuz(), tmp_path / "transkript.txt", ["gpt-5"], "istem")
+    assert sonuc.basarili and sonuc.veri["baslik"] == "Var"
+
+
+def test_the_timeout_says_how_long_it_waited(tmp_path, monkeypatch):
+    kopilot = _sahte_copilot(tmp_path / "npm", "copilot.exe")
+
+    def calistir(self, argumanlar, klasor):
+        raise subprocess.TimeoutExpired(cmd="copilot", timeout=self.zaman_asimi)
+
+    monkeypatch.setattr(ozet.CopilotOzetleyici, "calistir", calistir)
+    ozetleyici = ozet.CopilotOzetleyici(yol=str(kopilot), zaman_asimi=300)
+    cikti = ozetleyici.ozetle(_transkript(tmp_path), "gpt-5", "istem")
+
+    assert cikti.kod == 124
+    assert cikti.hata == "Copilot 300 sn'de bitmedi."
+
+
+def test_the_connection_test_walks_the_same_file_path(tmp_path):
+    """"Copilot'u sına" ucu da dosyaya yazdirir: yazma izni orada da kanitlanir."""
+    ozetleyici = sahte.SahteOzetleyici(cikti={"hazir": True}, kabuk="{govde}")
+    sonuc = ozet.sina(ozetleyici, ["claude-sonnet-5"], tmp_path)
+
+    assert sonuc["calisiyor"] is True
+    istem = ozetleyici.istemler[0]
+    assert str(tmp_path / ozet.OZET_DOSYASI) in istem
+    assert '{"hazir": true}' in istem
+    # Ne sinama dosyasi ne de cevap dosyasi geride kalir.
+    assert not (tmp_path / ozet.SINAMA_DOSYASI).exists()
+    assert not (tmp_path / ozet.OZET_DOSYASI).exists()
+
+
+def test_a_failed_connection_test_shows_the_raw_output_tail(tmp_path):
+    basarisiz = ozet.sina(sahte.SahteOzetleyici(kip="bos"), ["gpt-5"], tmp_path)
+    assert basarisiz["calisiyor"] is False
+    assert "Ham çıktı" in basarisiz["mesaj"]
+    assert "Üzgünüm, dosyayı bulamadım." in basarisiz["mesaj"]
+
+
+def test_secrets_are_masked_in_the_raw_output_tail(tmp_path):
+    class Sizdiran:
+        son_yol = ""
+
+        def ozetle(self, transkript, model, istem):
+            return OzetCikti(kod=0, metin="Authorization: Bearer gizli.jeton.burada")
+
+    sonuc = ozet.calistir(Sizdiran(), tmp_path / "transkript.txt", ["gpt-5"], "istem")
+    assert "[gizlendi]" in sonuc.hata
+    assert "gizli.jeton.burada" not in sonuc.hata
 
 
 # --- Copilot vekili -------------------------------------------------------
@@ -819,7 +996,8 @@ def test_a_cmd_file_is_run_through_cmd_exe_and_the_prompt_stays_off_the_command_
     argumanlar, dosya = ozet.komut_kur(yol, "gpt-5", istem, tmp_path, platform="win32")
 
     assert argumanlar[:5] == ["cmd.exe", "/c", str(yol), "--model", "gpt-5"]
-    assert argumanlar[-1] == "--allow-tool=read"
+    # Okuma izni transkript icin, yazma izni cevabin yazilacagi `ozet.json` icin.
+    assert argumanlar[-2:] == ["--allow-tool=read", "--allow-tool=write"]
     assert istem not in " ".join(argumanlar)
     assert dosya is not None and dosya.read_text(encoding="utf-8") == istem
     kisa = argumanlar[argumanlar.index("-p") + 1]
@@ -838,6 +1016,7 @@ def test_an_exe_is_run_directly_with_the_prompt_as_an_argument(tmp_path):
         "-p",
         "kısa istem",
         "--allow-tool=read",
+        "--allow-tool=write",
     ]
     assert dosya is None
     # Windows disinda `.cmd` diye bir sey yok: kabuk dalina hic girilmez.

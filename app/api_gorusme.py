@@ -410,6 +410,8 @@ def test_copilot(request: Request, payload: dict[str, Any] = Body(default_factor
             proxy=ayarlar.copilot_proxy,
             jira_base_url=ayarlar.jira_base_url,
             yol=ayarlar.copilot_yolu,
+            # Sinama kucucuk bir istek: ozetin 15 dakikasini beklemesin.
+            zaman_asimi=gorusme_ozet.SINAMA_ZAMAN_ASIMI,
         )
     )
     sonuc = gorusme_ozet.sina(ozetleyici, ayarlar.model_sirasi(), ayarlar.kok())

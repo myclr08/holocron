@@ -230,15 +230,22 @@ class OzetleyiciProtokolu(Protocol):
 
 @dataclass(frozen=True)
 class OzetCikti:
-    """Ozetleyicinin ham cevabi: kod sifir degilse model reddetmis demektir."""
+    """Ozetleyicinin ham cevabi: kod sifir degilse model reddetmis demektir.
+
+    `dosya` BIRINCIL yoldur: model JSON'u stdout'a degil kendi yazdigi
+    `ozet.json` dosyasina koyar; orasi ANSI renk kodlarindan, ilerleme
+    satirlarindan ve banner'dan temizdir. `metin` (stdout) ile `hata`
+    (stderr) yedek ayiklama ve teshis icindir.
+    """
 
     kod: int
     metin: str
     hata: str = ""
+    dosya: str = ""
 
     @property
     def basarili(self) -> bool:
-        return self.kod == 0 and bool(self.metin.strip())
+        return self.kod == 0 and bool((self.dosya or self.metin).strip())
 
 
 @runtime_checkable

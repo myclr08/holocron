@@ -1,19 +1,31 @@
-"""Ozet: Copilot CLI'ye transkripti okutur, JSON cevabi dayanikli ayristirir.
+"""Ozet: Copilot CLI'ye transkripti okutur, JSON cevabi DOSYADAN alir.
 
 Cagri bicimi TDD Beyin kalibidir:
 
-    copilot --model <model> -p "<istem>" --allow-tool=read
+    copilot --model <model> -p "<istem>" --allow-tool=read --allow-tool=write
 
 Transkript **dosya olarak** verilir ve istem modelden dosyayi okumasini ister:
 yarim saatlik bir gorusmenin metni komut satirina sigmaz, kabuk siniriyla
 bogusmanin da anlami yok.
 
+Cevap da **dosyadan** alinir. Saha hatasi (19 Eylul 2026, Windows): "Özet
+alınamadı: Model JSON döndürmedi." Copilot bulunuyor, model kabul ediliyor,
+surec donuyor ama stdout'tan JSON cikmiyor: programatik kipte (`-p`) stdout'a
+banner, ilerleme satirlari, arac kullanim dokumu ve ANSI renk kodlari
+karisiyor; cevap markdown icinde ya da stderr'de kalabiliyor. TDD Beyin
+(`beyin/araclar/beyin.py`) bu yuzden sonucu modelin YAZDIGI dosyadan okur,
+stdout'u yalnizca log/teshis icin tutar. Burada da ayni kalip:
+
+* istem modelden JSON'u transkriptin yanindaki `ozet.json`a yazmasini ister,
+* surec bitince o dosya okunur (UTF-8, BOM toleransli, ANSI yok),
+* dosya yoksa/bozuksa YEDEK yol: stdout + stderr birlestirilir, ANSI kacis
+  dizileri temizlenir, kod blogundan ya da duz metinden JSON cekilir,
+* o da olmazsa hata metninde ham ciktinin kuyrugu durur ve `holocron.log`a
+  WARNING ile daha uzun bir kuyruk yazilir. Ses SILINMEZ.
+
 Model reddedilirse (sifir olmayan cikis kodu ya da ciktida taninabilir bir
 hata) sradaki modele gecilir; calisan model "son calisan" olarak ayara
 yazilir, bir sonraki gorusme oradan baslar.
-
-Cikti serbest metin icinde gelebilir ("Işte not: ```json {...}```"): JSON
-metnin icinden cekilir, olmazsa hata verilir ve ses SILINMEZ.
 
 Copilot'un KENDISI de aranir: `holocron.bat` uygulamayi `start "" pythonw.exe`
 ile actigi icin surec, kullanicinin terminaldeki PATH'ini gormeyebilir (npm'in
@@ -56,7 +68,17 @@ VARSAYILAN_MODELLER: tuple[str, ...] = (
     "gpt-5",
 )
 # Copilot bir soruya takilirsa is parcacigi sonsuza kadar beklemesin.
+# Ozet uzun surebilir (yarim saatlik transkript), sinama ise kisacik olmali.
 ZAMAN_ASIMI = 900
+SINAMA_ZAMAN_ASIMI = 300
+
+# Modelin JSON'u yazacagi dosya: transkriptin YANINA dusar, surec bitince
+# okunur ve silinir. Birincil yol budur, stdout yedektir.
+OZET_DOSYASI = "ozet.json"
+
+# Copilot'a verilen arac izinleri (TDD Beyin ile ayni bicim). `read` olmadan
+# model transkripti okuyamaz, `write` olmadan cevabi dosyaya yazamaz.
+IZIN_BAYRAKLARI: tuple[str, ...] = ("--allow-tool=read", "--allow-tool=write")
 
 # Modelin reddedildigini anlatan ciktilar (kucuk harfe indirilmis arama).
 RED_IZLERI: tuple[str, ...] = (
@@ -80,6 +102,35 @@ def varsayilan_sablon() -> str:
     return SABLON_DOSYASI.read_text(encoding="utf-8")
 
 
+def cikti_yolu(transkript: Path) -> Path:
+    """Modelin JSON'u yazacagi dosya: transkriptin yanindaki `ozet.json`.
+
+    Istem de (`{cikti}`), okuyan taraf da (`CopilotOzetleyici.ozetle`) bu tek
+    fonksiyonu cagirir: yol iki yerde ayri ayri kurulup ayrisamaz.
+    """
+    return Path(transkript).parent / OZET_DOSYASI
+
+
+def dosya_oku(yol: Path) -> str:
+    """Modelin yazdigi dosyayi okur; yoksa ya da okunamazsa bos metin.
+
+    `utf-8-sig`: Windows'ta bir arac BOM birakirsa `json.loads` patlamasin.
+    Cozulemeyen bayt varsa metin yine de gelsin, teshis icin ise yarar.
+    """
+    try:
+        return Path(yol).read_text(encoding="utf-8-sig", errors="replace")
+    except (OSError, ValueError):
+        return ""
+
+
+def dosya_sil(yol: Path) -> None:
+    """Ara dosyayi sessizce siler (yoksa dert degil)."""
+    try:
+        Path(yol).unlink()
+    except OSError:
+        pass
+
+
 def istem_kur(
     sablon: str,
     transkript: Path,
@@ -94,6 +145,7 @@ def istem_kur(
     """
     degerler = {
         "{transkript}": str(transkript),
+        "{cikti}": str(cikti_yolu(transkript)),
         "{katilimcilar}": ", ".join(katilimcilar) or "bilinmiyor",
         "{tarih}": tarih or "bilinmiyor",
         "{sure}": sure or "bilinmiyor",
@@ -123,6 +175,70 @@ def reddedilenler_mesaji(modeller: Sequence[str]) -> str:
         f"Copilot modelleri reddetti: {liste} — Ayarlar'dan hesabında olan "
         f"bir model seçin (ör. {VARSAYILAN_MODELLER[0]})."
     )
+
+
+# --- ham cikti: ANSI temizligi, izin reddi, teshis ------------------------
+
+# ANSI kacis dizileri: renk/imlec (CSI), pencere basligi (OSC) ve tek harfli
+# kisa diziler. Copilot programatik kipte bile renk basabiliyor; JSON'un
+# icine dusen tek bir `\x1b[32m` ayristiriciyi bozar.
+_ANSI = re.compile(
+    r"\x1b\[[0-9;?]*[ -/]*[@-~]"          # CSI: renk, imlec, silme
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC: pencere basligi
+    r"|\x1b[@-Z\\-_]"                      # tek harfli kisa diziler
+)
+
+
+def ansi_temizle(metin: str) -> str:
+    """ANSI dizilerini atar, satir basi (`\\r`) ilerlemesini satira cevirir."""
+    ham = _ANSI.sub("", str(metin or ""))
+    return ham.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def ham_cikti(cikti: Any) -> str:
+    """stdout + stderr, ANSI'den arinmis: yedek ayiklama ve teshis bunu okur."""
+    parcalar = [
+        str(getattr(cikti, "metin", "") or ""),
+        str(getattr(cikti, "hata", "") or ""),
+    ]
+    return ansi_temizle("\n".join(parca for parca in parcalar if parca.strip()))
+
+
+# Arac izninin verilmedigini anlatan izler (kucuk harfe indirilmis arama).
+# "allow" tek basina YETMEZ: kendi bayragimiz (`--allow-tool=read`) ciktida
+# yankilanabilir, acik bir red sozcugu aranir.
+IZIN_IZLERI: tuple[str, ...] = (
+    "permission denied",
+    "permission to",
+    "requires permission",
+    "requires approval",
+    "not allowed",
+    "not permitted",
+    "tool denied",
+    "denied the",
+    "denied tool",
+    "is denied",
+    "was denied",
+)
+
+
+def izin_reddi(ham: str) -> str:
+    """Ham ciktida arac izni reddi varsa kullaniciya soylenecek cumle.
+
+    Model dosyayi okuyamadiysa ya da yazamadiysa JSON hic uretilmez; bunu
+    "Model JSON döndürmedi" diye gostermek kullaniciyi yanlis yere bakmaya
+    gonderir, bu yuzden ayri bir cumle veriyoruz.
+    """
+    metin = str(ham or "").lower()
+    if not any(iz in metin for iz in IZIN_IZLERI):
+        return ""
+    if "write" in metin:
+        arac = "dosyaya yazma"
+    elif "read" in metin:
+        arac = "dosya okuma"
+    else:
+        arac = "araç kullanma"
+    return f"Copilot {arac} izni vermedi; bayraklar: {' '.join(IZIN_BAYRAKLARI)}"
 
 
 # Alt surece verilen vekil degiskenleri: buyuk ve kucuk harfli yazimlarin
@@ -386,6 +502,9 @@ def komut_kur(
     da `&` varsa komut parcalanir. Bu yuzden `.cmd` yolunda istem ARGÜMAN
     olarak gecmez, transkriptin yanina dosya olarak yazilir ve modele "o
     dosyayi oku" denir (`--allow-tool=read` zaten acik).
+
+    `--allow-tool=write` de verilir: cevap artik stdout'tan degil modelin
+    yazdigi `ozet.json`dan okunuyor, izin olmazsa dosya hic olusmaz.
     """
     if kabukla_mi(yol, platform):
         dosya = Path(klasor) / ISTEM_DOSYASI
@@ -398,10 +517,10 @@ def komut_kur(
             model,
             "-p",
             KISA_ISTEM,
-            "--allow-tool=read",
+            *IZIN_BAYRAKLARI,
         ]
         return argumanlar, dosya
-    return [str(yol), "--model", model, "-p", istem, "--allow-tool=read"], None
+    return [str(yol), "--model", model, "-p", istem, *IZIN_BAYRAKLARI], None
 
 
 class CopilotOzetleyici:
@@ -447,25 +566,31 @@ class CopilotOzetleyici:
         self.son_yol = str(bulunan)
         log.info("Copilot CLI bulundu: %s", bulunan)
         klasor = transkript.parent
+        hedef = cikti_yolu(transkript)
+        # Onceki kosudan kalan dosya TAZE sanilmasin: once sil, sonra calistir.
+        dosya_sil(hedef)
         argumanlar, istem_dosyasi = komut_kur(bulunan, model, istem, klasor)
         try:
             sonuc = self.calistir(argumanlar, klasor)
         except FileNotFoundError:
             return OzetCikti(kod=127, metin="", hata=bulunamadi_mesaji(denenen))
         except subprocess.TimeoutExpired:
-            return OzetCikti(kod=124, metin="", hata="Copilot CLI zaman aşımına uğradı.")
+            return OzetCikti(
+                kod=124, metin="", hata=f"Copilot {self.zaman_asimi} sn'de bitmedi."
+            )
         except OSError as hata:  # pragma: no cover - isletim sistemi hatasi
             return OzetCikti(kod=1, metin="", hata=str(hata))
         finally:
             if istem_dosyasi is not None:
-                try:
-                    istem_dosyasi.unlink()
-                except OSError:  # pragma: no cover - dosya zaten yok
-                    pass
+                dosya_sil(istem_dosyasi)
+        # Birincil yol: modelin yazdigi dosya. Okunduktan sonra geride kalmaz.
+        yazilan = dosya_oku(hedef)
+        dosya_sil(hedef)
         return OzetCikti(
             kod=int(sonuc.returncode or 0),
-            metin=str(sonuc.stdout or ""),
-            hata=str(sonuc.stderr or ""),
+            metin=ansi_temizle(str(sonuc.stdout or "")),
+            hata=ansi_temizle(str(sonuc.stderr or "")),
+            dosya=yazilan,
         )
 
 
@@ -514,23 +639,29 @@ def calistir(
     modeller: Sequence[str],
     istem: str,
 ) -> OzetSonucu:
-    """Modelleri sirayla dener; ilk gecerli JSON kazanir."""
+    """Modelleri sirayla dener; ilk gecerli JSON kazanir.
+
+    JSON once modelin YAZDIGI dosyadan, o olmazsa stdout+stderr'den cekilir;
+    ikisi de vermezse hata metnine ham ciktinin kuyrugu konur ve loga daha
+    uzun bir kuyruk yazilir. Cikis kodu sifir olmasa bile gecerli JSON
+    geldiyse is bitmistir: Copilot kimi zaman cevabi yazip huysuz cikiyor.
+    """
     denenen: list[str] = []
     reddedilenler: list[str] = []
     son_hata = "Özetleyici hiç çalıştırılamadı."
     for model in modeller:
         denenen.append(model)
         cikti = ozetleyici.ozetle(transkript, model, istem)
+        veri = veriyi_cek(cikti)
+        if veri is not None:
+            return OzetSonucu(veri=veri, model=model, denenen=tuple(denenen))
         if reddedildi_mi(cikti):
             reddedilenler.append(model)
             son_hata = (cikti.hata or cikti.metin or "model reddedildi").strip()[:500]
             log.info("Özet modeli reddedildi: %s", model)
             continue
-        veri = ayristir(cikti.metin)
-        if veri is None:
-            son_hata = "Model JSON döndürmedi."
-            continue
-        return OzetSonucu(veri=veri, model=model, denenen=tuple(denenen))
+        son_hata = json_yok_mesaji(cikti)
+        teshis_logla(model, cikti)
     if reddedilenler:
         # Tek tek model hatalari yerine tek satirlik ozet: kullanici hangi
         # modellerin hesabinda kapali oldugunu bir bakista gorur.
@@ -543,20 +674,33 @@ def calistir(
 _KOD_BLOGU = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
+def veriyi_cek(cikti: Any) -> dict[str, Any] | None:
+    """Ozetleyicinin cevabindan JSON: once dosya, sonra stdout+stderr.
+
+    Dosya birincil yoldur (temiz UTF-8). Model dosyayi yazamadiysa ama
+    cevabi ekrana bastiysa not yine de kurtarilir.
+    """
+    veri = ayristir(str(getattr(cikti, "dosya", "") or ""))
+    if veri is not None:
+        return veri
+    return ayristir(ham_cikti(cikti))
+
+
 def ayristir(metin: str) -> dict[str, Any] | None:
     """Serbest metnin icinden JSON nesnesini ceker.
 
-    Once dogrudan okunur, sonra kod blogu, sonra ilk dengeli suslu parantez
-    kumesi denenir. Model "Işte not:" gibi bir giris cumlesi yazsa bile not
-    kaybolmasin.
+    Once ANSI temizlenir (Copilot renk basiyor), sonra sirayla metnin kendisi,
+    kod bloklari ve dengeli suslu parantez kumeleri denenir. Model "Işte not:"
+    gibi bir giris cumlesi yazsa ya da ilerleme satirlarinin arasina suslu
+    parantezli bir sey dusse bile not kaybolmasin.
     """
-    ham = str(metin or "").strip()
+    ham = ansi_temizle(metin).strip()
     if not ham:
         return None
     for aday in _adaylar(ham):
         try:
             veri = json.loads(aday)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, ValueError):
             continue
         if isinstance(veri, dict):
             return veri
@@ -566,40 +710,42 @@ def ayristir(metin: str) -> dict[str, Any] | None:
 def _adaylar(metin: str) -> list[str]:
     adaylar = [metin]
     adaylar.extend(_KOD_BLOGU.findall(metin))
-    dengeli = _dengeli_nesne(metin)
-    if dengeli:
-        adaylar.append(dengeli)
+    # Dengeli kumeler UZUNDAN kisaya: ilerleme satirlarindaki kucuk `{...}`
+    # parcacigi asil nesnenin onune gecmesin.
+    adaylar.extend(sorted(_dengeli_nesneler(metin), key=len, reverse=True))
     return adaylar
 
 
-def _dengeli_nesne(metin: str) -> str:
-    """Ilk `{` ile esleyen `}` arasini dondurur (metin icindeki tirnaklara dikkat)."""
-    basla = metin.find("{")
-    if basla < 0:
-        return ""
+def _dengeli_nesneler(metin: str) -> list[str]:
+    """Metindeki BUTUN en dis dengeli `{...}` kumeleri (tirnaklara dikkat)."""
+    bulunan: list[str] = []
     derinlik = 0
+    basla = -1
     tirnak = False
     kacis = False
-    for sira in range(basla, len(metin)):
-        harf = metin[sira]
+    for sira, harf in enumerate(metin):
         if kacis:
             kacis = False
             continue
-        if harf == "\\":
-            kacis = True
+        if tirnak:
+            if harf == "\\":
+                kacis = True
+            elif harf == '"':
+                tirnak = False
             continue
         if harf == '"':
-            tirnak = not tirnak
-            continue
-        if tirnak:
+            # Tirnak yalnizca bir nesnenin icindeyken metin baslatir.
+            tirnak = derinlik > 0
             continue
         if harf == "{":
+            if derinlik == 0:
+                basla = sira
             derinlik += 1
-        elif harf == "}":
+        elif harf == "}" and derinlik > 0:
             derinlik -= 1
             if derinlik == 0:
-                return metin[basla : sira + 1]
-    return ""
+                bulunan.append(metin[basla : sira + 1])
+    return bulunan
 
 
 # --- cikti duzeltme -----------------------------------------------------
@@ -667,10 +813,25 @@ def bolumler(veri: dict[str, Any]) -> list[dict[str, Any]]:
 
 # --- sinama --------------------------------------------------------------
 
-SINAMA_ISTEMI = "Yalnızca tek kelime yaz: hazır"
 SINAMA_DOSYASI = "copilot-sinama.txt"
+
+
+def sinama_istemi(cikti: Path) -> str:
+    """Sinama istemi: ozet yolunun AYNISI, yalnizca kucucuk bir JSON.
+
+    Ozet adimi cevabi dosyadan aliyor; sinama da ayni yoldan gecmezse
+    "çalışıyor" der ama gercek ozet yine patlar.
+    """
+    return (
+        'Tek bir iş yap: şu dosyaya {"hazir": true} içeriğini yaz: '
+        f"{cikti} — başka hiçbir şey yapma, açıklama yazma."
+    )
+
+
 # Hata metni ekranda gosterilir: uzun ciktinin kuyrugu isimize yaramaz.
 HATA_SINIRI = 400
+# `holocron.log` daha comert: teshis icin ciktinin daha uzun bir kuyrugu.
+LOG_SINIRI = 2000
 
 # Ciktidan temizlenecek izler: anahtar/parola benzeri her sey ekrana cikmasin.
 _SIR_IZLERI = re.compile(
@@ -679,14 +840,60 @@ _SIR_IZLERI = re.compile(
 )
 
 
-def temizle(metin: str) -> str:
-    """Ekrana cikacak hata metni: anahtar benzeri diziler maskelenir."""
-    ham = str(metin or "").strip()
+def _maskele(metin: str) -> str:
+    """ANSI atilmis, tek satira indirilmis, sirlari gizlenmis metin."""
+    ham = ansi_temizle(metin).strip()
     if not ham:
         return ""
-    gizli = _SIR_IZLERI.sub("[gizlendi]", ham)
-    tek_satir = " ".join(gizli.split())
-    return tek_satir[:HATA_SINIRI]
+    return " ".join(_SIR_IZLERI.sub("[gizlendi]", ham).split())
+
+
+def temizle(metin: str, sinir: int = HATA_SINIRI) -> str:
+    """Ekrana cikacak hata metninin BASI: uzun ciktinin gerisi kirpilir."""
+    return _maskele(metin)[:sinir]
+
+
+def son_karakterler(metin: str, sinir: int = HATA_SINIRI) -> str:
+    """Metnin SON `sinir` karakteri, maskelenmis ve tek satir.
+
+    Kirpma maskelemeden SONRA yapilir: once kirpilirsa kullanici ciktinin
+    basini gorur, oysa hatanin sebebi hep sondadir.
+    """
+    return _maskele(metin)[-sinir:] if sinir > 0 else ""
+
+
+def kuyruk(cikti: Any, sinir: int = HATA_SINIRI) -> str:
+    """Ozetleyici cevabinin (stdout+stderr) son `sinir` karakteri."""
+    return son_karakterler(ham_cikti(cikti), sinir)
+
+
+def json_yok_mesaji(cikti: Any) -> str:
+    """Ekranda gorunecek hata: once izin reddi, sonra ham ciktinin kuyrugu.
+
+    Sahadaki "Özet alınamadı: Model JSON döndürmedi." tek basina kullaniciya
+    hicbir sey soylemiyordu; artik Copilot'un son sozleri de yaninda.
+    """
+    izin = izin_reddi(ham_cikti(cikti))
+    if izin:
+        return izin
+    son = kuyruk(cikti)
+    if not son:
+        return "Model JSON döndürmedi. Copilot hiçbir çıktı vermedi, holocron.log'a bakın."
+    return f"Model JSON döndürmedi. Ham çıktı (son {HATA_SINIRI} karakter): {son}"
+
+
+def teshis_logla(model: str, cikti: Any) -> None:
+    """JSON cikmadiginda `holocron.log`a uzun kuyruk yazar (maskelenmis)."""
+    log.warning(
+        "Özet JSON'u çıkmadı (model %s, çıkış kodu %s). "
+        "stdout son %s karakter: %s | stderr son %s karakter: %s",
+        model,
+        getattr(cikti, "kod", "?"),
+        LOG_SINIRI,
+        son_karakterler(getattr(cikti, "metin", ""), LOG_SINIRI) or "(boş)",
+        LOG_SINIRI,
+        son_karakterler(getattr(cikti, "hata", ""), LOG_SINIRI) or "(boş)",
+    )
 
 
 def sina(ozetleyici: Any, modeller: Sequence[str], klasor: Path) -> dict[str, Any]:
@@ -694,12 +901,18 @@ def sina(ozetleyici: Any, modeller: Sequence[str], klasor: Path) -> dict[str, An
 
     Yedek sira burada da isler: ilk model reddederse sradaki denenir ve
     calisan model "son calisan" olarak geri bildirilir.
+
+    Sinama ozet adiminin AYNI yolunu yurur: model kucuk bir JSON'u
+    (`{"hazir": true}`) `ozet.json`a yazar, biz oradan okuruz. Boylece
+    "çalışıyor" yazisi dosyaya yazma izninin de verildigini kanitlar.
     """
     import time
 
     klasor.mkdir(parents=True, exist_ok=True)
     dosya = klasor / SINAMA_DOSYASI
     dosya.write_text("Bu bir bağlantı sınamasıdır.\n", encoding="utf-8")
+    hedef = cikti_yolu(dosya)
+    istem = sinama_istemi(hedef)
     denenen: list[str] = []
     reddedilenler: list[str] = []
     son_hata = "Copilot CLI hiç çalıştırılamadı."
@@ -707,11 +920,15 @@ def sina(ozetleyici: Any, modeller: Sequence[str], klasor: Path) -> dict[str, An
         for model in modeller:
             denenen.append(model)
             basladi = time.monotonic()
-            cikti = ozetleyici.ozetle(dosya, model, SINAMA_ISTEMI)
+            cikti = ozetleyici.ozetle(dosya, model, istem)
             gecen = time.monotonic() - basladi
-            if reddedildi_mi(cikti):
-                reddedilenler.append(model)
-                son_hata = temizle(cikti.hata or cikti.metin or "model reddedildi")
+            if veriyi_cek(cikti) is None:
+                if reddedildi_mi(cikti):
+                    reddedilenler.append(model)
+                    son_hata = temizle(cikti.hata or cikti.metin or "model reddedildi")
+                    continue
+                son_hata = json_yok_mesaji(cikti)
+                teshis_logla(model, cikti)
                 continue
             # Bulunan tam yol ekranda durur: kullanici hangi Copilot'un
             # calistigini gorur, ayara yazacagi degeri de oradan kopyalar.
@@ -729,10 +946,8 @@ def sina(ozetleyici: Any, modeller: Sequence[str], klasor: Path) -> dict[str, An
                 "mesaj": " · ".join(parcalar),
             }
     finally:
-        try:
-            dosya.unlink()
-        except OSError:
-            pass
+        dosya_sil(dosya)
+        dosya_sil(hedef)
     if reddedilenler:
         son_hata = temizle(reddedilenler_mesaji(reddedilenler))
     return {
@@ -746,6 +961,11 @@ def sina(ozetleyici: Any, modeller: Sequence[str], klasor: Path) -> dict[str, An
 
 
 def default_ozetleyici(
-    proxy: str = "", jira_base_url: str = "", yol: str = ""
+    proxy: str = "",
+    jira_base_url: str = "",
+    yol: str = "",
+    zaman_asimi: int = ZAMAN_ASIMI,
 ) -> CopilotOzetleyici:
-    return CopilotOzetleyici(proxy=proxy, jira_base_url=jira_base_url, yol=yol)
+    return CopilotOzetleyici(
+        proxy=proxy, jira_base_url=jira_base_url, yol=yol, zaman_asimi=zaman_asimi
+    )

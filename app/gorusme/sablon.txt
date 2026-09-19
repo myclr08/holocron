@@ -5,8 +5,12 @@ kanalıdır (notu tutan kişi), "Karşı taraf" duyulan sestir.
 Katılımcılar: {katilimcilar}
 Görüşme tarihi: {tarih}, süresi: {sure}
 
-Görüşmeyi Türkçe özetle ve YALNIZCA aşağıdaki şemaya uyan tek bir JSON nesnesi
-yaz. JSON dışında hiçbir şey yazma, kod bloğu kullanma.
+Görüşmeyi Türkçe özetle ve aşağıdaki şemaya uyan TEK bir JSON nesnesini şu
+dosyaya YAZ: {cikti}
+
+Dosyayı UTF-8 olarak yaz; içinde yalnızca JSON olsun. Kod bloğu (```),
+açıklama cümlesi ya da başlık ekleme. Ekrana bir şey basman gerekmiyor,
+işin sonunda dosya yazılmış olmalı.
 
 {
   "baslik": "görüşmeyi tek cümlede anlatan kısa başlık",
@@ -23,3 +27,4 @@ Kurallar:
 - Aksiyonun sahibi belli değilse "kisi" alanını boş bırak.
 - Tarih geçiyorsa YYYY-AA-GG biçimine çevir; geçmiyorsa boş bırak.
 - Boş kalan listeleri boş dizi olarak yaz, alanı atlama.
+- Dosyaya yazamazsan aynı JSON'u ekrana bas ve sebebini de yaz.

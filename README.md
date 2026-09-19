@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.10.6** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.10.7** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -802,8 +802,11 @@ Değer yalnızca Copilot alt sürecinin ortamına konur (`HTTPS_PROXY`,
 `HTTP_PROXY` ve küçük harfli eşleri), Jira sunucusu da o alt sürecin
 muafiyet listesine (`NO_PROXY`) eklenir. Holocron'un kendi istekleri ve Jira
 istemcisinin davranışı hiç değişmez. **Copilot'u sına** düğmesi seçili model
-ve vekille kısa bir istek atar; model reddedilirse yedek sıradaki denenir ve
-çalışan model "son çalışan" olarak saklanır.
+ve vekille kısa bir istek atar — modelden küçücük bir JSON'u (`{"hazir":
+true}`) dosyaya yazmasını ister, yani özet adımının **tam aynı yolunu**
+yürür; model reddedilirse yedek sıradaki denenir ve çalışan model "son
+çalışan" olarak saklanır. Başarısız olursa Copilot'un ham çıktısının son
+400 karakteri ekranda görünür.
 
 **Hangi model?** Copilot CLI hesap başına farklı modelleri açar; sahadan 19
 Eylül 2026'da gelen örnekte `gpt-5`, `claude-sonnet-4.5` ve `gpt-4.1` "Model
@@ -839,6 +842,20 @@ kullanır ve başarıda bulunan yolu gösterir. npm kurulumunun bıraktığı
 açamaz), Holocron onu `cmd.exe /c` ile çağırır ve istem metnini komut satırına
 koymaz — transkriptin yanına dosya olarak yazıp modele okutur, böylece
 istemdeki tırnak veya `%` komutu bölemez.
+
+**Özet cevabı dosyadan alınır.** Copilot programatik kipte (`-p`) ekrana
+yalnızca cevabı basmaz: banner, ilerleme satırları, araç kullanım dökümü ve
+ANSI renk kodları da aynı akışa karışır, cevabın kendisi markdown içinde ya
+da `stderr`'de kalabilir. Bu yüzden istem modelden JSON'u **transkriptin
+yanındaki `ozet.json` dosyasına yazmasını** ister ve Holocron cevabı oradan
+okur (UTF-8, BOM'a toleranslı, ANSI yok). Copilot bu yüzden
+`--allow-tool=read --allow-tool=write` ile çağrılır: okuma izni transkript,
+yazma izni cevap dosyası içindir. Dosya oluşmadıysa **yedek yol** devreye
+girer — `stdout` ile `stderr` birleştirilir, ANSI kaçış dizileri temizlenir
+ve metnin içinden (kod bloğundan ya da düz metinden) JSON çekilir. `ozet.json`
+okunduktan sonra silinir, önceki koşudan kalan dosya da çağrıdan önce
+temizlenir. Copilot 15 dakikada (sınamada 5 dakikada) bitmezse iş
+"Copilot 900 sn'de bitmedi" diyerek düşer, ses silinmez.
 
 **Aygıt kuralı.** Varsayılan **otomatik**tir: Teams'in ses oturumunun açık
 olduğu mikrofon ve çıkış kullanılır, bulunamazsa Windows'un varsayılan
@@ -876,6 +893,7 @@ dolar, bilerek açın).
 | Satır "hata: faster-whisper yok" | Paket kurulu değil: **Ayarlar → Görüşme notları → Yazıya dökme paketini kur** (ya da başlatıcıyı yeniden çalıştırın). Paket gelince bekleyen satırlar kendiliğinden yeniden denenir; ses silinmemiştir |
 | Sekmenin tepesinde "Yazıya dökme paketi eksik" şeridi | Aynı sebep; şerit kapatılabilir, paket gelince kendiliğinden kalkar |
 | Satır "hata: Özet alınamadı" | Copilot CLI oturumu kapalı ya da vekil yanlış; **Copilot'u sına** ile bakın |
+| Satır "hata: Özet alınamadı: Model JSON döndürmedi. Ham çıktı (son 400 karakter): …" | Model cevabı `ozet.json` dosyasına yazamadı ve ekrana da geçerli JSON basmadı. Hata metninin sonundaki ham çıktı ne dediğini söyler; tamamı için `holocron.log` dosyasına bakın (`Özet JSON'u çıkmadı` satırı, stdout ve stderr'in son 2000 karakteri, parola/anahtar benzeri diziler maskeli). Sık sebep: modelin araç izni reddedilmiş (o durumda hata "Copilot dosyaya yazma izni vermedi" der) ya da özet şablonunu elle değiştirip `{cikti}` yer tutucusunu silmişsiniz — **Ayarlar → Görüşme notları → Özet şablonu** alanını boşaltıp varsayılana dönün. Ses ve transkript silinmemiştir: düzeltince **Yeniden dene** |
 | Satır "hata: Özet alınamadı: Copilot CLI bulunamadı" | Uygulama `pythonw.exe` ile açıldığı için terminalinizin PATH'ini görmüyor: komut isteminde `where copilot` yazın ve çıkan tam yolu (`.cmd`/`.exe`) **Ayarlar → Görüşme notları → Copilot yolu** alanına yapıştırıp **Copilot'u sına** deyin. Hata metni nerelere bakıldığını sayar |
 | Copilot çalışırken (veya paket kurulurken) ekranda kısa süreliğine boş bir konsol penceresi açılıyor | v0.10.6'dan önceki sürümlerde görülen bir Windows davranışı: konsolsuz açılan Holocron alt süreç başlattığında Windows kendiliğinden pencere açıyordu. v0.10.6 alt süreçleri `CREATE_NO_WINDOW` ile başlatır, pencere hiç açılmaz; hâlâ görüyorsanız güncelleyin |
 | "katılımcı bekleniyor" kalıyor | Arama geçmişi henüz çekilmemiş: **Aramaları çek** |
@@ -1321,6 +1339,7 @@ taşımaz.
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.10.7** | 19 Eylül 2026 | Sahadan gelen yedinci hata: görüşme notu özet adımı "Özet alınamadı: Model JSON döndürmedi." diyordu — Copilot CLI bulunuyor, model (`claude-sonnet-5`) kabul ediliyor, süreç dönüyor ama `stdout`'tan JSON çıkmıyordu. Sebep programatik kipin (`-p`) çıktısı: banner, ilerleme satırları, araç kullanım dökümü ve ANSI renk kodları aynı akışa karışıyor, cevap markdown içinde ya da `stderr`'de kalabiliyor. Çözüm TDD Beyin'in kanıtlanmış kalıbı: cevap artık modelin **yazdığı dosyadan** alınıyor. Şablon (`app/gorusme/sablon.txt`) modelden JSON'u transkriptin yanındaki `ozet.json` dosyasına yazmasını istiyor, Copilot `--allow-tool=read --allow-tool=write` ile çağrılıyor ve dosya UTF-8/BOM toleranslı okunuyor; önceki koşudan kalan dosya çağrıdan önce, okunan dosya hemen sonra siliniyor. Dosya oluşmazsa yedek yol devrede: `stdout`+`stderr` birleşiyor, ANSI kaçış dizileri temizleniyor, kod bloğundan ya da düz metinden en dıştaki JSON nesnesi çekiliyor (ilerleme satırındaki küçük `{...}` parçacığı asıl nesnenin önüne geçmiyor). JSON yine yoksa kullanıcı ekranda "Model JSON döndürmedi. Ham çıktı (son 400 karakter): …" görüyor, `holocron.log`'a WARNING ile stdout ve stderr'in son 2000 karakteri düşüyor (parola/anahtar benzeri diziler maskeli); araç izni reddedilmişse metin bunu söylüyor ("Copilot dosyaya yazma izni vermedi; bayraklar: …"). **Copilot'u sına** da aynı dosya yolunu yürüyor (modelden `{"hazir": true}` yazmasını ister), yani "çalışıyor" yazısı yazma izninin de verildiğini kanıtlıyor; sınamanın zaman aşımı 300 sn, özetinki 900 sn ve aşılırsa hata "Copilot 900 sn'de bitmedi" diyor. Alt süreçlerin konsolsuz çalışması (v0.10.6) aynen duruyor |
 | **v0.10.6** | 19 Eylül 2026 | Sahadan gelen altıncı hata: Copilot CLI çağrısı (ve pip ile paket kurulumu) sırasında ekranda kısa süreliğine boş bir konsol penceresi açılıyordu — `holocron.bat` uygulamayı konsolsuz `pythonw.exe` ile açtığı için Windows, alt süreç başlatıldığında kendiliğinden bir pencere yaratıyordu. Ortak bir yardımcı (`app/gorusme/altsurec.py::sessiz_calistir_ayarlari`) artık her alt süreç çağrısına Windows'ta `CREATE_NO_WINDOW` bayrağını ve gizli `STARTUPINFO`yu ekliyor (diğer platformlarda hiçbir şey değişmiyor); ayrıca konsolsuz süreçte hiç var olmayan `stdin` artık `DEVNULL` veriliyor, girdi bekleyen bir CLI takılı kalmıyor |
 | **v0.10.5** | 19 Eylül 2026 | Sahadan gelen beşinci hata: özet modelleri `gpt-5`, `claude-sonnet-4.5`, `gpt-4.1` Copilot CLI tarafından "Model "gpt-4.1" from --model flag is not available" diyerek reddedildi, oysa aynı hesapta `claude-sonnet-5` ve `gpt-5-mini` (yedeği `claude-haiku-4.5`) çalışıyordu. Varsayılan özet modeli sırası `claude-sonnet-5, gpt-5-mini, claude-haiku-4.5, claude-sonnet-4.5, gpt-5` oldu (yalnızca ayar hiç yazılmamış kurulumlarda geçerli, kaydedilmiş ayarlar değişmez). Model reddi tespiti bu yeni hata metnini de tanıyor; reddedilen bütün modeller artık tek satırda listeleniyor ("Copilot modelleri reddetti: ... — Ayarlar'dan hesabında olan bir model seçin"). Ayarlar'daki Özet modelleri alanının ipucu güncel model adlarını gösteriyor |
 | **v0.10.4** | 19 Eylül 2026 | Sahadan gelen dördüncü hata: VDI'da özet adımı "Özet alınamadı: Copilot CLI bulunamadı (copilot)" diyordu, oysa kullanıcı aynı makinede terminalde `copilot` çalıştırabiliyordu. Sebep PATH: `holocron.bat` uygulamayı `start "" pythonw.exe` ile açar, o süreç kullanıcının **güncel** PATH'ini görmez (npm'in global klasörü çoğu kez yalnızca kullanıcı PATH'indedir ve o PATH oturum açıldıktan sonra değişmiştir). Copilot artık sırayla aranıyor: **Ayarlar → Görüşme notları → Copilot yolu** alanı, `PATH` (`PATHEXT` ile `.cmd`/`.exe` çözülür), Windows'un bilinen yerleri (`%APPDATA%\npm\copilot.cmd` başta olmak üzere npm, WinGet, Program Files, `%USERPROFILE%\.local\bin`) ve **kayıt defterinden taze okunan** kullanıcı/makine PATH'i. Bulunan tam yol loga yazılır, **Copilot'u sına** onu ekranda gösterir ("çalışıyor · `<yol>` · model X · N sn") ve ayara "son bulunan" olarak saklar; hiçbiri yoksa hata metni **denenen yerleri tek tek sayar** ve ne yapılacağını söyler. npm kurulumunun bıraktığı `copilot.cmd` dosyasını Windows doğrudan çalıştıramadığı için (`CreateProcess` `.cmd` açamaz) bu dosyalar `cmd.exe /c` ile çağrılıyor; cmd komut satırını yeniden ayrıştırdığından istem metni **argüman olarak geçmiyor**, transkriptin yanına dosya olarak yazılıp modele okutuluyor (tırnak, `%` ve `&` komutu bölemez). Vekil ve `NO_PROXY` mantığı aynen duruyor |
