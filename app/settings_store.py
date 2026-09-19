@@ -12,8 +12,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from .mail.source import is_supported as mail_supported
-from .gorusme.source import is_supported as gorusme_supported
-from .teamscalls.source import is_supported as calls_supported
 from .secrets import SecretBox, SecretError
 
 MODE_CLOUD = "cloud"
@@ -67,58 +65,6 @@ DEFAULTS: dict[str, str] = {
     "mailsend.mode": "display",
     # Teams: grup sohbetinin konu adi bicimi (sablon yer tutuculari gecerli).
     "teams.topic_format": "{key}",
-    # Teams aramalari: onbellek yolu (bos = varsayilan), Guncelle ile tarama.
-    "calls.cache_path": "",
-    "calls.scan_on_refresh": "0",
-    # Kendi Teams kimligim (MRI ya da GUID); bos = taramanin buldugu kullanilir.
-    "calls.my_mri": "",
-    # Taramanin veritabani adindan buldugu kimlik (ayar bosken kullanilir).
-    "calls.my_mri_found": "",
-    # Arama gecmisi en son ne zaman cekildi (bos = hic).
-    "calls.scanned_at": "",
-    # --- Gorusme notlari ----------------------------------------------
-    # Takip anahtari: acikken gorusme algilanip kaydedilir, kapaliyken
-    # hicbir sey kaydedilmez.
-    "calls.takip": "0",
-    "calls.takip_acilista": "1",
-    # Asgari gorusme suresi (dakika): altindaki gorusme islenmez.
-    "calls.min_dakika": "4",
-    # Aygit secimi: bos = otomatik (Teams'in ses oturumunun oldugu aygit).
-    "calls.mikrofon": "",
-    "calls.hoparlor": "",
-    # Yaziya dokme: model adi ve (vekil engelinde elle kopyalanan) model klasoru.
-    "calls.whisper_model": "small",
-    "calls.whisper_klasor": "",
-    # Ozet: sirali model listesi (JSON), son calisan model, sablon.
-    # Sahadan 19 Eylul 2026: gpt-5, claude-sonnet-4.5, gpt-4.1 kullanicinin
-    # hesabinda reddedildi; varsayilan simdi claude-sonnet-5, yedek sirada
-    # gpt-5-mini ve claude-haiku-4.5 var. Eski adlar da listede kalir, baska
-    # hesapta calisabilirler. Bu deger yalniz ayar hic yazilmamissa gecerli;
-    # mevcut kullanicilarin kaydettigi sira degismez.
-    "calls.ozet_modelleri": (
-        '["claude-sonnet-5", "gpt-5-mini", "claude-haiku-4.5", '
-        '"claude-sonnet-4.5", "gpt-5"]'
-    ),
-    "calls.ozet_model_son": "",
-    "calls.ozet_sablon": "",
-    # Copilot CLI'nin vekil sunucusu. Kurumda Copilot vekilden cikiyor, Jira
-    # dogrudan goruluyor: bu deger YALNIZCA alt surecin ortamina yazilir,
-    # Holocron'un kendi Jira istekleri ondan etkilenmez.
-    "calls.copilot_proxy": "",
-    # Copilot CLI'nin tam yolu (bos = otomatik ara). `holocron.bat` uygulamayi
-    # pythonw ile actigi icin surec, terminaldeki PATH'i gormeyebilir: "where
-    # copilot" ciktisi buraya yazilir. "son" alani otomatik bulunani saklar.
-    "calls.copilot_yolu": "",
-    "calls.copilot_yolu_son": "",
-    # Ses ve ara dosyalarin klasoru (bos = %LOCALAPPDATA%\\Holocron\\gorusme).
-    "calls.calisma_klasoru": "",
-    # Saklama: varsayilan olarak ikisi de silinir.
-    "calls.transkripti_sakla": "0",
-    "calls.sesi_sakla": "0",
-    # Bildirimler ve isleme zamanlamasi.
-    "calls.bildirim_baslangic": "1",
-    "calls.bildirim_hazir": "1",
-    "calls.isleme_gorusme_disinda": "1",
     # Kurum rehberi en son ne zaman cekildi (bos = hic).
     "teams.gal_synced_at": "",
     # Sefer (oyunlastirma): seri korumasinin harcandigi ay, "gecikmis gorev
@@ -135,14 +81,6 @@ BOOLEAN_KEYS: frozenset[str] = frozenset(
         "net.ipv4_first",
         "mail.enabled",
         "mail.scan_on_refresh",
-        "calls.scan_on_refresh",
-        "calls.takip",
-        "calls.takip_acilista",
-        "calls.transkripti_sakla",
-        "calls.sesi_sakla",
-        "calls.bildirim_baslangic",
-        "calls.bildirim_hazir",
-        "calls.isleme_gorusme_disinda",
     }
 )
 
@@ -241,10 +179,6 @@ class SettingsStore:
         data["secret_set"] = self.has_secret("jira.secret")
         # Arayuz karti buna bakar: Windows disinda dugmeler pasif kalir.
         data["mail_supported"] = mail_supported()
-        # Teams arama gecmisi de yerel onbellek okur: ayni sart.
-        data["calls_supported"] = calls_supported()
-        # Gorusme kaydi: algilama ve WASAPI de yalnizca Windows'ta calisir.
-        data["gorusme_supported"] = gorusme_supported()
         return data
 
     def apply(self, payload: dict[str, Any]) -> None:

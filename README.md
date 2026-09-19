@@ -27,11 +27,9 @@ Güncel sürüm: **v0.10.7** (bkz. [Sürüm notları](#sürüm-notları)).
 | **Görevlerim** | Jira'dan bağımsız kişisel kanban: üç sütun, sürükle-bırak, son tarih rozetleri, Jira kaydına bağlanabilen kartlar. |
 | **Outlook e-postasından görev** (Windows) | Kimden / Kime / CC listelerine uyan postalar **Yapılacak** sütununa düşer; bir konuşmadan tek görev çıkar. |
 | **Teams'e mesaj** | Kayda iliştirilen kişilere tek tıkla mesaj: Graph API ve IT izni yok, `msteams:` derin bağlantısı. Gönder'e siz basarsınız. |
-| **Teams Aramalar** (Windows) | Teams'in yerel önbelleğinden okunan **kendi** arama geçmişiniz: liste, kişi kırılımı, istatistik şeridi, Excel. |
-| **Görüşme notları** (Windows) | Teams görüşmesi başlayınca mikrofonunuzu ve duyduğunuz sesi kaydeder; görüşme bitince arka planda yazıya döker ve Copilot CLI ile özetler. Not hazır olunca ses silinir; aksiyonlardan tek tıkla görev çıkar, not bir Jira kaydına bağlanır. |
 | **E-posta ile gönder** (Windows) | Grubun kayıtlarını seçili sütunlarla Excel'e çevirip şablonlu bir postaya ekler; Kime/CC şablondan gelir, posta Outlook'ta açılır ya da gönderilir. |
 | **Sefer** | Bitiş tarihi olan XP hedefi: görev kapatmak, kaydın filodan düşmesi ve durum geçişleri puan verir; rütbe, rozetler, haftalık emirler ve "ne için puan aldım" defteri (yanlış satır silinebilir). |
-| **Excel'e aktarma** | Gruplar, görevler, aramalar ve XP defteri için gerçek tarih/sayı hücreli, köprülü `.xlsx` dosyaları. |
+| **Excel'e aktarma** | Gruplar, görevler ve XP defteri için gerçek tarih/sayı hücreli, köprülü `.xlsx` dosyaları. |
 | **Tema** | Koyu Star Wars atmosferi: yıldız alanı, ışın kılıcı renkleri, açılış akışı — hepsi kapatılabilir. Dış kaynak, CDN, izleme yok. |
 
 ## Gereksinimler
@@ -39,10 +37,8 @@ Güncel sürüm: **v0.10.7** (bkz. [Sürüm notları](#sürüm-notları)).
 - Python 3.11 veya üstü (Windows tam paketi kendi Python'ını getirir, lite paket getirmez)
 - Jira Server / Data Center (kişisel erişim anahtarı destekleyen sürümler) veya Jira Cloud
 - Outlook ve Teams özellikleri yalnız **Windows**'ta çalışır; diğer her şey her yerde çalışır
-- Görüşme notlarının yazıya dökme paketi (**faster-whisper**) `requirements.txt`
-  içindedir, kurulumla birlikte gelir; özet üretmek isteniyorsa ayrıca
-  **Copilot CLI** gerekir; bkz.
-  [Görüşme notları](#görüşme-notları-yalnız-windows)
+- Ayarlar'daki **Copilot** kartı kurulu bir **Copilot CLI** arar; yoksa kart
+  "bulunamadı" der, başka hiçbir şeyi etkilemez
 
 ## Kurulum
 
@@ -81,7 +77,7 @@ oluşur. Klasörü taşırsanız verileriniz de gelir.
 **Yükseltme.** Yeni sürümü eski klasörün üstüne açtığınızda başlatıcılar
 `requirements.txt`in özetini yanlarında tuttukları özetle (`.venv/holocron-req.sha`)
 karşılaştırır; liste değiştiyse "Bagimliliklar guncelleniyor..." der ve eksik
-paketleri kurar — önce yanınızdaki `wheels/` (ve varsa `whisper-wheels/`)
+paketleri kurar — önce yanınızdaki `wheels/`
 klasöründen, olmazsa ağdan. Kurulum düşse bile uygulama yine açılır: eksik
 paket yalnızca kendi özelliğini kapatır ve bir uyarı satırı yazılır.
 
@@ -197,21 +193,7 @@ listelerinden en az birine adres yazın, klasörleri seçin. Ayrıntı:
 yönetirsiniz. Windows'ta **Rehberi Outlook'tan yenile** kurum adres listesini
 tek geçişte içeri alır. Ayrıntı: [Teams'e mesaj](#teamse-mesaj-kayıttan-tek-tıkla).
 
-### 5. Teams Aramalar
-
-Aynı kartın altındaki **Arama geçmişi** bölümünde önbellek klasörünü elle
-verebilir, Güncelle sonunda otomatik çekmeyi açabilirsiniz. Ayrıntı:
-[Teams Aramalar](#teams-aramalar-yalnız-windows).
-
-### 6. Görüşme notları (yalnız Windows)
-
-**Ayarlar → Görüşme notları** kartında aygıtları sınayın (**Deneme kaydı**),
-asgari süreyi ve özet modelini seçin, kurum vekili varsa **Copilot vekil
-sunucusu** alanını doldurun. Özet adımı "Copilot CLI bulunamadı" diyorsa
-**Copilot yolu** alanına `where copilot` çıktısını yazın. Ayrıntı:
-[Görüşme notları](#görüşme-notları-yalnız-windows).
-
-### 7. E-posta şablonları (gönderim)
+### 5. E-posta şablonları (gönderim)
 
 **Ayarlar → E-posta şablonları** kartında Kime/CC/konu/gövde birlikte saklanır
 ve gönderim kipi seçilir. Ayrıntı: [E-posta ile gönder](#e-posta-ile-gönder-yalnız-windows).
@@ -567,344 +549,9 @@ paketine girer (`requirements.txt` içinde `sys_platform == "win32"` işaretçis
 vardır), Linux zip'ine alınmaz. Ayrı bir `pywin32_postinstall` adımı
 **gerekmez**: `win32com` site-packages'tan olduğu gibi çalışır.
 
-### Teams Aramalar (yalnız Windows)
-
-Sol kenarda, **Görevlerim**'in altında duran **Teams Aramalar**, Teams
-istemcisinin *Aramalar → Geçmiş* ekranında zaten gördüğünüz **kendi** arama
-geçmişinizi yerelde tablo ve istatistik olarak gösterir. Yalnız iki tür vardır:
-**birebir** ve **grup** aramaları. (v0.9.0'da toplantı kavramı tümden kaldırıldı:
-takvim eşleşmesi de toplantı sohbetinden katılım türetme de düzgün
-çalışmıyordu, ikisi de koddan, veritabanından ve ekrandan çıktı.)
-
-> **Nereden okur.** Yeni Teams, sohbet/arama verisini kendi makinenizde bir
-> Chromium **IndexedDB** klasöründe tutar:
-> `%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView\WV2Profile_tfw\IndexedDB\https_teams.microsoft.com_0.indexeddb.leveldb`
-> (yanındaki `.blob` klasörüyle birlikte). Holocron o klasörü
-> **okur** — ağa çıkmaz, Graph API kullanmaz, izin istemez, hiçbir şey
-> göndermez. Bu düzenin nasıl göründüğü (hangi veritabanı, hangi store, hangi
-> alan adları) açık kaynak adli analiz araçlarının belgelediği yapıdır;
-> Holocron o yapıyı okur, tahmin etmez.
-
-Nasıl çalışır:
-
-- **Çekme.** **Aramaları çek** düğmesi klasörü önce `%TEMP%` altına kopyalar.
-  Kilitli dosyalarda önce normal okuma, olmazsa Windows'un paylaşımlı açma
-  bayrakları (`FILE_SHARE_READ|WRITE|DELETE`) denenir; yine açılamayan dosya
-  atlanır ve **türüyle** sayılır. Atlananlar arasında yazma günlüğü (`*.log`),
-  `MANIFEST` ya da `CURRENT` varsa kopya **eksik** sayılır ve **canlı klasör**
-  okunur (okuyucu salt okuma yapar, Teams'in verisine dokunmaz); o da
-  başarısız olursa kopyadan okunan sonuç bir uyarıyla birlikte gelir.
-  Özet balonu kaç kayıt okunduğunu, **en yeni aramanın tarihini**, kaçının yeni
-  olduğunu, kaç grup araması bulunduğunu ve okumanın kaç saniye sürdüğünü
-  söyler. Aynı önbelleği ikinci kez taramak kopya oluşturmaz: tekilleştirme
-  `callId` üzerindendir; silinmiş (`isDeleted`) kayıtlar hiç alınmaz.
-- **Ne okunur.** Önbellekte yüzden fazla veritabanı var; Holocron yalnızca
-  **ikisini** açar — `call-history-manager` (aramalar) ve `profiles`
-  (kimlik → ad). Seçim veritabanı adının ikinci segmentiyle **tam** eşleşir,
-  böylece `call-history-sync-state-manager` gibi kardeşler hiç açılmaz. Takvim
-  (`calendar`), sohbet (`conversation-manager`) ve toplantı sohbeti
-  (`replychain-manager`) veritabanları **artık hiç açılmaz**. Alan değerleri
-  büyük/küçük harfe duyarsız okunur (`twoParty` / `TwoParty`) ve `bytes`
-  olarak gelen adlar (Teams bazı dizgeleri öyle yazar) çözülür.
-- **Tür kuralı (birebir / grup).** `twoParty` **birebir**, `multiParty`
-  **grup** aramasıdır. Alan boşsa ya da tanınmayan bir değer taşıyorsa
-  katılımcı sayısına bakılır: **kendim hariç katılımcı birden fazlaysa grup**,
-  değilse birebir. Kendi kimliğiniz bilinmiyorsa kimse elenemez; o durumda
-  listenin kendisi sayılır (birebir aramada iki kişi vardır: siz ve karşı
-  taraf). Kendi kimliğiniz önbellekteki veritabanı adından
-  (`Teams:<rol>:react-web-client:<kiracı>:<kullanıcı>:<dil>`) türetilir ve
-  taramada saklanır; **Ayarlar → Teams → Kendi Teams kimliğim** alanına elle
-  yazarsanız ayar her zaman öne geçer.
-- **Gruplar katılımcı kümesidir.** Bir grubun kimliği **kendiniz hariç
-  katılımcıların sıralanmış kümesidir**: aynı kişilerle yapılan bütün grup
-  aramaları — hangi sohbetten başlatılmış olursa olsun — tek satırda toplanır.
-  Sohbet kimliği (`threadId` / `groupChatThreadId`) gruplamada kullanılmaz ve
-  grup adı önbellekten **aranmaz**: etiket katılımcı adlarından türer
-  ("Ali, Veli, Ayşe +2", adlar alfabetik sırada), tam liste satırın altında ve
-  ipucunda durur. Katılımcısı hiç kaydedilmemiş bir grup araması listede
-  "Grup araması" olarak görünür ama Gruplar sekmesine girmez (kimliği yoktur).
-- **Süre.** Kayıtta `durationInMs` varsa o, yoksa *bitiş − bağlanma*, o da
-  yoksa *bitiş − başlangıç*. Kaçırılan ve reddedilen aramanın süresi yoktur;
-  bunlar **temas süresine girmez**, ayrı sayılır.
-- **Karşı taraf.** Gelen aramada arayan, giden aramada aranan. Ad, Teams'in
-  profil/kişi store'larından çözülür; çözülemezse kaydın kendi adı kullanılır.
-  Bir kişiyle bir kez birebir görüştüyseniz adı, sonraki grup aramalarının
-  etiketinde de çıkar (ad sözlüğü kayıtlı satırlardan yeniden kurulur). Adı
-  çözülemeyen bir kimlik hiçbir yerde ham gösterilmez; "Bilinmeyen kişi (son
-  altı hane)" yazar.
-- **İstatistik şeridi: tam olarak dört kutu.**
-  1. **En çok görüşülenler** — birebir aramalarda, süreye göre ilk beş kişi.
-  2. **Grupta en çok görüşülenler** — grup aramalarına katılanlar; bir grup
-     aramasının süresi katılan **herkese** yazılır ("bu kişiyle aynı aramada ne
-     kadar bulundum"), kendiniz listede yoksunuz.
-  3. **Toplamda en çok görüşülenler** — birebir + grup toplamı, tek satırda.
-  4. **Dağılım** — birebir / grup payı: çubuk süreye göre, satırlar adet ve
-     süre, altında süre ve adet yüzdesi.
-  Kutulardaki bir isme tıklamak kişi çekmecesini açar. ("Toplam Teams" ve "iş
-  günü başına" kutuları v0.9.0'da kaldırıldı.)
-- **Sekmeler.** **Liste** her aramayı tarih, yön (↗ / ↙), karşı taraf ya da
-  grup etiketi, tür, durum ve süreyle gösterir. **Kişiler** aynı pencereyi kişi
-  başına toplar (sayı, süre, giden/gelen, kaçırılan). **Gruplar** her grubu bir
-  satırda verir: etiket ve tam katılımcı listesi, arama sayısı, toplam süre,
-  son arama tarihi ve kişi sayısı. Üçünde de başlığa tıklayarak sıralanır.
-- **Gruba tıklayınca** Liste sekmesi yalnız o grubun aramalarını gösterir;
-  araç çubuğunda "Grup: …" şeridi çıkar, ✕ ile kalkar. Süzgeç uca da geçer:
-  `GET /api/calls/view?days=30&group=<kimlik>`.
-- **Çekmece.** Kişi satırına ya da listede bir ada tıklamak sağdan kişi
-  çekmecesini açar: özet (toplam süre, sayı, giden/gelen, kaçırılan, en uzun,
-  grup araması süresi, son görüşme), o kişiyle bütün birebir görüşmeler ve
-  ortak grup aramaları. Grup aramasının çekmecesi katılanları listeler ve
-  "Bu grubun aramaları" düğmesiyle listeyi süzer.
-- **Hız.** Pencere değiştirmek, arama kutusuna yazmak ve gruba tıklamak
-  **hiçbir zaman** Teams önbelleğini okumaz: ekranın tamamı tek bir SQLite
-  sorgusundan gelir (`GET /api/calls/view?days=&q=&group=` — liste, kişiler,
-  gruplar ve istatistik aynı yanıtta). Önbelleği yalnızca **Aramaları çek**
-  açar.
-- **Pencere.** 7 / 30 / 90 gün. Arama kutusu (`/` kısayolu) kişi adı ve
-  katılımcı adları üzerinde süzer.
-- **Excel.** **Excel'e aktar** dört sayfalık bir dosya verir: **Aramalar**,
-  **Kişiler**, **Gruplar**, **İstatistik**. Ekranda ne süzdüyseniz o iner.
-  Doğrudan da indirilebilir: `GET /api/calls/export.xlsx?days=30`
-- **Ayarlar.** **Ayarlar → Teams → Arama geçmişi** altında önbellek klasörünü
-  elle verebilir, kendi Teams kimliğinizi yazabilir ve **Güncelle** işinin
-  sonunda otomatik çekmeyi açabilirsiniz (varsayılan kapalı: kopyalama birkaç
-  saniye sürüyor).
-
-Windows dışında ekran açılır ama **Aramaları çek** pasiftir ve uçlar
-`feature_unavailable` döner. IndexedDB okuyucusu (`ccl_chromium_reader`)
-`app/vendor/` altında taşınır, `pip` gerektirmez ve yalnızca çağrı anında
-yüklenir.
-
-### Görüşme notları (yalnız Windows)
-
-Teams'de bir görüşme başladığında Holocron **mikrofonunuzu** ve **duyduğunuz
-sesi** (hoparlör döngüsü) iki ayrı dosyaya kaydeder. Görüşme bitince kayıt
-kuyruğa girer; arka planda **sırayla** birleştirilir, yazıya dökülür, Copilot
-CLI ile özetlenir ve not kaydedilir. Ses ve transkript (ayar aksini
-söylemedikçe) o anda silinir. Notlara **Aramalar → Görüşme notları**
-sekmesinden ulaşırsınız.
-
-Hiçbir şey dışarı gitmez: ses de transkript de yalnızca sizin makinenizde
-işlenir, özet için yalnızca sizin kendi Copilot CLI oturumunuz kullanılır.
-
-**Nasıl çalışır**
-
-1. **Algıla.** İki saniyede bir Windows'un mikrofon izin defterine bakılır
-   (`ConsentStore\microphone`): Teams'in `LastUsedTimeStop` değeri sıfırsa
-   mikrofon o an kullanımdadır. Paketli yeni Teams ve klasik `ms-teams.exe`
-   ikisi de tanınır. Yedek sinyal Teams'in ses oturumudur (pycaw).
-2. **Kaydet.** WASAPI ile iki kanal, 16 kHz mono WAV, parça parça:
-   `…\Holocron\gorusme\<YYYYAAGG-SSDDSS>\mik-01.wav`, `hop-01.wav`.
-   Görüşme içinde aygıt değişirse kayıt **yeni parça** olarak sürer
-   (`mik-02.wav`); parçalar sonra zaman sırasıyla birleşir.
-3. **Kuyruğa al.** Görüşme biter bitmez satır "kuyrukta" olur. Aynı anda tek
-   iş işlenir; siz yeni bir görüşmeye girerseniz o da kuyruğa eklenir.
-4. **Birleştir.** Parçalar kanal bazında tek dosyaya eklenir (stdlib `wave`,
-   ffmpeg gerekmez).
-5. **Yazıya dök.** faster-whisper, CPU, `int8`. İki kanal ayrı çevrilir ve
-   zaman damgasıyla harmanlanır: mikrofon kanalı **Sen**, diğer kanal **Karşı
-   taraf**. Grup aramasında karşı taraf tek kanaldır, kişi ayrımı yoktur;
-   adlar katılımcı listesinden bilinir.
-6. **Özetle.** Transkript dosya olarak Copilot CLI'ye verilir
-   (`copilot --model <model> -p "<istem>" --allow-tool=read`), cevap JSON
-   döner: başlık, özet, kararlar, aksiyonlar, açık sorular.
-7. **Temizle.** Not kaydedilir, ses silinir, bildirim düşer.
-
-**Takip anahtarı.** Sekmenin üstündeki şeritte durur. Duraklatılmışken hiçbir
-şey kaydedilmez ve şerit solar. Ayarlarda "Takip açılışta açık gelsin" açıksa
-uygulama her açılışta takibi açar. **Asgari görüşme süresi** (varsayılan 4 dk)
-altındaki görüşmeler hiç işlenmez, listede "atlandı" satırı kalır.
-
-**Katılımcılar.** Notun zaman aralığı Teams arama geçmişiyle eşleştirilir
-(başlangıç ±3 dakika ve süre yakınlığı). Önbellek henüz çekilmediyse not
-"katılımcı bekleniyor" der; bir sonraki **Aramaları çek**te kendiliğinden
-dolar.
-
-**Not detayı.** Dört bölüm sabittir: Özet, Kararlar, Aksiyonlar, Açık sorular.
-Her aksiyonun yanındaki **Görev yap** düğmesi Görevlerim'e kart açar (metin,
-kişi, son tarih ve nota bağ ile; not bir Jira kaydına bağlıysa kart da o kayda
-bağlanır). Not tek bir Jira kaydına bağlanır; bağlı kaydın detayında
-**Görüşme notları (n)** bölümü açılır, Kişiler çekmecesinde de o kişiyle
-yapılan görüşmelerin notları görünür. **Yeniden özetle** yalnızca transkript
-saklanıyorsa çalışır. Excel'e aktarımda ayrı bir **Görüşme notları** sayfası
-vardır.
-
-**Hata.** Bir aşama düşerse satır "hata" olur, **ses silinmez** ve **Yeniden
-dene** aynı klasörden devam eder. Uygulama işleme ortasında kapanırsa yarım iş
-bir sonraki açılışta kuyruğa geri alınır.
-
-**Bağımlılıklar**
-
-| Paket | Ne için | Nasıl gelir |
-| --- | --- | --- |
-| `pyaudiowpatch` | WASAPI kaydı ve hoparlör döngüsü | Windows paketiyle birlikte (`requirements.txt`) |
-| `winotify` | Windows bildirimi | Windows paketiyle birlikte; yoksa bildirim sessizce atlanır |
-| `pycaw` | Teams'in ses oturumundan aygıt bulma | İsteğe bağlı; yoksa Windows varsayılan aygıtları kullanılır |
-| `faster-whisper` | Yazıya dökme | `requirements.txt` ile birlikte (Windows); gelmezse Ayarlar'daki düğme kurar |
-| Copilot CLI | Özet | Zaten kuruluysa kullanılır; bulunamazsa **Copilot yolu** alanı |
-
-**faster-whisper kurulumu.** v0.10.1'den beri paket `requirements.txt`
-içindedir (`sys_platform == "win32"` işaretiyle): tam pakette hazır gelir, lite
-pakette ilk çalıştırmada `wheels/` klasöründen kurulur ve eski bir kurulumun
-üstüne açtığınızda başlatıcı onu kendiliğinden ekler.
-
-Yine de eksik kalabilir: kurumsal vekil PyPI'yi kesiyorsa ya da pakete
-v0.10.1'den önce girmiş bir `.venv` kullanıyorsanız. O durumda üç yol var:
-
-1. **Ayarlar → Görüşme notları → Yazıya dökme paketini kur.** Düğme `pip`i alt
-   süreçte çalıştırır: önce yanınızdaki `wheels/` ve `whisper-wheels/`
-   klasörlerini dener, olmazsa ağa çıkar. Vekil adresi (aynı karttaki *Copilot
-   vekil sunucusu* alanı) yalnızca o alt sürecin ortamına yazılır, Holocron'un
-   Jira bağlantısı "doğrudan bağlan" kipinde kalır. Paket gelince kuyrukta
-   "hata: faster-whisper yok" diye bekleyen satırlar kendiliğinden yeniden
-   denenir (ses silinmemiştir).
-2. **Vekil PyPI'yi kesiyorsa** release sayfasındaki
-   `holocron-windows-whisper.zip` dosyasını indirin ve Holocron klasörüne
-   açın: yanında `whisper-wheels/` klasörü oluşur. Bundan sonra hem başlatıcı
-   hem de yukarıdaki düğme paketi o klasörden, ağa hiç çıkmadan kurar.
-3. **Elle:**
-
-```bat
-rem Holocron klasorunde:
-.venv\Scripts\python -m pip install --no-index --find-links whisper-wheels faster-whisper
-rem ya da ag aciksa:
-.venv\Scripts\python -m pip install faster-whisper
-```
-
-**Model dosyası.** Model (ör. `small`, ~250 MB) ilk çalıştırmada Hugging
-Face'ten iner. Kurum vekili bunu kesiyorsa modeli ağa çıkmadan yanınızda
-taşıyabilirsiniz:
-
-1. Release sayfasındaki `holocron-whisper-model-small.zip` dosyasını indirin ve
-   **açın**: içinden `faster-whisper-small\` klasörü çıkar (`model.bin`,
-   `config.json`, `tokenizer.json`, `vocabulary.txt`).
-2. Klasörü istediğiniz yere kopyalayın (ör. `D:\modeller\faster-whisper-small`).
-3. Yolunu **Ayarlar → Görüşme notları → Model klasörü** alanına yazın ve
-   kaydedin. **Klasörün içinde `model.bin` olmalı.** Hem açılmış model
-   klasörünün kendisi (`D:\modeller\faster-whisper-small`) hem de onun üst
-   klasörü (`D:\modeller`, içinde `small\` ya da `faster-whisper-small\`)
-   kabul edilir; elinizde Hugging Face önbelleği varsa
-   (`models--Systran--faster-whisper-small\snapshots\...`) önbellek kökünü
-   yazabilirsiniz.
-4. **Modeli sına** düğmesi modeli yüklemeyi dener ve `hazır: <yol>, N sn` ya da
-   tek satırlık hatayı yazar. Kuyruğu bloklamaz, kaydetmeden de çalışır.
-
-Bu alan doluyken Holocron **ağa hiç çıkmaz**: klasörde model yoksa dakikalarca
-zaman aşımı beklemek yerine anında "Model klasöründe model.bin bulunamadı:
-`<yol>`" der. Alan boşsa eski davranış sürer, model Hugging Face'ten iner.
-
-**Copilot CLI ve vekil sunucu.** Kurumda Copilot vekil sunucudan çıkarken Jira
-doğrudan görülebiliyorsa (Holocron'un ağ ayarında "doğrudan bağlan"), vekili
-Holocron'un kendi sürecine yazmak Jira bağlantısını koparır. Bu yüzden vekil
-adresi **Ayarlar → Görüşme notları → Copilot vekil sunucusu** alanında ayrı
-durur: terminalde `set HTTPS_PROXY=...` ile yazdığınız adresi buraya yazın.
-Değer yalnızca Copilot alt sürecinin ortamına konur (`HTTPS_PROXY`,
-`HTTP_PROXY` ve küçük harfli eşleri), Jira sunucusu da o alt sürecin
-muafiyet listesine (`NO_PROXY`) eklenir. Holocron'un kendi istekleri ve Jira
-istemcisinin davranışı hiç değişmez. **Copilot'u sına** düğmesi seçili model
-ve vekille kısa bir istek atar — modelden küçücük bir JSON'u (`{"hazir":
-true}`) dosyaya yazmasını ister, yani özet adımının **tam aynı yolunu**
-yürür; model reddedilirse yedek sıradaki denenir ve çalışan model "son
-çalışan" olarak saklanır. Başarısız olursa Copilot'un ham çıktısının son
-400 karakteri ekranda görünür.
-
-**Hangi model?** Copilot CLI hesap başına farklı modelleri açar; sahadan 19
-Eylül 2026'da gelen örnekte `gpt-5`, `claude-sonnet-4.5` ve `gpt-4.1` "Model
-"gpt-4.1" from --model flag is not available" diyerek reddedildi, oysa aynı
-hesapta `claude-sonnet-5` ve `gpt-5-mini` (yedeği `claude-haiku-4.5`)
-çalışıyordu. Bu yüzden varsayılan **özet modelleri** sırası artık
-`claude-sonnet-5, gpt-5-mini, claude-haiku-4.5, claude-sonnet-4.5, gpt-5`
-olarak geliyor: önce hesabınızda çalışması beklenen modeller denenir, eski
-adlar yedekte kalır. **Ayarlar → Görüşme notları → Özet modelleri** alanına
-virgülle kendi sıranızı yazabilirsiniz; daha önce bir sıra kaydettiyseniz o
-sıra hiç değişmez, bu yeni varsayılan yalnızca ayar hiç yazılmamış
-kurulumlarda geçerlidir. Bir model reddedilirse hata metninde reddedilen
-modellerin tümü tek satırda listelenir (ör. "Copilot modelleri reddetti:
-gpt-5, claude-sonnet-4.5, gpt-4.1 — Ayarlar'dan hesabında olan bir model
-seçin (ör. claude-sonnet-5).").
-
-**Copilot nerede aranır?** Holocron `pythonw.exe` ile açıldığı için
-terminalinizin PATH'ini görmeyebilir: npm'in global klasörü çoğu kez yalnızca
-kullanıcı PATH'indedir ve o PATH oturum açıldıktan sonra değişmiş olabilir.
-Bu yüzden Copilot sırayla aranır:
-
-1. **Ayarlar → Görüşme notları → Copilot yolu** alanı (boş = otomatik),
-2. sürecin `PATH`i (`PATHEXT` ile `.cmd`/`.exe` çözülür),
-3. Windows'un bilinen yerleri: `%APPDATA%\npm\copilot.cmd`, WinGet bağlantıları,
-   `%ProgramFiles%\GitHub Copilot CLI\copilot.exe`, `%USERPROFILE%\.local\bin`,
-4. kayıt defterinden **taze okunan** kullanıcı ve makine PATH'i.
-
-Hiçbiri tutmazsa hata metni denenen yerleri tek tek sayar. Çözüm: komut
-isteminde `where copilot` yazıp çıkan tam yolu (`.cmd` ya da `.exe`
-uzantısıyla) **Copilot yolu** alanına yapıştırın; **Copilot'u sına** o alanı da
-kullanır ve başarıda bulunan yolu gösterir. npm kurulumunun bıraktığı
-`copilot.cmd` Windows'ta doğrudan çalıştırılamaz (`CreateProcess` `.cmd`
-açamaz), Holocron onu `cmd.exe /c` ile çağırır ve istem metnini komut satırına
-koymaz — transkriptin yanına dosya olarak yazıp modele okutur, böylece
-istemdeki tırnak veya `%` komutu bölemez.
-
-**Özet cevabı dosyadan alınır.** Copilot programatik kipte (`-p`) ekrana
-yalnızca cevabı basmaz: banner, ilerleme satırları, araç kullanım dökümü ve
-ANSI renk kodları da aynı akışa karışır, cevabın kendisi markdown içinde ya
-da `stderr`'de kalabilir. Bu yüzden istem modelden JSON'u **transkriptin
-yanındaki `ozet.json` dosyasına yazmasını** ister ve Holocron cevabı oradan
-okur (UTF-8, BOM'a toleranslı, ANSI yok). Copilot bu yüzden
-`--allow-tool=read --allow-tool=write` ile çağrılır: okuma izni transkript,
-yazma izni cevap dosyası içindir. Dosya oluşmadıysa **yedek yol** devreye
-girer — `stdout` ile `stderr` birleştirilir, ANSI kaçış dizileri temizlenir
-ve metnin içinden (kod bloğundan ya da düz metinden) JSON çekilir. `ozet.json`
-okunduktan sonra silinir, önceki koşudan kalan dosya da çağrıdan önce
-temizlenir. Copilot 15 dakikada (sınamada 5 dakikada) bitmezse iş
-"Copilot 900 sn'de bitmedi" diyerek düşer, ses silinmez.
-
-**Aygıt kuralı.** Varsayılan **otomatik**tir: Teams'in ses oturumunun açık
-olduğu mikrofon ve çıkış kullanılır, bulunamazsa Windows'un varsayılan
-iletişim aygıtları. Ayarlardan sabitleyebilirsiniz. VDI'da sanal aygıtların
-hangisinin ses taşıdığını görmek için **Deneme kaydı (10 sn)** düğmesi vardır:
-iki kanalı da kaydeder ve kanal başına tek satır yazar —
-
-```
-Mikrofon: Remote Audio — açıldı, 156672 çerçeve, ses var
-Duyduğum ses: Hoparlör (döngü) — açıldı, 0 çerçeve — hoparlör: veri gelmedi (10 sn). Kayıt sırasında bir ses çalın.
-```
-
-Satırda aygıtın adı, açılıp açılmadığı, kaç çerçeve geldiği ve ses olup
-olmadığı durur; altında ne yapılacağı yazar (aygıtı sabitleyin, bir ses
-çalın). Düğme hiçbir durumda hata sayfası göstermez: sürücü patlasa bile
-ekranda sebebin metni belirir.
-
-**Döngü kanalı neden sessiz kalır?** WASAPI'nin döngü aygıtı, hoparlörden ses
-**çıkmıyorken** tek çerçeve üretmez. Bu yüzden deneme kaydı boyunca Holocron
-hoparlöre duyulmayacak seviyede (-60 dB) bir sinyal çalar; döngü akar ve
-"açıldı, N çerçeve" satırı gerçeği gösterir. Ses çıkışı yoksa bu adım sessizce
-atlanır, deneme yine çalışır.
-
-**Saklama.** Varsayılan: not hazır olunca ses de transkript de silinir.
-"Transkripti sakla" açıksa transkript veritabanında kalır ve **Yeniden
-özetle** çalışabilir. "Ses dosyalarını sakla" açıksa klasör silinmez (disk
-dolar, bilerek açın).
-
-**Sorun giderme**
-
-| Belirti | Sebep / çözüm |
-| --- | --- |
-| Şeritte "Görüşme kaydı yalnız Windows'ta çalışır" | Windows dışındasınız; ekran çalışır, kayıt yapılmaz |
-| Kayıt hiç başlamıyor | Takip duraklatılmış olabilir; Teams mikrofon izni kapalıysa defter güncellenmez — Ayarlar'da aygıtı sabitleyip **Deneme kaydı** ile sınayın |
-| Satır "hata: faster-whisper yok" | Paket kurulu değil: **Ayarlar → Görüşme notları → Yazıya dökme paketini kur** (ya da başlatıcıyı yeniden çalıştırın). Paket gelince bekleyen satırlar kendiliğinden yeniden denenir; ses silinmemiştir |
-| Sekmenin tepesinde "Yazıya dökme paketi eksik" şeridi | Aynı sebep; şerit kapatılabilir, paket gelince kendiliğinden kalkar |
-| Satır "hata: Özet alınamadı" | Copilot CLI oturumu kapalı ya da vekil yanlış; **Copilot'u sına** ile bakın |
-| Satır "hata: Özet alınamadı: Model JSON döndürmedi. Ham çıktı (son 400 karakter): …" | Model cevabı `ozet.json` dosyasına yazamadı ve ekrana da geçerli JSON basmadı. Hata metninin sonundaki ham çıktı ne dediğini söyler; tamamı için `holocron.log` dosyasına bakın (`Özet JSON'u çıkmadı` satırı, stdout ve stderr'in son 2000 karakteri, parola/anahtar benzeri diziler maskeli). Sık sebep: modelin araç izni reddedilmiş (o durumda hata "Copilot dosyaya yazma izni vermedi" der) ya da özet şablonunu elle değiştirip `{cikti}` yer tutucusunu silmişsiniz — **Ayarlar → Görüşme notları → Özet şablonu** alanını boşaltıp varsayılana dönün. Ses ve transkript silinmemiştir: düzeltince **Yeniden dene** |
-| Satır "hata: Özet alınamadı: Copilot CLI bulunamadı" | Uygulama `pythonw.exe` ile açıldığı için terminalinizin PATH'ini görmüyor: komut isteminde `where copilot` yazın ve çıkan tam yolu (`.cmd`/`.exe`) **Ayarlar → Görüşme notları → Copilot yolu** alanına yapıştırıp **Copilot'u sına** deyin. Hata metni nerelere bakıldığını sayar |
-| Copilot çalışırken (veya paket kurulurken) ekranda kısa süreliğine boş bir konsol penceresi açılıyor | v0.10.6'dan önceki sürümlerde görülen bir Windows davranışı: konsolsuz açılan Holocron alt süreç başlattığında Windows kendiliğinden pencere açıyordu. v0.10.6 alt süreçleri `CREATE_NO_WINDOW` ile başlatır, pencere hiç açılmaz; hâlâ görüyorsanız güncelleyin |
-| "katılımcı bekleniyor" kalıyor | Arama geçmişi henüz çekilmemiş: **Aramaları çek** |
-| Hoparlör kanalı sessiz | Döngü aygıtı yanlış seçilmiş: Ayarlar'da "Duyduğum ses" aygıtını sabitleyin |
-| Deneme kaydında "veri gelmedi" | Aygıt açıldı ama tek çerçeve göndermedi (VDI'nın sanal aygıtı, ses çalınmayan döngü): aygıtı Ayarlar'da sabitleyin, döngü için kayıt sırasında bir ses çalın |
-| Satır "hata: Ses alınamadı (mikrofon: veri gelmedi)" | Görüşme kaydedildi ama kanallardan veri gelmedi; ses klasörü durur, aygıtı sabitleyip **Deneme kaydı** ile sınayın, sonra **Yeniden dene** |
-| Görüşme sırasında makine yavaşlıyor | "İşleme yalnız görüşme dışında çalışsın" seçeneğini açık tutun |
-
 ### Sağ çekmeceleri genişletme
 
-Bütün sağ çekmecelerin (kayıt detayı, Teams aramaları) sol kenarında ince bir
+Bütün sağ çekmecelerin sol kenarında ince bir
 tutamaç vardır: sürükleyerek genişliği değiştirirsiniz. En az 360 piksel, en
 çok ekranın %90'ı (ya da 1400 piksel). Ölçü tarayıcıda saklanır ve bir sonraki
 açılışta uygulanır; **çift tıklamak** varsayılan 440 piksele döner. Tutamaç
@@ -1029,10 +676,10 @@ Holocron bir istemcidir; kendi sunucusu, hesabı, bulutu yoktur.
 
 - **Her şey yerelde.** Sunucu yalnız `127.0.0.1` dinler. Dışarıya çıkan tek
   trafik sizin tanımladığınız **Jira** adresidir. Teams ve Outlook özellikleri
-  ağa hiç çıkmaz: biri işletim sistemine bir adres verir, diğerleri makinenizdeki
-  COM oturumunu ve yerel önbelleği okur.
+  ağa hiç çıkmaz: biri işletim sistemine bir adres verir, diğeri makinenizdeki
+  COM oturumunu okur.
 - **`holocron.db`** bütün verinizi taşır: gruplar, kayıtların ham JSON'u, yerel
-  alanlar ve geçmişleri, görevler, kişiler, şablonlar, arama geçmişi. Yedeği
+  alanlar ve geçmişleri, görevler, kişiler, şablonlar. Yedeği
   dosyayı kopyalamaktır.
 - **`holocron.key`** Jira token'ınızı şifreleyen anahtardır, yalnız sahibine
   okunur izinle oluşturulur. **Kaybederseniz kayıtlı token çözülemez**; Ayarlar
@@ -1131,27 +778,6 @@ Hata mesajı sebebi söyler: adı çözülemedi (DNS), kapı reddedildi, TCP
 kurulamadı, vekil sunucuya ulaşılamadı, sertifika doğrulanamadı. Daha
 ayrıntısı için **Ayarlar → Ağ → Teşhis**.
 
-### Teams aramalarında son günler gelmiyor
-
-Eski aramalar geliyor ama son birkaç günün kayıtları yoksa sebep neredeyse
-her zaman **kilitli yazma günlüğüdür**: LevelDB yeni kayıtları önce `*.log`
-dosyasına yazar, sıkıştırılmış `.ldb` dosyalarına sonra taşır. Teams açıkken o
-`.log` dosyası kilitlidir; kopyalanamazsa en yeni aramalar da gelmez.
-
-Sırayla:
-
-1. **Teams'te Aramalar → Geçmiş ekranını açın** ve biraz aşağı kaydırın.
-   İstemci kayıtları oraya yazar; hiç açmadıysanız yerel önbellekte de
-   olmayabilirler.
-2. **Teams'i tamamen kapatın** (bildirim alanındaki simgeden Çıkış) ve
-   **Aramaları çek**'e yeniden basın. Balon "Teams açıkken N dosya
-   kopyalanamadı" diyorsa sorun budur.
-3. Balondaki **en yeni** tarihine bakın: beklediğiniz günü gösteriyorsa veri
-   gelmiştir, pencereyi (7/30/90 gün) kontrol edin.
-4. Hâlâ gelmiyorsa `tools/teams_probe/probe.py` sondasını çalıştırın; çıktı
-   hangi veritabanında kaç kayıt olduğunu ve tarih aralığını yazar (kişisel
-   değer içermez, paylaşılabilir).
-
 ### Gönderilen postada imza kayboldu ya da tablo bozuk görünüyor
 
 Holocron postayı önce görünmez bir pencerede açar (imzayı Outlook orada
@@ -1215,11 +841,10 @@ python3 -m venv .venv
 .venv/bin/pytest -q
 ```
 
-Testler gerçek Jira'ya, gerçek Outlook'a ya da gerçek Teams önbelleğine
-**çıkmaz**: `requests` oturumu sahte bir sunucuyla değiştirilir
-(`tests/fake_jira.py`), posta kaynağı/göndericisi ve arama kaynağı bellek içi
-sahtelerle (`app/mail/fake.py`, `app/teamscalls/fake.py`) takılır. Her test
-kendi geçici veri klasöründe çalışır.
+Testler gerçek Jira'ya ya da gerçek Outlook'a **çıkmaz**: `requests` oturumu
+sahte bir sunucuyla değiştirilir (`tests/fake_jira.py`), posta kaynağı ve
+göndericisi bellek içi sahtelerle (`app/mail/fake.py`) takılır. Her test kendi
+geçici veri klasöründe çalışır.
 
 ### Paketleme
 
@@ -1250,19 +875,6 @@ pip download --only-binary=:all: --python-version 3.13 \
 
 Linux paketinde `pywin32` tekerlekleri `wheels/` klasörüne kopyalanmaz.
 
-`pyaudiowpatch`, `winotify` ve `faster-whisper` (görüşme kaydı, bildirimi ve
-yazıya dökme) `requirements.txt` içinde `sys_platform == "win32"` işaretiyle
-durur, yani Windows paketine kendiliğinden girer, Linux paketini şişirmez.
-`faster-whisper` ile `ctranslate2` birkaç yüz megabayt tuttuğu için Windows
-zip'leri v0.10.1 ile belirgin biçimde büyümüştür.
-
-Aynı tekerlekler ayrıca `holocron-windows-whisper.zip` olarak da yayımlanır:
-zip'in içinde `whisper-wheels/` klasörü vardır, kullanıcı onu Holocron
-klasörüne açar ve başlatıcılar (`--find-links whisper-wheels`) ile uygulama
-içindeki kurulum düğmesi o klasörden, ağa çıkmadan kurar. O sürüm için cp313
-tekerleği yoksa hem bu adım hem de ana indirmenin whisper kısmı sessizce
-atlanır: iş düşmez, paket whisper'sız çıkar ve README elle kurulumu anlatır.
-
 ### Sürüm çıkarma
 
 Sürüm numarası iki dosyada durur ve **aynı olmak zorundadır**:
@@ -1275,13 +887,6 @@ yanlış numaralı bir release çıkmaz.
 ```bash
 git tag v0.7.3 && git push origin v0.7.3
 ```
-
-### Teams sondası
-
-`tools/teams_probe/probe.py` saf Python'dur, tekerlek istemez ve uygulama
-paketlerine girmez; kendi zip'iyle release'e eklenir. Çıktısı hangi
-veritabanında kaç kayıt olduğunu ve tarih aralığını söyler, kişisel değer
-taşımaz.
 
 ## Dosya düzeni
 
@@ -1298,7 +903,7 @@ taşımaz.
 | `app/tasks.py` | Görev panosunun kurulması (sütunlar, son tarih durumu) |
 | `app/teams.py` | Teams derin bağlantısı ve şablon çözümü (saf mantık) |
 | `app/desktop.py` | Adresi işletim sistemine açtırır (`msteams:` protokolü dahil) |
-| `app/export.py` | Grup / görev / arama → Excel (.xlsx) dosyası |
+| `app/export.py` | Grup / görev / XP defteri → Excel (.xlsx) dosyası |
 | `app/refresh.py` | Arka planda çalışan Güncelle işi |
 | `app/mail/` | Outlook'tan görev üretme (kaynak sözleşmesi, COM sarmalayıcı, iş mantığı) |
 | `app/mail/intake.py` | Eşleştirme, tekilleştirme, görev üretimi (COM'dan bağımsız) |
@@ -1310,26 +915,18 @@ taşımaz.
 | `app/gamify.py` | Sefer motoru: XP kuralları, rütbe, rozet, emir, seri (saf mantık) |
 | `app/gamify_repo.py` | Seferler, XP defteri, kurallar, rozetler, emirler, seri (SQL) |
 | `app/api_gamify.py` | Sefer uçları (ayrı router) |
-| `app/teamscalls/` | Teams arama geçmişi (kaynak sözleşmesi, önbellek okuyucu, iş mantığı) |
-| `app/teamscalls/intake.py` | Normalize, tür kararı, gruplar, istatistik (IndexedDB'den bağımsız) |
-| `app/teamscalls/teams_cache.py` | Teams'in yerel IndexedDB önbelleği (yalnız Windows) |
-| `app/vendor/` | Kurulum gerektirmeyen IndexedDB okuyucusu (MIT, `app/vendor/README.md`) |
+| `app/copilot.py` | Copilot CLI'yi bulma, çağırma, sınama (genel yardımcı) |
 | `app/static/` | Vanilla HTML/CSS/JS arayüz, dış bağımlılık yok |
 | `app/static/fonts/` | Gömülü OFL yazı tipleri ve lisans metinleri |
 | `app/static/js/starfield.js` | Arka plandaki yıldız alanı (canvas) |
-| `app/static/js/calls.js` | Teams Aramalar ekranı (dört kutuluk şerit, Liste/Kişiler/Gruplar, çekmece) |
 | `app/static/js/addressbox.js` | Ortak adres kutusu: çipler, tamamlama, ayrıştırma |
 | `app/static/js/mailsend.js` | "E-posta ile gönder" penceresi |
 | `app/static/js/mailsend-settings.js` | Ayarlar → E-posta şablonları kartı |
 | `app/static/js/campaign.js` | Sefer paneli (kahraman şeridi, emirler, rozetler, defter) |
 | `app/static/js/campaign-settings.js` | Ayarlar → Sefer kartı (XP kuralları, koruma durumu) |
 | `app/static/img/gamify/` | Rütbe ve rozet görselleri (yoksa SVG hologram yedeği) |
-| `app/gorusme/` | Görüşme notları: algılama, kayıt, kuyruk, yazıya dökme, özet |
-| `app/static/js/gorusme.js` | Görüşme notları sekmesi, takip şeridi, not çekmecesi |
-| `app/static/js/gorusme-settings.js` | Ayarlar → Görüşme notları kartı |
 | `tests/` | pytest testleri, sahte Jira sunucusu |
 | `tools/build_portable.py` | Taşınabilir Windows/Linux paketlerini üretir |
-| `tools/teams_probe/` | Teams önbellek sondası (paketlere girmez) |
 | `holocron.db` | Yerel veritabanı (depoya girmez) |
 | `holocron.key` | Şifreleme anahtarı (depoya girmez, yedekleyin) |
 | `holocron.log` | Çalışma günlüğü (1 MB × 3, depoya girmez) |

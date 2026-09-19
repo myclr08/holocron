@@ -55,12 +55,10 @@ req_hash() {
   return 0
 }
 
-# Yanimizda gelen tekerlekler: wheels/ tam liste, whisper-wheels/ yaziya
-# dokme paketi. Bos donerse kurulum agdan gider.
+# Yanimizda gelen tekerlekler (wheels/). Bos donerse kurulum agdan gider.
 find_links() {
   links=""
   if [ -d "wheels" ]; then links="$links --find-links wheels"; fi
-  if [ -d "whisper-wheels" ]; then links="$links --find-links whisper-wheels"; fi
   if [ -n "$links" ]; then printf '%s' "--no-index$links"; fi
   return 0
 }
@@ -72,8 +70,8 @@ write_stamp() {
 }
 
 # Her acilista: requirements.txt degistiyse (surum yukseltmesi, sonradan
-# eklenen faster-whisper) bagimliliklar tazelenir. Kurulum dusse bile
-# uygulama ACILIR; eksik paket yalnizca ilgili ozelligi kapatir.
+# eklenen paket) bagimliliklar tazelenir. Kurulum dusse bile uygulama
+# ACILIR; eksik paket yalnizca ilgili ozelligi kapatir.
 sync_deps() {
   hash_now="$(req_hash)"
   if [ -z "$hash_now" ]; then return 0; fi

@@ -82,18 +82,6 @@ WINDOWS_ONLY_WHEELS = {
 # Windows'a ozel paketler Linux zip'ine girmez (bos yer, yanlis izlenim).
 LINUX_EXCLUDED_WHEEL_PREFIXES = ("pywin32-", "pywin32_ctypes-", "pypiwin32-")
 
-# Teams yapi sondasi ayri bir zip'tir: tek seferlik bir tanilama araci,
-# uygulamanin parcasi degil. Lite/tam pakete GIRMEZ (`EXCLUDED_FROM_PACKAGE`
-# zaten `tools`u disariyor), kendi zip'iyle release'e eklenir.
-PROBE_ZIP_NAME = "holocron-teams-probe.zip"
-PROBE_DIR_NAME = "holocron-teams-probe"
-PROBE_SOURCE = "tools/teams_probe"
-# Sonda okuyucuyu `app/vendor/` altindan paylasir; zip kendi kopyasini tasir
-# ki tek basina calissin.
-PROBE_VENDOR_SOURCE = "app/vendor"
-PROBE_CONTENT = ("probe.py", "README.md")
-
-
 def zip_name(target: str, variant: str = VARIANT_FULL) -> str:
     suffix = "-lite" if variant == VARIANT_LITE else ""
     return f"holocron-{target}-x64{suffix}.zip"
@@ -106,34 +94,6 @@ def manifest(target: str, variant: str = VARIANT_FULL) -> list[str]:
     if target == TARGET_WINDOWS and variant == VARIANT_FULL:
         entries.append("python-embed/")
     return sorted(entries)
-
-
-def probe_manifest() -> list[str]:
-    """Sonda zip'inin kokunde ne olacak? Test bu listeyi okur."""
-    return sorted([*PROBE_CONTENT, "vendor/"])
-
-
-def build_probe(dist: Path) -> Path:
-    """`dist/holocron-teams-probe.zip`: probe.py + vendor + README.
-
-    Vendor deposunda `app/vendor/` altinda durur (uygulama da ayni okuyucuyu
-    kullanir); zip kendi kopyasini alir ki sonda tek basina, Holocron
-    kurulmadan calissin.
-    """
-    package_dir = dist / PROBE_DIR_NAME
-    if package_dir.exists():
-        shutil.rmtree(package_dir)
-    package_dir.mkdir(parents=True)
-
-    source = ROOT / PROBE_SOURCE
-    for name in PROBE_CONTENT:
-        shutil.copy2(source / name, package_dir / name)
-    shutil.copytree(
-        ROOT / PROBE_VENDOR_SOURCE,
-        package_dir / "vendor",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-    )
-    return make_zip(package_dir, dist / PROBE_ZIP_NAME)
 
 
 def extract_embed(zip_path: Path, target: Path) -> None:
@@ -366,26 +326,10 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="python-embed'siz hafif paket (--variant lite ile ayni)",
     )
-    parser.add_argument(
-        "--probe",
-        action="store_true",
-        help=f"yalnizca Teams yapi sondasini paketle ({PROBE_ZIP_NAME})",
-    )
     parser.add_argument("--dry-run", action="store_true", help="yazmadan plani goster")
     args = parser.parse_args(argv)
 
     variant = VARIANT_LITE if args.no_embed else args.variant
-
-    if args.probe:
-        # Sondanin tekerlege de embed'e de ihtiyaci yok: saf Python.
-        if args.dry_run:
-            print("Hedef            : teams-probe")
-            print(f"Paket icerigi    : {', '.join(probe_manifest())}")
-            print(f"Cikti            : {args.dist / PROBE_ZIP_NAME}")
-            return 0
-        output = build_probe(args.dist)
-        print(f"Sonda hazir: {output} ({output.stat().st_size // 1024} KB)")
-        return 0
 
     if not args.wheels.exists():
         raise SystemExit(f"Wheels klasoru bulunamadi: {args.wheels}")

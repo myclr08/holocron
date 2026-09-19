@@ -16,8 +16,6 @@ from . import repository
 from .jira_client import KEY_CHUNK_SIZE, JiraError
 from .mail import MailError
 from .mail import intake as mail_intake
-from .teamscalls import CallsError
-from .teamscalls import intake as calls_intake
 from .settings_store import MODE_CLOUD
 
 if TYPE_CHECKING:  # dairesel ice aktarimi onlemek icin yalnizca tip zamaninda
@@ -95,8 +93,6 @@ def empty_summary() -> dict[str, Any]:
         "filter_groups": {},
         # Posta taramasi calistiysa ozeti buraya duser; calismadiysa None kalir.
         "mail": None,
-        # Teams arama gecmisi taramasi (varsayilan kapali) ayni sekilde.
-        "calls": None,
     }
 
 
@@ -198,7 +194,6 @@ class RefreshManager:
         state, error = self._run_jira(context, group_id, summary, report)
         if state != STATE_CANCELLED:
             self._scan_mail(context, summary)
-            self._scan_calls(context, summary)
         # Puan is BITMEDEN once yazilir: arayuz "tamamlandi" gorup rozeti
         # tazeledeginde defter zaten dolu olsun.
         self._score(context, report)
@@ -346,42 +341,6 @@ class RefreshManager:
         except Exception as exc:
             summary["mail"] = {"created": 0, "appended": 0, "errors": [
                 {"code": "mail_failed", "message": str(exc) or exc.__class__.__name__}
-            ]}
-
-    def _scan_calls(self, context: "AppContext", summary: dict[str, Any]) -> None:
-        """Istege bagli son asama: Teams arama gecmisi taramasi.
-
-        Varsayilan olarak KAPALIDIR (`calls.scan_on_refresh`): onbellek
-        kopyalamasi birkac saniye surebiliyor, her Guncelle'yi yavaslatmasin.
-        Buradaki hata Jira sonucunu bozmaz.
-        """
-        try:
-            config = calls_intake.load_config(context.settings)
-        except Exception:  # pragma: no cover - ayar okunamiyorsa sessizce gec
-            return
-        if not config.scan_on_refresh:
-            return
-
-        self._touch(stage="Teams aramaları taranıyor")
-        try:
-            source = context.calls_factory(config.cache_path)
-            with context.db_lock:
-                result = calls_intake.scan(
-                    context.connection(),
-                    source,
-                    my_mri_setting=context.settings.get("calls.my_mri", "") or "",
-                )
-            # Kendi kimligim: grup istatistiklerinde beni elemek icin saklanir.
-            if result.get("my_mri"):
-                context.settings.set("calls.my_mri_found", str(result["my_mri"]))
-            summary["calls"] = result
-        except CallsError as exc:
-            summary["calls"] = {"scanned": 0, "new": 0, "errors": [
-                {"code": exc.code, "message": exc.message}
-            ]}
-        except Exception as exc:
-            summary["calls"] = {"scanned": 0, "new": 0, "errors": [
-                {"code": "calls_failed", "message": str(exc) or exc.__class__.__name__}
             ]}
 
     # --- ic yardimcilar -----------------------------------------------

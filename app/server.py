@@ -13,14 +13,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__, gamify, paths
 from .api import router
 from .api_gamify import router as gamify_router
-from .api_gorusme import router as gorusme_router
 from .api_mailsend import router as mailsend_router
 from .context import AppContext
-from .gorusme import servis as gorusme_servis
 from .jira_client import JiraError
 from .mail import MailError
 from .repository import RepositoryError
-from .teamscalls import CallsError
 
 log = logging.getLogger("holocron.server")
 
@@ -47,13 +44,6 @@ def create_app(context: AppContext) -> FastAPI:
             content={"error": {"code": exc.code, "message": exc.message}},
         )
 
-    @app.exception_handler(CallsError)
-    async def _calls_error(_: Request, exc: CallsError) -> JSONResponse:
-        return JSONResponse(
-            status_code=exc.status,
-            content={"error": {"code": exc.code, "message": exc.message}},
-        )
-
     # Starlette'in kendi 404'u da buradan gecsin diye taban sinifa baglanir.
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
@@ -75,8 +65,6 @@ def create_app(context: AppContext) -> FastAPI:
     app.include_router(mailsend_router)
     # Asama 11: Sefer paneli (XP, rutbe, rozet, haftalik emirler).
     app.include_router(gamify_router)
-    # Asama 12: gorusme notlari (kayit, yaziya dokme, ozet).
-    app.include_router(gorusme_router)
 
     # Acilista suresi dolmus sefer kapatilir: kullanici uygulamayi gunlerce
     # acmasa da sefer dogru gunde bitmis gorunur. Puan ikincil, uygulama
@@ -86,19 +74,6 @@ def create_app(context: AppContext) -> FastAPI:
         gamify.ensure_campaign(context)
     except Exception:  # pragma: no cover - bozuk veritabaninda bile acilmali
         log.warning("Sefer kontrolu yapilamadi", exc_info=True)
-
-    # Gorusme hatti: yarim kalmis isler kuyruga alinir, arka plan is
-    # parcaciklari baslar. Kurulum basarisiz olsa da uygulama acilmali.
-    try:
-        servis = gorusme_servis.kur(context)
-        servis.start()
-
-        @app.on_event("shutdown")
-        def _gorusme_kapat() -> None:
-            servis.stop()
-
-    except Exception:  # pragma: no cover - ses katmani yoksa bile acilmali
-        log.warning("Görüşme hattı kurulamadı", exc_info=True)
 
     static_dir = paths.static_dir()
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")

@@ -68,7 +68,7 @@ if not exist "%VENV_PY%" goto venv_failed
 "%VENV_PY%" -m pip install --upgrade pip >nul
 
 rem Cevrimdisi kurulum: paketler yanimizda geldiyse agi hic kullanma.
-rem wheels/ tam listedir, whisper-wheels/ yaziya dokme zip'inden gelir.
+rem wheels/ paketin yanindaki tam listedir.
 call :find_links
 if defined PIP_LINKS goto offline_install
 echo [holocron] Bagimliliklar indiriliyor...
@@ -203,14 +203,13 @@ rem Donus: PIP_LINKS. Bos ise yerel tekerlek yok, kurulum agdan gider.
 :find_links
 set "PIP_LINKS="
 if exist "wheels\*" set "PIP_LINKS=--find-links wheels"
-if exist "whisper-wheels\*" set "PIP_LINKS=%PIP_LINKS% --find-links whisper-wheels"
 if defined PIP_LINKS set "PIP_LINKS=--no-index %PIP_LINKS%"
 exit /b 0
 
 rem --- alt yordam: bagimliliklari requirements.txt ile esitle ------------
 rem Cagri: call :sync_deps <python.exe> <ozet dosyasi>.
-rem Eski surumun uzerine yeni paket acildiginda (v0.10.1'de faster-whisper)
-rem pip yalnizca .venv ILK yaratilirken kosuyordu, yeni bagimlilik hic
+rem Eski surumun uzerine yeni paket acildiginda pip yalnizca .venv ILK
+rem yaratilirken kosuyordu, yeni bagimlilik hic
 rem kurulmuyordu. Artik her acilista requirements.txt'in ozeti kayitli
 rem ozetle karsilastirilir. Kurulum dusse bile uygulama ACILIR: eksik paket
 rem yalnizca ilgili ozelligi kapatir.

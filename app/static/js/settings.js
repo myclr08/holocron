@@ -473,13 +473,6 @@ function fillTeams(settings) {
     ? "Son yenileme: " + galStamp(when)
     : "Rehber hiç çekilmedi.";
 
-  // Arama gecmisi de yerel onbellek okur: ayni Windows sarti.
-  const callsOk = settings.calls_supported !== false;
-  document.getElementById("calls-unsupported").hidden = callsOk;
-  document.getElementById("calls-cache-path").value = settings["calls.cache_path"] || "";
-  document.getElementById("calls-scan-on-refresh").checked =
-    settings["calls.scan_on_refresh"] === "1";
-  document.getElementById("calls-my-mri").value = settings["calls.my_mri"] || "";
 }
 
 /** ISO damgayi yerel saatle "GG.AA.YYYY SS:dd" yazar. */
@@ -690,12 +683,7 @@ function dropContact(contact) {
 
 function saveTeams() {
   const topic = document.getElementById("teams-topic").value.trim() || "{key}";
-  const payload = {
-    "teams.topic_format": topic,
-    "calls.cache_path": document.getElementById("calls-cache-path").value.trim(),
-    "calls.scan_on_refresh": document.getElementById("calls-scan-on-refresh").checked ? "1" : "0",
-    "calls.my_mri": document.getElementById("calls-my-mri").value.trim(),
-  };
+  const payload = { "teams.topic_format": topic };
   teamsAction(
     () => api("/api/settings", { method: "PUT", body: JSON.stringify(payload) }),
     "Teams ayarları kaydedildi."

@@ -548,18 +548,6 @@ button.ghost-accent:hover:not(:disabled) { border-color: var(--accent); backgrou
   padding: 3px 9px;
 }
 
-/* Sekmenin tepesinde duran kapatilabilir uyari seridi. */
-.warn-strip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0 0 10px;
-  padding: 6px 10px;
-}
-
-.warn-strip a { color: var(--accent); }
-
 /* Excel penceresi: sutun onay kutulari */
 .export-columns {
   border: 1px solid var(--line);
@@ -1681,63 +1669,12 @@ html.crawl-open .layout { visibility: hidden; }
   .kanban-body { max-height: 320px; }
 }
 
-/* --- Teams Aramalar ----------------------------------------------------- */
-
-#calls-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
-
-/* Pencere secici: 7 / 30 / 90 gun. */
+/* Pencere/kaynak secici dugme grubu (Sefer defteri suzgeci). */
 .window-picker { display: flex; gap: 4px; }
 .window-picker button { padding: 4px 9px; font-size: 12px; }
 .window-picker button.on { border-color: var(--accent); color: var(--accent); }
 
-/* Ust seritteki istatistik kartlari. */
-.stats-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.stat-card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  min-width: 0;
-}
-
-.stat-card h3 {
-  margin: 0 0 8px;
-  font-family: var(--display);
-  font-size: 13px;
-  letter-spacing: .12em;
-  color: var(--muted);
-}
-
-.stat-figure { font-family: var(--mono); font-size: 20px; color: var(--text); }
-.stat-note { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
-
-.stat-row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; font-size: 12px; }
-.stat-row .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stat-row .much { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
-.stat-row.is-link { cursor: pointer; border-radius: 4px; }
-.stat-row.is-link:hover { background: var(--panel-2); }
-.stat-row.is-link:hover .who { color: var(--accent); }
-
-.split-bar {
-  display: flex;
-  height: 8px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: var(--panel-2);
-  margin-bottom: 8px;
-}
-
-.split-bar span { display: block; height: 100%; }
-.split-group_call { background: var(--saber-purple); }
-.split-one_to_one { background: var(--saber-green); }
-
-/* Liste / Kisiler / Gruplar sekmeleri. */
+/* Sekme seridi (E-posta penceresi: Gövde / Önizleme). */
 .tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
 
 .tab {
@@ -1751,98 +1688,6 @@ html.crawl-open .layout { visibility: hidden; }
 
 .tab:hover { background: none; color: var(--text); }
 .tab.on { color: var(--accent); border-bottom-color: var(--accent); }
-
-.calls-grid td.when { font-family: var(--mono); white-space: nowrap; color: var(--muted); }
-.calls-grid tbody tr { cursor: pointer; }
-
-.call-dir { font-family: var(--mono); font-size: 15px; }
-.call-dir.out { color: var(--saber-green); }
-.call-dir.in { color: var(--saber-blue); }
-
-.call-person {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--text);
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-
-.call-person:hover { background: none; border: 0; color: var(--accent); text-decoration: underline; }
-
-.call-kind,
-.call-state {
-  display: inline-block;
-  padding: 1px 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  font-size: 11px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.call-kind.kind-group_call { color: var(--saber-purple); border-color: rgba(168, 85, 247, .45); }
-.call-kind.kind-one_to_one { color: var(--saber-green); border-color: rgba(57, 211, 83, .45); }
-
-/* Gruplar sekmesinden gelen suzgec serdi: "Grup: Proje ekibi x". */
-.call-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 10px;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  color: var(--accent);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.call-filter button {
-  background: none;
-  border: 0;
-  padding: 0 2px;
-  color: inherit;
-  font-size: 13px;
-  line-height: 1;
-}
-
-.call-filter button:hover { background: none; border: 0; color: var(--text); }
-
-/* Gruplar sekmesindeki katilimci dokumu. */
-.call-people { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
-
-.call-state.state-Missed { color: var(--saber-red); border-color: rgba(255, 59, 59, .45); }
-.call-state.state-Declined { color: #ffab40; border-color: rgba(255, 171, 64, .45); }
-
-/* Cekmecedeki gorusme listesi. */
-.call-summary { margin-bottom: 12px; }
-
-.call-list { display: flex; flex-direction: column; margin-bottom: 12px; }
-
-.call-line {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--line);
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.call-line:last-child { border-bottom: 0; }
-.call-line:hover { background: var(--panel-2); }
-.call-line .when { color: var(--muted); font-family: var(--mono); white-space: nowrap; }
-.call-line .what { flex: 1; overflow-wrap: anywhere; }
-.call-line .much { color: var(--muted); font-family: var(--mono); white-space: nowrap; }
-
-/* 1024'te dort kart iki satira iner. */
-@media (max-width: 1024px) {
-  .stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
-@media (max-width: 760px) {
-  .stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 
 /* --- duyarli davranis --------------------------------------------------- */
 
@@ -2324,117 +2169,3 @@ html.no-motion *::after {
 
 .rule-line .rule-source { font-size: 11px; color: var(--muted); }
 .rule-line .rule-points { width: 84px; font-family: var(--mono); }
-
-/* --- Gorusme notlari ---------------------------------------------------- */
-
-/* Takip seridi: Aramalar ekraninin tepesinde, her zaman gorunur. */
-.track-strip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: var(--panel-2);
-  margin-bottom: 10px;
-}
-
-.track-strip.is-off { opacity: .72; }
-.track-strip .track-gap { flex: 1; }
-.track-strip .switch { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
-
-/* Durum rozetleri: canli kayit kirmizi, isleme sarisi, kuyruk mavisi. */
-.pill {
-  font-family: var(--mono);
-  font-size: 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  padding: 2px 9px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.pill.live { color: var(--saber-red); border-color: var(--saber-red); }
-.pill.live::before {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--saber-red);
-  margin-right: 6px;
-  box-shadow: var(--saber-red-glow);
-}
-.pill.work { color: var(--saber-yellow); border-color: var(--saber-yellow); }
-.pill.queue { color: var(--saber-blue); border-color: var(--saber-blue); }
-.pill.state-hazir { color: var(--saber-green); border-color: var(--saber-green); }
-.pill.state-hata { color: var(--saber-red); border-color: var(--saber-red); }
-.pill.state-atlandi { color: var(--muted); }
-.pill.state-kaydediliyor { color: var(--saber-red); border-color: var(--saber-red); }
-.pill.state-kuyrukta { color: var(--saber-blue); border-color: var(--saber-blue); }
-.pill.state-birlestiriliyor,
-.pill.state-yaziya_dokuluyor,
-.pill.state-ozetleniyor { color: var(--saber-yellow); border-color: var(--saber-yellow); }
-
-/* Belirsiz ilerleme: yaziya dokme suruyor, ne kadar kaldigini bilmiyoruz. */
-.bar {
-  display: inline-block;
-  vertical-align: middle;
-  width: 90px;
-  height: 4px;
-  margin-left: 8px;
-  border-radius: 2px;
-  background: var(--line-strong);
-  overflow: hidden;
-}
-
-.bar i { display: block; height: 100%; width: 40%; background: var(--saber-yellow); }
-
-@media (prefers-reduced-motion: no-preference) {
-  .bar i { animation: bar-slide 1.6s ease-in-out infinite; }
-}
-
-@keyframes bar-slide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(250%); }
-}
-
-.gorusme-grid .what { overflow-wrap: anywhere; }
-.gorusme-row { cursor: pointer; }
-.gorusme-row:hover { background: var(--panel-2); }
-
-.who-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.who-chips span {
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  padding: 1px 8px;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.jira-key { font-family: var(--mono); color: var(--saber-blue); white-space: nowrap; }
-
-/* Not cekmecesi: bolum listeleri, aksiyon satirlari, Jira kutusu. */
-.note-list { margin: 4px 0 10px; padding-left: 18px; display: grid; gap: 4px; }
-
-.action-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  align-items: center;
-  border-bottom: 1px dashed var(--line);
-  padding: 6px 0;
-}
-
-.action-row small { display: block; }
-
-.drawer-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-
-.jira-box { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.jira-box input { flex: 1; min-width: 140px; font-family: var(--mono); }
-
-/* Ayarlar -> Gorusme notlari: deneme kaydi sonucu. */
-.trial-result { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
-.trial-result .ok { color: var(--saber-green); }
-.trial-result .no { color: var(--saber-red); }

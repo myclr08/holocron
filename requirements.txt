@@ -3,14 +3,6 @@ uvicorn==0.34.0
 requests==2.32.3
 openpyxl==3.1.5
 cryptography==44.0.0
-# Outlook COM (Asama 7) ve kilitli dosyayi paylasimli okuma (win32file, Teams
-# arama gecmisi): yalnizca Windows'ta kurulur, Linux paketine girmez.
+# Outlook COM (Asama 7): kurum rehberi, posta taramasi ve posta gonderimi.
+# Yalnizca Windows'ta kurulur, Linux paketine girmez.
 pywin32==312; sys_platform == "win32"
-# Gorusme notlari (Asama 12): WASAPI dongu kaydi. Yalnizca Windows'ta kurulur.
-pyaudiowpatch==0.2.12.7; sys_platform == "win32"
-# Windows bildirimi (istege bagli; yoksa bildirim sessizce atlanir).
-winotify==1.1.0; sys_platform == "win32"
-# Gorusme notlarinin yaziya dokme katmani (Asama 12). Yalnizca Windows'ta
-# kurulur: gorusme kaydi zaten Windows'a bagli, paket ise (ctranslate2 ile
-# birlikte) birkac yuz megabayt tutuyor ve Linux paketini bosuna sisirirdi.
-faster-whisper==1.2.1; sys_platform == "win32"

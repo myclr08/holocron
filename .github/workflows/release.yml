@@ -34,17 +34,10 @@ jobs:
       - name: Paketi uret
         run: python tools/build_portable.py --target linux --wheels wheels --version ${{ github.ref_name }}
 
-      # Teams yapi sondasi: saf Python, tekerlek gerektirmez. Uygulama
-      # paketlerine girmez, kendi zip'iyle release'e eklenir.
-      - name: Teams sondasini paketle
-        run: python tools/build_portable.py --probe
-
       - uses: actions/upload-artifact@v4
         with:
           name: holocron-linux
-          path: |
-            dist/holocron-linux-x64.zip
-            dist/holocron-teams-probe.zip
+          path: dist/holocron-linux-x64.zip
 
   windows:
     runs-on: windows-latest
@@ -55,44 +48,13 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      # requirements.txt artik faster-whisper'i da tasiyor: tekerlekleri
-      # pakete girsin diye burada iniyor. O surum icin cp313 tekerlegi yoksa
-      # is DUSMESIN: whisper satiri cikarilip cekirdek liste ile devam edilir
-      # (yaziya dokme paketi ayri zip ve uygulama ici kurulumla da gelebilir).
       - name: Tekerlekleri indir (win_amd64 / cp313)
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
           pip download --only-binary=:all: --python-version ${{ env.PYTHON_VERSION }} --platform win_amd64 --implementation cp -r requirements.txt -d wheels
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "[release] Tam liste inmedi; faster-whisper cikarilip yeniden deneniyor."
-            Get-Content requirements.txt | Where-Object { $_ -notmatch 'faster-whisper' } | Set-Content requirements-core.txt
-            pip download --only-binary=:all: --python-version ${{ env.PYTHON_VERSION }} --platform win_amd64 --implementation cp -r requirements-core.txt -d wheels
-            if ($LASTEXITCODE -ne 0) { exit 1 }
-          }
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           dir wheels
-
-      # Yaziya dokme tekerlekleri ayrica kendi zip'iyle de cikar: lite paketi
-      # alip vekil yuzunden PyPI'ye ulasamayanlar zip'i Holocron klasorune
-      # acar ve `whisper-wheels/` klasoru olusur -- baslaticilar ve uygulama
-      # ici kurulum o klasoru `--find-links` olarak kullanir. cp313 tekerlegi
-      # yoksa is dusmesin diye adim hatayi yutar (README elle kurulumu anlatir).
-      - name: Yaziya dokme tekerlekleri (istege bagli)
-        continue-on-error: true
-        run: |
-          pip download --only-binary=:all: --python-version ${{ env.PYTHON_VERSION }} --platform win_amd64 --implementation cp faster-whisper -d whisper-wheels
-          dir whisper-wheels
-
-      - name: Yaziya dokme paketini sikistir
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          if (Test-Path whisper-wheels) {
-            New-Item -ItemType Directory -Force -Path dist | Out-Null
-            # Klasorun KENDISI zip'e girer: kullanici zip'i Holocron
-            # klasorune acinca dogrudan `whisper-wheels/` olusur.
-            Compress-Archive -Path whisper-wheels -DestinationPath dist\holocron-windows-whisper.zip -Force
-          }
 
       - name: Embed dagitimini indir
         shell: pwsh
@@ -126,7 +88,6 @@ jobs:
           path: |
             dist/holocron-windows-x64.zip
             dist/holocron-windows-x64-lite.zip
-            dist/holocron-windows-whisper.zip
           if-no-files-found: warn
 
   publish:

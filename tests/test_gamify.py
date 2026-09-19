@@ -63,7 +63,7 @@ def test_migration_creates_the_campaign_tables(conn):
     assert {
         "campaigns", "xp_events", "xp_rules", "badges", "quests", "streaks"
     } <= db.table_names(conn)
-    assert db.SCHEMA_VERSION == 15
+    assert db.SCHEMA_VERSION == 16
 
 
 def test_rules_are_seeded_once(conn):

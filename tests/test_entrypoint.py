@@ -87,8 +87,6 @@ def test_windows_launcher_installs_offline_when_wheels_are_present():
     text = BAT.read_text(encoding="utf-8")
     assert ":find_links" in text
     assert 'if exist "wheels\\*" set "PIP_LINKS=--find-links wheels"' in text
-    # Yaziya dokme zip'i `whisper-wheels/` olarak acilir: o klasor de gorulur.
-    assert 'if exist "whisper-wheels\\*" set "PIP_LINKS=%PIP_LINKS% --find-links whisper-wheels"' in text
     assert 'set "PIP_LINKS=--no-index %PIP_LINKS%"' in text
     assert '"%VENV_PY%" -m pip install %PIP_LINKS% -r requirements.txt' in text
     # Tekerlekler hedef Python surumune uymazsa agdan denenir.
@@ -118,7 +116,6 @@ def test_windows_launcher_explains_a_missing_venv_module():
 def test_shell_launcher_also_falls_back_to_the_network():
     text = SH.read_text(encoding="utf-8")
     assert '--find-links wheels' in text
-    assert '--find-links whisper-wheels' in text
     assert '"--no-index$links"' in text
     assert "Cevrimdisi kurulum olmadi" in text
 
@@ -308,17 +305,6 @@ def test_readme_documents_the_self_shutdown_reason():
     assert "### Uygulama bir süre sonra kendiliğinden kapandı" in text
     assert "nabiz ... sn'dir yok" in text
     assert "Kapat dugmesi: kapaniliyor" in text
-
-
-def test_readme_documents_the_whisper_package_install():
-    """Saha sorusu: "ilk kurulumda bu paketi kurmuyor mu?" -- cevabi belgede."""
-    text = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "Yazıya dökme paketini kur" in text
-    assert "whisper-wheels" in text
-    assert "holocron-req.sha" in text
-    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    assert 'faster-whisper==' in requirements
-    assert 'sys_platform == "win32"' in requirements.split("faster-whisper==", 1)[1]
 
 
 def test_readme_documents_the_troubleshooting_path():

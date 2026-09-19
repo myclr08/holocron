@@ -760,6 +760,61 @@ def _migration_0015_gorusme_notlari(conn: sqlite3.Connection) -> None:
         pass
 
 
+def _migration_0016_gorusme_ve_aramalar_kaldirildi(conn: sqlite3.Connection) -> None:
+    """Teams aramalari ve gorusme notlari ozelligi tumden kaldirildi (0.11.0).
+
+    Kullanici kararı (19 Eylul 2026): Holocron artik arama gecmisi okumuyor,
+    gorusme kaydetmiyor, not cikarmiyor. Bu yuzden ilgili tablolar DUSER --
+    kodu duran bir tablonun verisi dosyada bos yer tutmaktan baska bir ise
+    yaramaz. Eski gocler (8, 9, 11, 14, 15) tarihseldir: olduklari gibi
+    kalirlar, bu goc onlarin kurdugunu yikar.
+
+    DIKKAT: bu goc VERI SILER. Taranmis Teams aramalari ve uretilmis butun
+    gorusme notlari (ozet, karar, aksiyon, transkript) geri gelmez.
+
+    Copilot ayarlari KAYBOLMAZ: kullanicinin elle yazdigi yol ve vekil
+    adresi `calls.*` altindan `copilot.*` altina tasinir; Copilot karti
+    Ayarlar'da kaliyor. Geri kalan `calls.*` / gorusmeye ozel anahtarlar
+    silinir.
+    """
+    conn.executescript(
+        """
+        DROP TABLE IF EXISTS teams_calls;
+        DROP TABLE IF EXISTS gorusme_bolum;
+        DROP TABLE IF EXISTS gorusme_katilimci;
+        DROP TABLE IF EXISTS gorusme_bag;
+        DROP TABLE IF EXISTS gorusme_transkript;
+        DROP TABLE IF EXISTS gorusme_fts;
+        DROP TABLE IF EXISTS gorusme_notu;
+        """
+    )
+    # Copilot ayarlari yeni adlarina tasinir (mevcut yeni deger varsa dokunulmaz).
+    for eski, yeni in COPILOT_AYAR_GOCU:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (eski,)).fetchone()
+        deger = str(row["value"] or "") if row is not None else ""
+        if deger:
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO NOTHING",
+                (yeni, deger),
+            )
+    conn.executescript(
+        """
+        DELETE FROM settings WHERE key LIKE 'calls.%';
+        """
+    )
+
+
+# Eski `calls.copilot_*` / ozet anahtarlarinin yeni `copilot.*` karsiliklari.
+COPILOT_AYAR_GOCU: tuple[tuple[str, str], ...] = (
+    ("calls.copilot_yolu", "copilot.yolu"),
+    ("calls.copilot_yolu_son", "copilot.yolu_son"),
+    ("calls.copilot_proxy", "copilot.proxy"),
+    ("calls.ozet_modelleri", "copilot.modeller"),
+    ("calls.ozet_model_son", "copilot.son_model"),
+)
+
+
 # Sira onemli: yeni goc her zaman listenin sonuna eklenir, mevcut satir degismez.
 MIGRATIONS: list[tuple[int, str, Migration]] = [
     (1, "initial schema", _migration_0001_initial),
@@ -777,6 +832,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (13, "group Jira detail fields", _migration_0013_group_detail_fields),
     (14, "teams calls without meetings", _migration_0014_calls_without_meetings),
     (15, "meeting notes", _migration_0015_gorusme_notlari),
+    (16, "drop teams calls and meeting notes", _migration_0016_gorusme_ve_aramalar_kaldirildi),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

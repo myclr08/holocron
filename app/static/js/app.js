@@ -227,7 +227,7 @@ async function move(index, delta) {
 }
 
 function showPlaceholder() {
-  if (state.view === "tasks" || state.view === "calls" || state.view === "campaign") return;
+  if (state.view === "tasks" || state.view === "campaign") return;
   state.activeId = null;
   state.group = null;
   el("placeholder").hidden = false;
@@ -240,7 +240,6 @@ async function selectGroup(groupId, keepView) {
   // Arka planda tazeleme (keepView) gorev panosunu kapatmaz; grubu tiklamak kapatir.
   if (!keepView) {
     leaveTasks();
-    if (typeof leaveCalls === "function") leaveCalls();
     if (typeof leaveCampaign === "function") leaveCampaign();
   }
   state.activeId = groupId;
@@ -251,7 +250,7 @@ async function selectGroup(groupId, keepView) {
     clearSelection();
   }
   el("placeholder").hidden = true;
-  if (state.view !== "tasks" && state.view !== "calls" && state.view !== "campaign") {
+  if (state.view !== "tasks" && state.view !== "campaign") {
     el("group-view").hidden = false;
   }
   renderGroups();
@@ -611,10 +610,6 @@ function renderDrawerBody() {
   }
   renderDrawerLocal(body);
   renderDrawerTeams(body);
-  // Bu kayda bagli gorusme notlari (gorusme.js yuklendiyse).
-  if (typeof renderDrawerGorusme === "function" && state.drawerKey) {
-    renderDrawerGorusme(body, state.drawerKey);
-  }
   const selected = state.group && state.group.detail_fields;
   (state.drawerFields || [])
     .filter((item) => selected === null || selected === undefined || selected.includes(item.field))
@@ -2015,8 +2010,7 @@ function dateText(iso) {
 }
 
 function showTasks() {
-  // Teams Aramalar / Sefer ekrani aciksa once o kapanir: hepsi ayni alanda.
-  if (typeof leaveCalls === "function") leaveCalls();
+  // Sefer ekrani aciksa once o kapanir: ikisi de ayni alanda durur.
   if (typeof leaveCampaign === "function") leaveCampaign();
   state.view = "tasks";
   el("placeholder").hidden = true;

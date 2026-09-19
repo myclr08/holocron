@@ -29,7 +29,6 @@ const campaignState = {
 
 function showCampaign() {
   if (typeof leaveTasks === "function") leaveTasks();
-  if (typeof leaveCalls === "function") leaveCalls();
   state.view = "campaign";
   el("placeholder").hidden = true;
   el("group-view").hidden = true;
