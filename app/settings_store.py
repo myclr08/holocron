@@ -85,6 +85,12 @@ DEFAULTS: dict[str, str] = {
         '"claude-sonnet-4.5", "gpt-5"]'
     ),
     "copilot.son_model": "",
+    # Metin duzeltme ("Duzelt" dugmesi). Kapatilirsa dugme hic cizilmez; ton
+    # "resmi" secilirse cip secilmemis olsa da istem resmi uslup ister; sablon
+    # bos birakilirsa `app/copilot_sablon_duzelt.txt` kullanilir.
+    "copilot.duzelt_acik": "1",
+    "copilot.duzelt_ton": "notr",
+    "copilot.duzelt_sablon": "",
     # Kurum rehberi en son ne zaman cekildi (bos = hic).
     "teams.gal_synced_at": "",
     # Sefer (oyunlastirma): seri korumasinin harcandigi ay, "gecikmis gorev
@@ -101,6 +107,7 @@ BOOLEAN_KEYS: frozenset[str] = frozenset(
         "net.ipv4_first",
         "mail.enabled",
         "mail.scan_on_refresh",
+        "copilot.duzelt_acik",
     }
 )
 

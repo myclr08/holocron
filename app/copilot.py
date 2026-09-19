@@ -893,6 +893,10 @@ class Ayarlar:
     modeller: tuple[str, ...] = VARSAYILAN_MODELLER
     son_model: str = ""
     jira_base_url: str = ""
+    # Metin duzeltme: dugme acik mi, varsayilan ton, kullanicinin sablonu.
+    duzelt_acik: bool = True
+    duzelt_ton: str = "notr"
+    duzelt_sablon: str = ""
 
     def kok(self) -> Path:
         """Ara dosyalarin yazildigi klasor (yoksa olusturulur)."""
@@ -914,6 +918,12 @@ def load_config(settings: Any) -> Ayarlar:
         modeller=tuple(modeller),
         son_model=str(settings.get("copilot.son_model", "") or "").strip(),
         jira_base_url=str(settings.get("jira.base_url", "") or "").strip(),
+        duzelt_acik=str(settings.get("copilot.duzelt_acik", "1") or "") != "0",
+        duzelt_ton=(
+            str(settings.get("copilot.duzelt_ton", "") or "").strip().lower()
+            or DUZELT_TONLARI[0]
+        ),
+        duzelt_sablon=str(settings.get("copilot.duzelt_sablon", "") or ""),
     )
 
 
@@ -926,3 +936,262 @@ def default_calistirici(
     return CopilotCalistirici(
         proxy=proxy, jira_base_url=jira_base_url, yol=yol, zaman_asimi=zaman_asimi
     )
+
+
+# --- metin duzeltme ------------------------------------------------------
+#
+# "Duzelt" dugmesi Gorevlerim'deki aciklama/not alanlarinin ve Jira kaydinin
+# cok satirli YEREL alanlarinin kosesinde durur. Sinama JSON isterken burada
+# modelden DUZ METIN istenir: fark hesabi tarayicida yapilir, ayristirma derdi
+# olmaz. Cevap yine dosyadan alinir (stdout'a banner ve ANSI karisiyor).
+
+# Gomulu istem sablonu: `app/` icinde durur, pakete oldugu gibi girer.
+DUZELT_SABLON_DOSYASI = "copilot_sablon_duzelt.txt"
+
+# Ara dosyalar: metin girdi dosyasina yazilir, model cevabi cikti dosyasina.
+DUZELT_GIRDI_DOSYASI = "copilot-duzelt-girdi.txt"
+DUZELT_CIKTI_DOSYASI = "copilot-duzelt-cikti.txt"
+
+# Alan sinirlari: daha uzun metin dugmede "cok uzun" der, 30 sn'de cevap
+# gelmezse istek kesilir (kullanici pencerenin basinda bekliyor).
+DUZELT_SINIRI = 4000
+DUZELT_ZAMAN_ASIMI = 30
+
+# Cip adlarinin istemdeki karsiligi. Arayuzde "Imla ve noktalama" ile "Anlam
+# dusuklugu" varsayilan acik, digerleri istege bagli.
+DUZELT_SECENEK_KURALLARI: dict[str, str] = {
+    "imla": "- İmla, yazım ve noktalama yanlışlarını düzelt.",
+    "anlam": "- Anlam düşüklüğünü ve bozuk cümleleri düzelt.",
+    "resmi": "- Üslubu biraz daha resmi yap; günlük konuşma kalıplarını sadeleştir.",
+    "kisa": "- Gereksiz sözcükleri at, metni kısalt; hiçbir bilgiyi atma.",
+}
+VARSAYILAN_DUZELT_SECENEKLERI: tuple[str, ...] = ("imla", "anlam")
+
+# Ayardaki ton: "resmi" secilirse cip secilmemis olsa da kural eklenir.
+DUZELT_TONLARI: tuple[str, ...] = ("notr", "resmi")
+
+
+def duzelt_sablonu(ozel: str = "") -> str:
+    """Kullanicinin yazdigi sablon ya da `app/` icindeki gomulu sablon.
+
+    Ozel sablonda yer tutucular eksikse gomulu sablona dusulur: eksik
+    `{cikti}` modelin cevabi nereye yazacagini bilememesi demektir.
+    """
+    metin = str(ozel or "").strip()
+    if metin and "{girdi}" in metin and "{cikti}" in metin:
+        return metin
+    yol = Path(__file__).resolve().parent / DUZELT_SABLON_DOSYASI
+    try:
+        return yol.read_text(encoding="utf-8").strip()
+    except OSError:  # pragma: no cover - dosya pakete hep giriyor
+        return (
+            "{girdi} dosyasını oku, metni düzelt ve düzeltilmiş düz metni "
+            "{cikti} dosyasına yaz.\n{kurallar}"
+        )
+
+
+def duzelt_secenekleri(secenekler: Any = (), ton: str = "") -> list[str]:
+    """Ekrandan gelen cipleri temizler; ayardaki ton "resmi"yi ekler."""
+    ham = secenekler if isinstance(secenekler, (list, tuple)) else ()
+    secili = [
+        str(ad).strip().lower()
+        for ad in ham
+        if str(ad).strip().lower() in DUZELT_SECENEK_KURALLARI
+    ]
+    if not secili:
+        secili = list(VARSAYILAN_DUZELT_SECENEKLERI)
+    if str(ton or "").strip().lower() == "resmi" and "resmi" not in secili:
+        secili.append("resmi")
+    # Sira sabit kalsin: istem her zaman ayni bicimde kurulur.
+    return [ad for ad in DUZELT_SECENEK_KURALLARI if ad in secili]
+
+
+def duzelt_kurallari(secenekler: Any = (), ton: str = "") -> str:
+    """Secili ciplerin istem satirlari."""
+    return "\n".join(
+        DUZELT_SECENEK_KURALLARI[ad] for ad in duzelt_secenekleri(secenekler, ton)
+    )
+
+
+def duzelt_istemi(
+    girdi: Path, cikti: Path, secenekler: Any = (), sablon: str = "", ton: str = ""
+) -> str:
+    """Sablonun yer tutucularini doldurur."""
+    return (
+        duzelt_sablonu(sablon)
+        .replace("{girdi}", str(girdi))
+        .replace("{cikti}", str(cikti))
+        .replace("{kurallar}", duzelt_kurallari(secenekler, ton))
+    )
+
+
+# Modelin cevabinin cevresine koyabilecegi kod blogu.
+_DUZELT_BLOK = re.compile(r"\A```[A-Za-z0-9_-]*[ \t]*\r?\n(.*?)\r?\n?```\Z", re.DOTALL)
+
+# "Iste duzeltilmis metin:" gibi ON EKLER (kucuk harfe indirilmis arama).
+_DUZELT_ON_EKLERI: tuple[str, ...] = (
+    "düzeltilmiş metin:",
+    "duzeltilmis metin:",
+    "düzeltilmiş hâli:",
+    "düzeltilmiş hali:",
+    "düzeltilmiş:",
+    "sonuç:",
+    "çıktı:",
+    "metin:",
+)
+
+# Cevreleyen tirnaklar: duz, egik ve tirnak isareti cesitleri.
+_ACIK_TIRNAK = "\"'“«„"
+_KAPALI_TIRNAK = "\"'”»“"
+
+
+def duzelt_ciktisi_temizle(metin: str) -> str:
+    """Modelin cevabindan yalnizca duzeltilmis metni birakir.
+
+    Model bazen cevabi kod bloguna alir, basina "Düzeltilmiş metin:" yazar ya
+    da tirnak icine koyar. Bu kabuklar soyulmazsa kullanicinin alanina tirnakla
+    birlikte giriyorlar.
+    """
+    ham = ansi_temizle(str(metin or "")).strip()
+    for _ in range(4):  # ic ice gecmis kabuklar icin birkac tur yeter
+        if not ham:
+            return ""
+        blok = _DUZELT_BLOK.match(ham)
+        if blok is not None:
+            ham = blok.group(1).strip()
+            continue
+        ilk, ayrac, kalan = ham.partition("\n")
+        kucuk = ilk.strip().lower()
+        on_ek = next((ek for ek in _DUZELT_ON_EKLERI if kucuk.startswith(ek)), "")
+        if on_ek:
+            geri_kalan = ilk.strip()[len(on_ek) :].strip()
+            ham = (geri_kalan + ayrac + kalan).strip() if geri_kalan else kalan.strip()
+            continue
+        if (
+            len(ham) > 1
+            and ham[0] in _ACIK_TIRNAK
+            and ham[-1] in _KAPALI_TIRNAK
+            and "\n" not in ham
+        ):
+            ham = ham[1:-1].strip()
+            continue
+        break
+    return ham
+
+
+# Copilot'un stdout'a bastigi kendi satirlari: yedek yolda metin sanilmasin.
+_COPILOT_GURULTUSU = re.compile(
+    r"^(?:[●◇○✓✔✗×∙·>»]|\s*\[[\d;]+m|GitHub Copilot|Copilot CLI|Reading |Wrote |"
+    r"Writing |Running |Total duration|Usage:|Model:|Tool |Thinking)",
+)
+
+
+def duzelt_stdout_yedegi(cikti: Any) -> str:
+    """Model dosyayi yazmadiysa STDOUT'tan metni ayiklamayi dener.
+
+    Once kod blogu aranir; yoksa Copilot'un kendi ilerleme satirlari atilir ve
+    geriye kalan metin kullanilir. Hicbir sey kalmazsa bos doner (cagiran taraf
+    hata gosterir): yanlis bir satiri kullanicinin metninin yerine koymaktansa
+    hic duzeltmemek yeglenir.
+
+    `stderr` BILEREK okunmaz: oradaki "permission denied" ya da "model is not
+    available" satiri duzeltilmis metin sanilirsa kullanicinin alanina Copilot'un
+    hata mesaji yazilir.
+    """
+    ham = ansi_temizle(str(getattr(cikti, "metin", "") or "")).strip()
+    if not ham:
+        return ""
+    bloklar = re.findall(r"```[A-Za-z0-9_-]*[ \t]*\r?\n(.*?)\r?\n?```", ham, re.DOTALL)
+    if bloklar:
+        return max(bloklar, key=len).strip()
+    kalan = [
+        satir
+        for satir in ham.splitlines()
+        if not _COPILOT_GURULTUSU.match(satir.strip())
+    ]
+    return "\n".join(kalan).strip()
+
+
+def duzelt_yok_mesaji(cikti: Any) -> str:
+    """Model hicbir metin uretmediginde ekranda gorunecek hata."""
+    izin = izin_reddi(ham_cikti(cikti))
+    if izin:
+        return izin
+    son = kuyruk(cikti)
+    if not son:
+        return "Copilot düzeltilmiş metni yazmadı ve hiçbir çıktı vermedi; holocron.log'a bakın."
+    return f"Copilot düzeltilmiş metni yazmadı. Ham çıktı (son {HATA_SINIRI} karakter): {son}"
+
+
+def duzelt(
+    calistirici: Any,
+    modeller: Sequence[str],
+    klasor: Path,
+    metin: str,
+    secenekler: Any = (),
+    sablon: str = "",
+    ton: str = "",
+) -> dict[str, Any]:
+    """Metni Copilot'a duzelttirir.
+
+    Basarida `{"metin": ..., "model": ..., "sn": ...}`, aksi halde
+    `{"hata": ...}` doner. Hata metni temizdir: ANSI atilmis, tek satira
+    indirilmis, parola/anahtar benzeri diziler maskelenmistir.
+    """
+    ham = str(metin or "")
+    if not ham.strip():
+        return {"hata": "Düzeltilecek metin boş."}
+    if len(ham) > DUZELT_SINIRI:
+        return {
+            "hata": (
+                f"Metin çok uzun: {len(ham)} karakter, en fazla {DUZELT_SINIRI}."
+            )
+        }
+
+    klasor = Path(klasor)
+    klasor.mkdir(parents=True, exist_ok=True)
+    girdi = klasor / DUZELT_GIRDI_DOSYASI
+    hedef = klasor / DUZELT_CIKTI_DOSYASI
+    # Onceki kosudan kalan dosya TAZE sanilmasin.
+    dosya_sil(hedef)
+    girdi.write_text(ham, encoding="utf-8")
+    istem = duzelt_istemi(girdi, hedef, secenekler, sablon, ton)
+
+    denenen: list[str] = []
+    reddedilenler: list[str] = []
+    son_hata = "Copilot CLI hiç çalıştırılamadı."
+    try:
+        for model in modeller:
+            denenen.append(model)
+            basladi = time.monotonic()
+            cikti = calistirici.sor(klasor, model, istem)
+            gecen = time.monotonic() - basladi
+            # Birincil yol: modelin yazdigi dosya. Yedek: stdout -- ama yalniz
+            # model reddedilmediyse; reddin metni duzeltme sanilmasin.
+            reddedildi = reddedildi_mi(cikti)
+            yazilan = duzelt_ciktisi_temizle(dosya_oku(hedef))
+            if not yazilan and not reddedildi:
+                yazilan = duzelt_ciktisi_temizle(duzelt_stdout_yedegi(cikti))
+            if yazilan:
+                return {
+                    "metin": yazilan,
+                    "model": model,
+                    "sn": round(gecen, 1),
+                    "denenen": denenen,
+                }
+            if reddedildi:
+                reddedilenler.append(model)
+                son_hata = temizle(
+                    getattr(cikti, "hata", "")
+                    or getattr(cikti, "metin", "")
+                    or "model reddedildi"
+                )
+                continue
+            son_hata = duzelt_yok_mesaji(cikti)
+            teshis_logla(model, cikti)
+    finally:
+        dosya_sil(girdi)
+        dosya_sil(hedef)
+    if reddedilenler:
+        son_hata = temizle(reddedilenler_mesaji(reddedilenler))
+    return {"hata": son_hata or "Copilot yanıt vermedi.", "denenen": denenen}

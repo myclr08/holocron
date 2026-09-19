@@ -83,7 +83,10 @@ def shutdown(request: Request) -> dict[str, Any]:
 @router.get("/settings")
 def read_settings(request: Request) -> dict[str, Any]:
     context = get_context(request)
-    return {"settings": context.settings.public_view()}
+    data = context.settings.public_view()
+    # Ayarlar'daki "Varsayilana don" dugmesi gomulu sablonu ekranda gosterir.
+    data["copilot_duzelt_sablon_varsayilan"] = copilot.duzelt_sablonu()
+    return {"settings": data}
 
 
 @router.put("/settings")
@@ -925,6 +928,59 @@ def test_copilot(request: Request, payload: dict[str, Any] = Body(default_factor
             context.settings.set("copilot.yolu_son", str(sonuc["yol"]))
     # Vekil adresi ekrana geri yazilmaz: yalnizca "ayarli mi" bilgisi doner.
     sonuc["proxy_ayarli"] = bool(ayarlar.proxy)
+    return sonuc
+
+
+@router.post("/copilot/duzelt")
+def fix_text(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
+    """Gorev ve yerel alan metnini Copilot'a duzelttirir.
+
+    Cevap `{"metin": ..., "model": ..., "sn": ...}` ya da `{"hata": ...}`.
+    Copilot'un kendi hatasi 200 doner: ekran alandaki metne dokunmadan tek
+    satirlik bir uyari gosterir. 400 yalnizca ISTEK yanlissa verilir (bos ya
+    da cok uzun metin, kapatilmis ozellik).
+    """
+    context = get_context(request)
+    metin = str(payload.get("metin") or "")
+    if not metin.strip():
+        return error_response("empty_text", "Düzeltilecek metin boş.", 400)
+    if len(metin) > copilot.DUZELT_SINIRI:
+        return error_response(
+            "text_too_long",
+            f"Metin çok uzun: {len(metin)} karakter, en fazla {copilot.DUZELT_SINIRI}.",
+            400,
+        )
+    ayarlar = copilot.load_config(context.settings)
+    if not ayarlar.duzelt_acik:
+        return error_response(
+            "feature_disabled",
+            "Metin düzeltme Ayarlar → Copilot'tan kapatılmış.",
+            400,
+        )
+    fabrika = context.copilot_factory
+    calistirici = (
+        fabrika(ayarlar)
+        if fabrika is not None
+        else copilot.default_calistirici(
+            proxy=ayarlar.proxy,
+            jira_base_url=ayarlar.jira_base_url,
+            yol=ayarlar.yolu,
+            # Kullanici pencerenin basinda bekliyor: uzun isin suresi burada olmaz.
+            zaman_asimi=copilot.DUZELT_ZAMAN_ASIMI,
+        )
+    )
+    sonuc = copilot.duzelt(
+        calistirici,
+        ayarlar.model_sirasi(),
+        ayarlar.kok(),
+        metin,
+        payload.get("secenekler"),
+        ayarlar.duzelt_sablon,
+        ayarlar.duzelt_ton,
+    )
+    if sonuc.get("model"):
+        # Calisan model bir sonraki istekte basa alinir.
+        context.settings.set("copilot.son_model", str(sonuc["model"]))
     return sonuc
 
 

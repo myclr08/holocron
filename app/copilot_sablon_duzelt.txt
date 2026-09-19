@@ -1,0 +1,21 @@
+Sana verilen metni DÜZELT. Yeni bir metin yazma, yorum ekleme, soru sorma.
+
+Girdi dosyası: {girdi}
+Çıktı dosyası: {cikti}
+
+Yapılacak iş:
+1. Girdi dosyasını oku.
+2. İçindeki metni aşağıdaki kurallara göre düzelt.
+3. Yalnızca düzeltilmiş metni çıktı dosyasına yaz (düz metin, UTF-8).
+
+Kurallar:
+{kurallar}
+- Metnin anlamını, maddelerini ve sırasını KORU; yeni bilgi EKLEME, madde SİLME.
+- Özel adlar, kısaltmalar, kayıt anahtarları ve kod parçaları (PRJ-1432, EKAP)
+  olduğu gibi kalsın.
+- Yazarın sesini ve üslubunu koru; metni yeniden kurgulama.
+- Satır sonlarını, madde imlerini ve boş satırları olduğu gibi bırak.
+- Metin Türkçeyse Türkçe kalır; başka dildeyse o dilde düzeltilir.
+
+Çıktı dosyasında YALNIZCA düzeltilmiş metin olsun: başlık, açıklama, kod bloğu,
+tırnak işareti ya da "Düzeltilmiş metin:" gibi bir ön ek YAZMA.
