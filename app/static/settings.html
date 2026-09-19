@@ -491,6 +491,51 @@
                 <button class="primary" id="copilot-save">Kaydet</button>
               </div>
               <div class="status" id="copilot-status" hidden></div>
+
+              <h3 id="copilot-duzelt">Metin düzeltme</h3>
+              <p class="hint">
+                Görevlerim'deki <strong>Açıklama</strong> ve <strong>Not</strong> alanlarının,
+                Jira kaydı çekmecesindeki çok satırlı <strong>yerel alanların</strong> sağ alt
+                köşesinde bir <strong>Düzelt</strong> düğmesi durur (kısayol
+                <code>Ctrl+Shift+D</code>). Metin Copilot'a gider; imla, noktalama, anlam
+                düşüklüğü ve bozuk cümle düzeltilir. Sonuç önce/sonra karşılaştırmasıyla gelir,
+                <strong>Uygula</strong> demeden alan değişmez. En fazla 4000 karakter, 30 saniye.
+              </p>
+
+              <label class="checkbox">
+                <input type="checkbox" id="copilot-duzelt-acik" checked />
+                Metin alanlarında "Düzelt" düğmesi görünsün
+              </label>
+
+              <div class="field-grid">
+                <div class="field">
+                  <label for="copilot-duzelt-ton">Ton</label>
+                  <select id="copilot-duzelt-ton">
+                    <option value="notr">Nötr (varsayılan)</option>
+                    <option value="resmi">Daha resmi</option>
+                  </select>
+                  <p class="hint">
+                    "Daha resmi" seçilirse panelde çip işaretlenmese de istem resmi üslup
+                    ister. Panelde her düzeltme için yine "Daha resmi" ve "Kısalt" açılabilir.
+                  </p>
+                </div>
+                <div class="field">
+                  <label for="copilot-duzelt-sablon">İstem şablonu</label>
+                  <textarea id="copilot-duzelt-sablon" rows="8"></textarea>
+                  <p class="hint">
+                    Boş bırakılırsa gömülü şablon kullanılır. <code>{girdi}</code> ve
+                    <code>{cikti}</code> yer tutucuları <strong>zorunludur</strong> (metnin
+                    okunacağı ve cevabın yazılacağı dosyalar); <code>{kurallar}</code> seçili
+                    çiplerin satırlarıyla dolar. Eksik yer tutucuda gömülü şablona dönülür.
+                  </p>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button id="copilot-duzelt-varsayilan">Şablonu varsayılana döndür</button>
+                <button class="primary" id="copilot-duzelt-save">Kaydet</button>
+              </div>
+              <div class="status" id="copilot-duzelt-status" hidden></div>
             </div>
           </section>
 

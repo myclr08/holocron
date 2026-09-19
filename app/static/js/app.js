@@ -147,6 +147,12 @@ function field(labelText, control) {
   return h("div", { class: "field" }, [h("label", { text: labelText }), control]);
 }
 
+/** Alani "Düzelt" dugmesiyle sarmalar; bilesen yoksa alanin kendisi doner. */
+function duzeltKutusu(alan, ad) {
+  if (typeof attachDuzelt !== "function") return alan;
+  return attachDuzelt(alan, { ad: ad }) || alan;
+}
+
 // --- gruplar ------------------------------------------------------------
 
 async function loadGroups(selectId) {
@@ -845,8 +851,12 @@ function closeEditor(silent) {
 }
 
 /** Tipe gore satir ici duzenleyici. Enter kaydeder, Esc vazgecer, blur kaydeder. */
-function localEditor(field, value, hooks) {
+function localEditor(field, value, hooks, options) {
+  const opts = options || {};
+  // Cok satirli kip yalnizca cekmecede acilir: grid hucresi tek satir kalir.
+  const wide = !!opts.multiline && field.type === "text";
   let node;
+  let box;
   let dead = false;
   const read = () => (field.type === "bool" ? (node.checked ? "1" : "0") : node.value);
   const commit = () => {
@@ -876,6 +886,15 @@ function localEditor(field, value, hooks) {
     node = h("input", { type: "date", class: "local-input" });
     node.value = value || "";
     node.addEventListener("change", commit);
+  } else if (wide) {
+    // Cekmecedeki uzun metin alani: Enter yeni satir acar, Ctrl+Enter kaydeder.
+    node = h("textarea", {
+      class: "local-input local-area",
+      rows: "4",
+      title: "Ctrl+Enter kaydeder, Esc vazgeçer",
+    });
+    node.value = value || "";
+    box = duzeltKutusu(node, field.name);
   } else {
     // Sayi icin de metin kutusu: tarayicinin number girdisi Turkce ondalik
     // virgulu yutuyor, dogrulamayi sunucu yapiyor.
@@ -889,6 +908,8 @@ function localEditor(field, value, hooks) {
 
   node.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
+      // Cok satirli alanda Enter yeni satir acar; kaydeden Ctrl+Enter'dir.
+      if (wide && !(event.ctrlKey || event.metaKey)) return;
       event.preventDefault();
       commit();
     } else if (event.key === "Escape") {
@@ -900,14 +921,30 @@ function localEditor(field, value, hooks) {
   node.addEventListener("blur", () => {
     // Hata gosterilirken odak kaybi kaydi tekrar denemesin.
     if (node.classList.contains("bad")) return;
+    // "Düzelt" paneli aciksa odak kaybi kaydi tetiklemesin: panel kapaninca
+    // ya da oneri uygulaninca normal akis devam eder.
+    if (node.duzeltAktif) return;
     commit();
   });
 
   return {
     node: node,
+    // Mount edilecek dugum: "Düzelt" sarmalayicisi varsa o, yoksa alanin kendisi.
+    box: box || node,
     focus: () => {
       node.focus();
-      if (node.select) node.select();
+      // Cok satirli alanda metnin tumu secili gelirse ilk tusa basildiginda
+      // silinir; imlec sona konur. Tek satirda secmek hizli degistirmeyi
+      // kolaylastiriyor, orada eski davranis kaliyor.
+      if (wide) {
+        try {
+          node.setSelectionRange(node.value.length, node.value.length);
+        } catch (err) {
+          // Tarayici desteklemiyorsa odak yeter.
+        }
+      } else if (node.select) {
+        node.select();
+      }
     },
     detach: () => {},
     fail: (message) => {
@@ -1074,11 +1111,18 @@ function renderDrawerLocal(body) {
     };
     const edit = () => {
       clear(value);
-      const editor = localEditor(item, item.value, {
-        onSave: (fresh) => saveLocalValue(key, item, fresh, editor),
-        onCancel: show,
-      });
-      value.appendChild(editor.node);
+      const editor = localEditor(
+        item,
+        item.value,
+        {
+          onSave: (fresh) => saveLocalValue(key, item, fresh, editor),
+          onCancel: show,
+        },
+        // Cekmecede yer var: metin alanlari cok satirli acilir ve kosesinde
+        // "Düzelt" dugmesi durur.
+        { multiline: true }
+      );
+      value.appendChild(editor.box);
       editor.focus();
     };
     show();
@@ -2384,6 +2428,10 @@ function taskModal(existing, preset) {
   descInput.value = seed.description || "";
   const noteInput = h("textarea", { placeholder: "Kendine not" });
   noteInput.value = seed.note || "";
+  // "Düzelt" dugmesi alani sarmalayan bir kutuya girer; pencereye o kutu
+  // konur, alanin kendisi degil (bkz. duzelt.js).
+  const descBox = duzeltKutusu(descInput, "Açıklama");
+  const noteBox = duzeltKutusu(noteInput, "Not");
   const dueInput = h("input", { type: "date", value: seed.due_date || "" });
 
   const statusSelect = h("select", {}, []);
@@ -2435,8 +2483,8 @@ function taskModal(existing, preset) {
 
   const body = h("div", {}, [
     field("Ad", titleInput),
-    field("Açıklama", descInput),
-    field("Not", noteInput),
+    field("Açıklama", descBox),
+    field("Not", noteBox),
     h("div", { class: "row" }, [field("Son tarih", dueInput), field("Durum", statusSelect)]),
     field("Jira kaydı", h("div", {}, [keyInput, suggestions, keyNote])),
     h("p", {
@@ -2806,6 +2854,8 @@ document.addEventListener("DOMContentLoaded", () => {
       applyAppearance(settings);
       maybeOpenCrawl(settings);
       state.baseUrl = (settings["jira.base_url"] || "").replace(/\/+$/, "");
+      // "Düzelt" dugmesi: ozellik acik mi, Copilot ayarlanmis mi.
+      if (typeof duzeltAyarla === "function") duzeltAyarla(settings);
       // Dugme yalnizca ozellik acikken ve Windows'ta gorunur.
       state.tasks.mail = settings["mail.enabled"] === "1" && settings.mail_supported !== false;
       el("tasks-scan").hidden = !state.tasks.mail;

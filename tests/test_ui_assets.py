@@ -198,6 +198,7 @@ CSS_VARIABLES = (
 
 SCRIPTS = (
     "common.js",
+    "duzelt.js",
     "app.js",
     "settings.js",
     "starfield.js",
@@ -1000,3 +1001,120 @@ probe();
         [node], input=setup + script + "\nasync function probe" + exercise,
         capture_output=True, text=True, check=True)
     assert json.loads(result.stdout) == [False, True, False, True, False, False]
+
+
+# --- "Düzelt": alanin kosesindeki dugme ---------------------------------
+#
+# Tasarim (kullanici onayi): Gorevlerim'deki Aciklama/Not alanlari ve Jira
+# kaydi cekmecesindeki cok satirli yerel alanlar. Davranis testleri
+# `tests/test_copilot_duzelt.py` icinde gercek JavaScript ile kosuyor; burada
+# yalnizca kancalar ve metin dili denetleniyor.
+
+
+def test_the_fix_component_is_loaded_on_the_main_page(api_client):
+    page = api_client.get("/").text
+    assert '<script src="/static/js/duzelt.js"></script>' in page
+    # Bilesen `app.js`ten ONCE yuklenir: pencere cizilirken hazir olmali.
+    assert page.index("duzelt.js") < page.index("js/app.js")
+
+
+def test_the_fix_script_carries_the_button_the_states_and_the_shortcut(api_client):
+    script = api_client.get("/static/js/duzelt.js").text
+    for marker in (
+        "function attachDuzelt",
+        "function duzeltFark",
+        "function duzeltAyarla",
+        '"/api/copilot/duzelt"',
+        '"Düzelt"',
+        '"Düzeltiliyor…"',
+        '"Düzeltme önerisi"',
+        '"Vazgeç"',
+        '"Yeniden dene"',
+        '"Uygula"',
+        '"Copilot ayarlı değil"',
+        "Ayarlar'da sına",
+        '"Düzeltme uygulandı"',
+        "Geri al: Ctrl+Z",
+        "DUZELT_SINIRI = 4000",
+    ):
+        assert marker in script, marker
+    # Kisayol Ctrl+Shift+D, geri alma Ctrl+Z.
+    assert 'event.ctrlKey && event.shiftKey && (event.key === "D"' in script
+    # Once tarayicinin KENDI geri alma yigini denenir.
+    assert 'document.execCommand("insertText"' in script
+    # Cipler: ikisi varsayilan acik, ikisi istege bagli.
+    assert '{ id: "imla", ad: "İmla ve noktalama", varsayilan: true }' in script
+    assert '{ id: "kisa", ad: "Kısalt", varsayilan: false }' in script
+
+
+def test_the_fix_button_is_wired_into_the_task_form_and_the_local_fields(api_client):
+    script = api_client.get("/static/js/app.js").text
+    assert "function duzeltKutusu" in script
+    # Gorev penceresi: alanin kendisi degil, sarmalayici kutusu konur.
+    assert 'field("Açıklama", descBox)' in script
+    assert 'field("Not", noteBox)' in script
+    # Jira kaydi cekmecesi: yerel metin alani cok satirli acilir.
+    assert "{ multiline: true }" in script
+    assert 'class: "local-input local-area"' in script
+    assert "value.appendChild(editor.box);" in script
+    # Panel aciksa odak kaybi kaydi tetiklemesin.
+    assert "if (node.duzeltAktif) return;" in script
+
+
+def test_the_fix_styles_exist_and_never_shout_in_turkish(api_client):
+    css = api_client.get("/static/css/app.css").text
+    for name in (
+        ".fix-wrap",
+        ".fix {",
+        ".fix.on",
+        ".fix.busy",
+        ".fix-spin",
+        ".fix-error",
+        ".suggest {",
+        ".suggest-meta",
+        ".cmp {",
+        ".cmp del",
+        ".cmp ins",
+        ".suggest .chip",
+        ".local-input.local-area",
+    ):
+        assert name in css, name
+    # Donen halka hareket tercihine saygi duyar.
+    assert "@keyframes fix-spin" in css
+    donen = css.split(".fix-spin {", 1)[1]
+    assert "animation: none" in donen
+    # Turkce metne `text-transform: uppercase` uygulanmaz.
+    for blok in (".fix {", ".cmp h4 {", ".suggest .chip {"):
+        govde = css.split(blok, 1)[1].split("}", 1)[0]
+        assert "text-transform: none" in govde, blok
+    # Bilesenin butun bloklari: hicbirinde buyuk harfe zorlama yok.
+    bolum = css.split("/* --- \"Düzelt\"", 1)[1]
+    assert "text-transform: uppercase" not in bolum
+
+
+def test_the_fix_settings_are_on_the_copilot_card(api_client):
+    page = api_client.get("/settings").text
+    kart = page.split('id="copilot-card"', 1)[1].split("</section>", 1)[0]
+    for marker in (
+        ">Metin düzeltme<",
+        'id="copilot-duzelt-acik"',
+        'id="copilot-duzelt-ton"',
+        'value="notr"',
+        'value="resmi"',
+        'id="copilot-duzelt-sablon"',
+        'id="copilot-duzelt-varsayilan"',
+        'id="copilot-duzelt-save"',
+        "Ctrl+Shift+D",
+    ):
+        assert marker in kart, marker
+    script = api_client.get("/static/js/settings.js").text
+    for marker in (
+        "copilot.duzelt_acik",
+        "copilot.duzelt_ton",
+        "copilot.duzelt_sablon",
+        "copilot_duzelt_sablon_varsayilan",
+        "function collectDuzelt",
+        "function resetDuzeltTemplate",
+    ):
+        assert marker in script, marker
+

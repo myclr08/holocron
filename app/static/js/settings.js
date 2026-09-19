@@ -801,6 +801,62 @@ function fillCopilot(settings) {
   // Otomatik bulunan yol ipucu olarak durur: kullanici ne calistigini gorur.
   const sonYol = settings["copilot.yolu_son"] || "";
   copilotField("copilot-sonuc").textContent = sonYol ? "Son bulunan: " + sonYol : "";
+  fillDuzelt(settings);
+}
+
+// --- Metin duzeltme ("Düzelt" dugmesi) ---------------------------------
+//
+// Gomulu sablon sunucudan gelir (`copilot_duzelt_sablon_varsayilan`):
+// "Şablonu varsayılana döndür" onu kutuya yazar, kaydedilen bos deger de
+// gomulu sablon demektir.
+
+let duzeltVarsayilanSablon = "";
+
+function fillDuzelt(settings) {
+  duzeltVarsayilanSablon = settings["copilot_duzelt_sablon_varsayilan"] || "";
+  copilotField("copilot-duzelt-acik").checked = settings["copilot.duzelt_acik"] !== "0";
+  copilotField("copilot-duzelt-ton").value =
+    settings["copilot.duzelt_ton"] === "resmi" ? "resmi" : "notr";
+  const sablon = settings["copilot.duzelt_sablon"] || "";
+  copilotField("copilot-duzelt-sablon").value = sablon || duzeltVarsayilanSablon;
+  // Gomulu sablon oldugu gibi duruyorsa ayara bos yazilir (bkz. collectDuzelt).
+  copilotField("copilot-duzelt-sablon").dataset.ozel = sablon ? "1" : "";
+}
+
+function collectDuzelt() {
+  const kutu = copilotField("copilot-duzelt-sablon");
+  const yazilan = kutu.value.trim();
+  return {
+    "copilot.duzelt_acik": copilotField("copilot-duzelt-acik").checked ? "1" : "0",
+    "copilot.duzelt_ton": copilotField("copilot-duzelt-ton").value,
+    // Gomulu sablonun aynisi kaydedilmez: sablon degisirse kullanici yeni
+    // surumu kendiliginden alsin.
+    "copilot.duzelt_sablon":
+      !yazilan || yazilan === duzeltVarsayilanSablon.trim() ? "" : kutu.value,
+  };
+}
+
+async function saveDuzelt() {
+  const status = document.getElementById("copilot-duzelt-status");
+  try {
+    const data = await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify(collectDuzelt()),
+    });
+    fillDuzelt(data.settings || {});
+    setStatus(status, "Metin düzeltme ayarları kaydedildi.", "ok");
+  } catch (err) {
+    setStatus(status, err.message, "error");
+  }
+}
+
+function resetDuzeltTemplate() {
+  copilotField("copilot-duzelt-sablon").value = duzeltVarsayilanSablon;
+  setStatus(
+    document.getElementById("copilot-duzelt-status"),
+    "Gömülü şablon yazıldı; Kaydet'e basınca geçerli olur.",
+    null
+  );
 }
 
 /** Ayar JSON listesi de olabilir, virgullu metin de: ikisi de okunur. */
@@ -902,6 +958,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("teams-save").addEventListener("click", saveTeams);
   document.getElementById("copilot-save").addEventListener("click", saveCopilot);
   document.getElementById("copilot-test").addEventListener("click", testCopilot);
+  document.getElementById("copilot-duzelt-save").addEventListener("click", saveDuzelt);
+  document
+    .getElementById("copilot-duzelt-varsayilan")
+    .addEventListener("click", resetDuzeltTemplate);
   document.getElementById("clear-secret").addEventListener("click", async () => {
     const status = document.getElementById("status");
     if (!confirm("Kayıtlı sır silinsin mi?")) return;
