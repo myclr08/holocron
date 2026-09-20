@@ -272,6 +272,7 @@ CSS_VARIABLES = (
 SCRIPTS = (
     "common.js",
     "teamslink.js",
+    "zenginalan.js",
     "duzelt.js",
     "app.js",
     "settings.js",
@@ -1634,7 +1635,11 @@ def test_the_teams_link_script_carries_the_token_the_chip_and_the_stripper(api_c
 
 def test_teams_paste_is_wired_where_the_fix_button_is(api_client):
     script = api_client.get("/static/js/app.js").text
-    assert 'if (typeof attachTeamsLink === "function") attachTeamsLink(alan);' in script
+    # Duz textarea'da yapistirma kancasi; zengin alan kendi karsiliyor.
+    assert (
+        'if (!alan.zenginAlan && typeof attachTeamsLink === "function") attachTeamsLink(alan);'
+        in script
+    )
     # Salt-okunur gorunumler ciziciden gecer.
     assert "function metinCiz" in script
     for marker in (
@@ -1642,6 +1647,25 @@ def test_teams_paste_is_wired_where_the_fix_button_is(api_client):
         'metinCiz(h("span", { class: "local-text" }, []), cell.text || "—")',
         'metinCiz(h("div", { class: "history-value" }, []), value || "— (boş)")',
         'h("button", { class: "local-open", title: "Düzenle", onclick: () => edit() }, [])',
+        # Jira hucreleri ve cekmecedeki Jira alan degerleri de cizicidir.
+        "metinCiz(td, cell.text)",
+        'metinCiz(h("div", { class: "value" }, []), item.empty ? "—" : item.text)',
+        # `title` duz metindir: belirtec orada kisa etiketine iner.
+        "title: metinDuz(cell.text)",
+    ):
+        assert marker in script, marker
+
+
+def test_the_multiline_fields_are_the_rich_editor(api_client):
+    """Gorev alanlari ve cekmecedeki uzun yerel alan zengin alandir."""
+    script = api_client.get("/static/js/app.js").text
+    assert "function metinAlani" in script
+    assert 'if (typeof zenginAlanYap === "function") return zenginAlanYap(opt);' in script
+    for marker in (
+        'const descInput = metinAlani({',
+        'const sonInput = metinAlani({ placeholder: "Nerede kaldı?"',
+        'const noteInput = metinAlani({ placeholder: "Kendine not"',
+        'node = metinAlani({\n      class: "local-input local-area",',
     ):
         assert marker in script, marker
 

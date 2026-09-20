@@ -16,6 +16,10 @@ const DUZELT_SINIRI = 4000;
 // tabloyu kurmak yerine tek blok fark gosterilir (tarayici kilitlenmesin).
 const DUZELT_FARK_SINIRI = 1500000;
 
+// Teams belirteci Copilot'a GITMEZ: yerine bu yer tutucu konur, cevapta
+// yerine geri yazilir. Model uzun adresi bozmasin, kisaltmasin, "duzeltmesin".
+const DUZELT_YER_TUTUCU = /\[\[\s*T(\d{1,3})\s*\]\]/g;
+
 // Oneri panelindeki cipler. Ilk ikisi varsayilan acik.
 const DUZELT_SECENEKLER = [
   { id: "imla", ad: "İmla ve noktalama", varsayilan: true },
@@ -41,6 +45,56 @@ function duzeltAyarla(settings) {
     veri["copilot.son_model"]
   );
   return duzeltAyar;
+}
+
+// --- Teams belirteci: yer tutucuyla koruma ------------------------------
+
+/**
+ * Belirtecleri yer tutucuya cevirir: `{metin, belirtecler}`.
+ *
+ * Copilot'a giden metinde `[[teams: … |https://…]]` yerine `[[T1]]` durur:
+ * hem model uzun adresi bozamaz hem de alan siniri belirtecin uzunlugu
+ * yuzunden dolmaz.
+ */
+function duzeltBelirtecSakla(metin) {
+  const ham = metin === null || metin === undefined ? "" : String(metin);
+  const belirtecler = [];
+  if (typeof TEAMSLINK_BELIRTEC === "undefined") return { metin: ham, belirtecler: belirtecler };
+  TEAMSLINK_BELIRTEC.lastIndex = 0;
+  const yeni = ham.replace(TEAMSLINK_BELIRTEC, (hepsi) => {
+    belirtecler.push(hepsi);
+    return `[[T${belirtecler.length}]]`;
+  });
+  return { metin: yeni, belirtecler: belirtecler };
+}
+
+/**
+ * Yer tutuculari geri koyar.
+ *
+ * Model bir yer tutucuyu yutmussa o belirtec KAYBOLMAZ: metnin sonuna kendi
+ * satirinda eklenir. Kaynak baglantisi bir duzeltme yuzunden silinmemeli.
+ */
+function duzeltBelirtecGeri(metin, belirtecler) {
+  const ham = metin === null || metin === undefined ? "" : String(metin);
+  const liste = belirtecler || [];
+  if (!liste.length) return ham;
+  const kullanildi = liste.map(() => false);
+  DUZELT_YER_TUTUCU.lastIndex = 0;
+  let sonuc = ham.replace(DUZELT_YER_TUTUCU, (hepsi, sira) => {
+    const yer = Number(sira) - 1;
+    if (yer < 0 || yer >= liste.length) return "";
+    kullanildi[yer] = true;
+    return liste[yer];
+  });
+  const eksik = liste.filter((belirtec, yer) => !kullanildi[yer]);
+  if (eksik.length) sonuc = (sonuc.replace(/\s+$/, "") + "\n" + eksik.join("\n")).trim();
+  return sonuc;
+}
+
+/** Alanin metni: zengin alan da textarea da ayni `value` ile okunur. */
+function duzeltMetin(alan) {
+  const deger = alan && typeof alan.deger === "function" ? alan.deger() : (alan || {}).value;
+  return deger === null || deger === undefined ? "" : String(deger);
 }
 
 // --- kucuk DOM yardimcilari ---------------------------------------------
@@ -157,13 +211,20 @@ function duzeltFarkSayisi(ops) {
   return sayi;
 }
 
+/** Fark metnini bir dugume basar: Teams belirteci burada da CIP olur. */
+function duzeltFarkMetni(kutu, metin) {
+  if (typeof teamsLinkCiz === "function") kutu.appendChild(teamsLinkCiz(metin));
+  else kutu.appendChild(document.createTextNode(metin));
+  return kutu;
+}
+
 /** Fark parcalarini bir kutuya cizer: `hangi` "del" ya da "ins". */
 function duzeltFarkKutusu(baslik, ops, hangi) {
   const kutu = duzeltDugum("div", {}, [duzeltDugum("h4", { text: baslik })]);
   (ops || []).forEach((op) => {
     if (op.tur !== "ayni" && op.tur !== hangi) return;
-    if (op.tur === "ayni") kutu.appendChild(document.createTextNode(op.metin));
-    else kutu.appendChild(duzeltDugum(hangi, { text: op.metin }));
+    if (op.tur === "ayni") duzeltFarkMetni(kutu, op.metin);
+    else kutu.appendChild(duzeltFarkMetni(duzeltDugum(hangi, {}), op.metin));
   });
   return kutu;
 }
@@ -221,8 +282,9 @@ function attachDuzelt(alan, secenekler) {
     }
     dugme.hidden = false;
     if (duzeltCalisiyor && alan.duzeltAktif) return; // "Düzeltiliyor…" kalsin
-    const uzunluk = (alan.value || "").length;
-    const bos = !(alan.value || "").trim();
+    // Olcu Copilot'a GIDEN metnin olcusudur: belirtec yer tutucuya iner.
+    const uzunluk = duzeltBelirtecSakla(duzeltMetin(alan)).metin.length;
+    const bos = !duzeltMetin(alan).trim();
     const uzun = uzunluk > DUZELT_SINIRI;
     dugme.disabled = bos || uzun;
     dugme.classList.remove("busy");
@@ -263,7 +325,7 @@ function attachDuzelt(alan, secenekler) {
   }
 
   function panelCiz() {
-    const ops = duzeltFark(alan.value, sonuc.metin);
+    const ops = duzeltFark(duzeltMetin(alan), sonuc.metin);
     const bilgi = [
       sonuc.model || "Copilot",
       (sonuc.sn === 0 || sonuc.sn ? sonuc.sn : "?") + " sn",
@@ -330,18 +392,26 @@ function attachDuzelt(alan, secenekler) {
    */
   function uygula() {
     const yeniMetin = sonuc.metin;
-    const eski = alan.value;
+    const eski = duzeltMetin(alan);
     panelKapat();
     alan.focus();
     let oldu = false;
     try {
-      if (alan.setSelectionRange) alan.setSelectionRange(0, alan.value.length);
-      else if (alan.select) alan.select();
-      oldu = document.execCommand("insertText", false, yeniMetin);
+      if (alan.zenginAlan) {
+        // Zengin alanda metin CIPLERIYLE bastan cizilir; `insertText` belirteci
+        // duz yaziya cevirirdi.
+        oldu = false;
+      } else if (alan.setSelectionRange) {
+        alan.setSelectionRange(0, (alan.value || "").length);
+        oldu = document.execCommand("insertText", false, yeniMetin);
+      } else if (alan.select) {
+        alan.select();
+        oldu = document.execCommand("insertText", false, yeniMetin);
+      }
     } catch (err) {
       oldu = false;
     }
-    const kendiYigin = !oldu || alan.value !== yeniMetin;
+    const kendiYigin = !oldu || duzeltMetin(alan) !== yeniMetin;
     if (kendiYigin) alan.value = yeniMetin;
     try {
       if (typeof Event === "function") {
@@ -366,15 +436,20 @@ function attachDuzelt(alan, secenekler) {
       hataGoster("Copilot ayarlı değil.", "Ayarlar → Copilot");
       return;
     }
-    const metin = alan.value || "";
-    if (!metin.trim() || metin.length > DUZELT_SINIRI) return;
+    const metin = duzeltMetin(alan);
+    const korunan = duzeltBelirtecSakla(metin);
+    if (!metin.trim() || korunan.metin.length > DUZELT_SINIRI) return;
     mesgulAc();
     try {
       const cevap = await api("/api/copilot/duzelt", {
         method: "POST",
-        body: JSON.stringify({ metin: metin, secenekler: secili }),
+        body: JSON.stringify({ metin: korunan.metin, secenekler: secili }),
       });
       mesgulKapat();
+      if (cevap && cevap.metin) {
+        // Belirtecler Copilot'un eline hic gecmedi: simdi yerlerine doner.
+        cevap.metin = duzeltBelirtecGeri(cevap.metin, korunan.belirtecler);
+      }
       if (!cevap || cevap.hata || !cevap.metin) {
         alan.duzeltAktif = false;
         durumTazele();

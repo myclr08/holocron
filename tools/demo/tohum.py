@@ -78,9 +78,20 @@ FILOLAR: tuple[dict[str, Any], ...] = (
 # Teams mesaj belirteci (uydurma kiraci/sohbet kimlikleriyle): bir gorevin
 # aciklamasinda ve bir kaydin yerel alaninda duruyor. Ekranda tiklanabilir bir
 # cipe donusur, Excel'e ve e-postaya HIC girmez (bkz. app/teamslink.py).
+#
+# Birebir yazismada Teams'in on satiri GERCEKTE soyle gelir:
+#
+#   Deniz Akgün-Örnek Bank-Kredi Sistemleri-Yazılım Mühendisi |
+#   Deniz Akgün-Örnek Bank-Kredi Sistemleri-Yazılım Mühendisi 2 sohbetinde
+#   gönderildi, gönderme zamanı: Eyl 16, 2026, 14:14
+#
+# Yani sohbet adi gonderenin BASLIGININ kendisidir. Tohumdaki belirtec bu ham
+# haliyle durur; arayuz onu cizerken "Deniz Akgün · 16 Eyl 2026 14:14" diye
+# kisaltir (bkz. teamsLinkEtiketKisalt). Veri hic degismez.
 TEAMS_KIRACI = "00000000-0000-4000-8000-000000000001"
+TEAMS_GONDEREN = "Deniz Akgün-Örnek Bank-Kredi Sistemleri-Yazılım Mühendisi"
 TEAMS_SOHBET_BELIRTEC = (
-    "[[teams: Deniz Akgün · Ödeme ekibi · 16 Eyl 2026 14:14|"
+    f"[[teams: {TEAMS_GONDEREN} · {TEAMS_GONDEREN} 2 · 16 Eyl 2026 14:14|"
     "https://teams.microsoft.com/l/message/"
     "19:2f1c9a7b4d8e4f0b9c3a5d6e7f801234@unq.gbl.spaces/1789557243396"
     "?groupId=&parentMessageId=1789557243396"
@@ -206,7 +217,7 @@ SON_DURUMLAR: dict[str, tuple[tuple[int, str], ...]] = {
     "Mutabakat raporu farkını çıkar": (
         (72, "Fark listesi çıkarıldı, 14 kalem var."),
         (30, "Sekiz kalem kur farkından; kalanı inceleniyor."),
-        (4, "İş birimine ara özet gönderildi, dönüş bekleniyor."),
+        (4, f"İş birimine ara özet gönderildi: {TEAMS_SOHBET_BELIRTEC}"),
     ),
     "Test ortamında veri maskeleme kontrolü": (
         (96, "Maskeleme betiği test ortamında koştu."),

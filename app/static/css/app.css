@@ -2504,8 +2504,10 @@ html.no-motion *::after {
 .fix-wrap { position: relative; display: block; }
 
 /* Dugme alanin sag alt kosesinde durur: metnin altina bosluk birakilir. */
-.fix-wrap > textarea { padding-bottom: 34px; }
-.fix-wrap > textarea.is-duzeltiliyor { opacity: .55; }
+.fix-wrap > textarea,
+.fix-wrap > .zengin-alan { padding-bottom: 34px; }
+.fix-wrap > textarea.is-duzeltiliyor,
+.fix-wrap > .zengin-alan.is-duzeltiliyor { opacity: .55; }
 
 .fix {
   position: absolute;
@@ -2645,11 +2647,15 @@ html.no-motion .fix-spin { animation: none; }
 /* Cekmecedeki cok satirli yerel alan: grid hucresi tek satir kalir. */
 .local-input.local-area {
   min-height: 92px;
+  max-height: 260px;
   padding-bottom: 34px;
   font-family: var(--font);
   font-size: 13px;
   resize: vertical;
 }
+
+/* Zengin alan cekmecede de ayni olculerde durur (resize yok: kutu buyur). */
+.zengin-alan.local-area { resize: none; }
 
 /* --- Teams mesaj cipi ---------------------------------------------------
  *
@@ -2698,6 +2704,90 @@ html.no-motion .fix-spin { animation: none; }
 /* Metin icindeki duz baglanti; belirtec olmayan http(s) adresleri. */
 .text-link { color: var(--accent); text-decoration: underline; word-break: break-all; }
 .text-link:hover { color: var(--accent-2); }
+
+/* Filo tablosunda cip satiri buyutmez: tek satir, tasarsa "…". */
+.grid td .teams-msg {
+  max-width: 100%;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+.grid td .teams-msg .teams-msg-text { max-width: 28ch; }
+
+/* --- zengin alan: canli cipli duzenleyici -------------------------------
+ *
+ * Bilesen `app/static/js/zenginalan.js`. Kutu bir `contenteditable`; icinde
+ * duz metin, satir sonlari ve atomik cipler durur. Satir sonlari GERCEK
+ * karakterdir, bu yuzden `pre-wrap` sart.
+ */
+.zengin-alan {
+  width: 100%;
+  min-height: 130px;
+  max-height: 340px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  transition: border-color var(--speed) var(--ease), box-shadow var(--speed) var(--ease);
+}
+
+.zengin-alan:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(255, 232, 31, .22);
+}
+
+/* Yer tutucu: gercek metin degil, bos alanda cizilen bir golge. */
+.zengin-alan.is-bos::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* Duzenleyicinin icindeki cip bir BUTUNDUR: secilmez, surtuklenmez. */
+.zengin-alan .teams-msg {
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.zengin-alan .teams-msg .teams-msg-text { max-width: 34ch; }
+
+/* Cipe tiklayinca acilan kucuk menu. */
+.teams-menu {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-width: 132px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .45);
+}
+
+.teams-menu button {
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.teams-menu button:hover { background: var(--panel-2); color: var(--accent); }
 
 /* --- gorev karti: son durum satiri -------------------------------------- */
 

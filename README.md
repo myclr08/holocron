@@ -532,16 +532,31 @@ Holocron bunu **tek satırlık bir işarete** çevirir:
 - **Nerede çalışır.** Görev penceresindeki Açıklama / Son durum / Not alanları ve
   Jira kaydı çekmecesindeki çok satırlı yerel metin alanları — yani "Düzelt"
   düğmesi olan her alan. Panoda başka metin de varsa yalnızca blok dönüşür.
-- **Ne yazar.** Gönderenin adı ön satırdaki ilk tireye kadar okunur, sohbet adı
-  "… sohbetinde" arasından; kanal mesajında bağlantının kendi
-  `teamName` / `channelName` bilgisi kullanılır. Zaman ön satırdan çözülür
-  (Türkçe/İngilizce ay adları, 12 ya da 24 saat); çözülemezse mesaj kimliğinden
-  (Unix milisaniye) türetilir. Ön satır hiç yoksa işaret "Teams mesajı" der.
-- **Nasıl görünür.** İşaret düz metindir: düzenleme kipinde onu görür ve
-  silebilirsiniz. Salt-okunur görünümlerde (kanban kartı, grid hücresi, çekmece
-  değeri, geçmiş popover'ı) küçük bir çipe döner; tıklayınca önce `msteams:`
-  denenir, açılmazsa tarayıcı yolu kullanılır. Sohbet adı çipin ipucunda durur.
-  Metin içindeki düz `http(s)://` bağlantılar da aynı görünümde tıklanabilir.
+- **Ne yazar.** Gönderenin adı ön satırdaki ilk tireye kadar okunur ("Ad
+  Soyad-Şirket-Birim-Unvan" → "Ad Soyad"), sohbet adı "… sohbetinde" arasından;
+  kanal mesajında bağlantının kendi `teamName` / `channelName` bilgisi
+  kullanılır. Zaman ön satırdan çözülür (Türkçe/İngilizce ay adları, 12 ya da
+  24 saat); çözülemezse mesaj kimliğinden (Unix milisaniye) türetilir. Ön satır
+  hiç yoksa işaret "Teams mesajı" der.
+- **Etiket kısa tutulur.** Birebir yazışmalarda Teams sohbete gönderenin
+  başlığını veriyor ("… Yazılım Mühendisi 2"); böyle bir ad hiçbir şey
+  anlatmadığı için **atlanır**. Kalırsa etiket `Ad · Sohbet · tarih` olur ve
+  çipte en fazla 48 karakter görünür: önce sohbet adı düşer, sonra metin "…"
+  ile kırpılır. Tam hâli çipin ipucunda durur. Eski kayıtlardaki uzun işaretler
+  de **çizilirken** aynı kuralla kısalır; verinin kendisi hiç değişmez.
+- **Nasıl görünür.** Çok satırlı alanlar zengin bir düzenleyicidir
+  (`zenginalan.js`): yapıştırdığınız anda, **kaydetmeyi beklemeden** çipi
+  görürsünüz. Çip bir bütündür — imleç içine girmez, tek Backspace/Delete onu
+  siler, tıklayınca "Teams'te aç / Kaldır" menüsü açılır. Alanın değeri yine
+  düz metindir: veritabanına `[[teams:…|…]]` olarak yazılır.
+  Salt-okunur görünümlerde (kanban kartı, grid hücresi, çekmece değeri, geçmiş
+  popover'ı, "Düzelt" fark paneli) aynı çip çizilir; tıklayınca önce `msteams:`
+  denenir, açılmazsa tarayıcı yolu kullanılır. Metin içindeki düz `http(s)://`
+  bağlantılar da aynı görünümde tıklanabilir.
+- **"Düzelt" işareti bozmaz.** Copilot'a giden metinde her işaret `[[T1]]` yer
+  tutucusuna iner, dönen metinde yerine konur; model uzun adresi ne kısaltabilir
+  ne de "düzeltebilir". Alan uzunluğu sınırı da bu kısaltılmış metne göre
+  ölçülür.
 - **Nereye girmez.** İşaret **uygulamanın içinde kalır**: Excel dökümlerinde ve
   e-posta / Teams mesaj gövdelerinde ne adres ne çip ne yer tutucu olarak görünür,
   metinden temizlenir. Düz `http(s)://` bağlantılar dışa aktarımda olduğu gibi kalır.
@@ -1237,7 +1252,8 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/static/js/campaign.js` | Sefer paneli (kahraman şeridi, emirler, rozetler, defter) |
 | `app/static/js/campaign-settings.js` | Ayarlar → Sefer kartı (XP kuralları, koruma durumu) |
 | `app/static/js/duzelt.js` | "Düzelt" bileşeni: düğme, öneri paneli, kelime düzeyinde fark |
-| `app/static/js/teamslink.js` | Teams mesajı iliştirme: yapıştırma çevirisi, çip, temizleme |
+| `app/static/js/teamslink.js` | Teams mesajı iliştirme: yapıştırma çevirisi, çip, etiket kısaltma, temizleme |
+| `app/static/js/zenginalan.js` | Çok satırlı alanların zengin düzenleyicisi: canlı, atomik Teams çipi |
 | `app/static/img/gamify/` | Rütbe görselleri ve elle çizilmiş rozet PNG'leri |
 | `app/static/rozetler/` | Rozet simgeleri (`tools/rozet_simgeleri.py` üretir) |
 | `tests/` | pytest testleri, sahte Jira sunucusu |

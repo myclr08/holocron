@@ -226,13 +226,95 @@ def test_the_token_is_drawn_as_a_clickable_chip():
     turler = [(kid["tag"], kid["sinif"]) for kid in kutu["cocuklar"]]
     assert turler == [("#text", ""), ("a", "teams-msg"), ("#text", "")]
     cip = kutu["cocuklar"][1]
-    # Cipte gonderen ve zaman; sohbet adi `title`'da durur.
-    assert cip["metin"] == "Deniz Akgün · 16 Eyl 2026 14:14"
-    assert cip["attrs"]["title"] == "Ödeme ekibi"
+    # Etiket 48 karakterin altinda: gonderen, sohbet ve zaman birlikte durur.
+    assert cip["metin"] == "Deniz Akgün · Ödeme ekibi · 16 Eyl 2026 14:14"
+    # Tam bilgi `title`'da.
+    assert cip["attrs"]["title"] == "Deniz Akgün · Ödeme ekibi · 16 Eyl 2026 14:14"
     assert cip["attrs"]["href"] == SOHBET_ADRESI
     # Ikon marka logosu degil, kendi cizdigimiz balon.
     assert cip["cocuklar"][0]["tag"] == "svg"
-    assert kutu["metin"] == "önce Deniz Akgün · 16 Eyl 2026 14:14 sonra"
+    assert kutu["metin"] == "önce Deniz Akgün · Ödeme ekibi · 16 Eyl 2026 14:14 sonra"
+
+
+# --- etiket kisaltma: gonderen, tekrar eden sohbet, 48 karakter ---------
+
+# Birebir yazismada Teams sohbete gonderenin BASLIGINI veriyor; ikincisine de
+# " 2" ekliyor. Bu ad cipte hicbir sey anlatmaz.
+GONDEREN = "Deniz Akgün-Örnek Bank-Kredi Sistemleri-Yazılım Mühendisi"
+AYNILI_ON_SATIR = (
+    f"{GONDEREN} | {GONDEREN} 2 sohbetinde gönderildi, "
+    "gönderme zamanı: Eyl 16, 2026, 14:14"
+)
+UZUN_BELIRTEC = (
+    f"[[teams: {GONDEREN} · {GONDEREN} 2 · 16 Eyl 2026 14:14|{SOHBET_ADRESI}]]"
+)
+
+
+def test_a_chat_named_after_the_sender_is_skipped():
+    """Sohbet adi gonderenin basligiyla basliyorsa etikete girmez."""
+    assert _yapistir(f"{AYNILI_ON_SATIR}\n\n{SOHBET_ADRESI}") == (
+        f"[[teams: Deniz Akgün · 16 Eyl 2026 14:14|{SOHBET_ADRESI}]]"
+    )
+
+
+def test_the_counter_suffix_does_not_make_the_chat_name_different():
+    veri = _node_kos(
+        SHIM
+        + "process.stdout.write(JSON.stringify({"
+        + "sayac: teamsLinkSohbetTekrar('Ada Yılmaz-Örnek-Birim', 'Ada Yılmaz',"
+        + " 'Ada Yılmaz-Örnek-Birim 3'),"
+        + "baska: teamsLinkSohbetTekrar('Ada Yılmaz-Örnek-Birim', 'Ada Yılmaz', 'Ödeme ekibi'),"
+        + "adayni: teamsLinkSohbetTekrar('Ada Yılmaz-Örnek-Birim', 'Ada Yılmaz', 'Ada Yılmaz'),"
+        + "}));"
+    )
+    assert veri == {"sayac": True, "baska": False, "adayni": True}
+
+
+def test_an_old_long_token_is_shortened_when_it_is_drawn():
+    """Kayittaki belirtec DEGISMEZ; cipte yalnizca kisaltilmisi gorunur."""
+    kutu = _ciz(UZUN_BELIRTEC)
+    cip = kutu["cocuklar"][0]
+    assert cip["sinif"] == "teams-msg"
+    assert cip["metin"] == "Deniz Akgün · 16 Eyl 2026 14:14"
+    # Tam etiket `title`'da duruyor: bilgi kaybolmuyor.
+    assert cip["attrs"]["title"] == f"{GONDEREN} · {GONDEREN} 2 · 16 Eyl 2026 14:14"
+
+
+def test_a_label_that_is_still_too_long_is_cut_at_48_characters():
+    uzun = "Uluslararası Ödeme Sistemleri Mutabakat Masası Sorumlusu"
+    veri = _node_kos(
+        SHIM
+        + "process.stdout.write(JSON.stringify({"
+        + "kisa: teamsLinkEtiketKisalt(" + json.dumps(f"{uzun} · 16 Eyl 2026 14:14") + "),"
+        + "sinir: TEAMSLINK_ETIKET_SINIRI,"
+        + "}));"
+    )
+    assert veri["sinir"] == 48
+    assert len(veri["kisa"]) <= 48
+    assert veri["kisa"].endswith("…")
+    assert veri["kisa"].startswith("Uluslararası Ödeme")
+
+
+def test_the_chat_name_is_the_first_thing_dropped_when_the_label_is_long():
+    uzun_sohbet = "Ödeme Mutabakat ve Raporlama Çalışma Grubu"
+    veri = _node_kos(
+        SHIM
+        + "process.stdout.write(JSON.stringify(teamsLinkEtiketKisalt("
+        + json.dumps(f"Deniz Akgün · {uzun_sohbet} · 16 Eyl 2026 14:14")
+        + ")));"
+    )
+    assert veri == "Deniz Akgün · 16 Eyl 2026 14:14"
+
+
+def test_plain_text_places_show_the_short_label_not_the_raw_token():
+    """`title` gibi duz metin yerlerde ham belirtec gorunmez."""
+    veri = _node_kos(
+        SHIM
+        + "process.stdout.write(JSON.stringify(teamsLinkDuzMetin("
+        + json.dumps(f"not {UZUN_BELIRTEC} sonu")
+        + ")));"
+    )
+    assert veri == "not Deniz Akgün · 16 Eyl 2026 14:14 sonu"
 
 
 def test_a_plain_https_link_is_clickable_too():
@@ -280,6 +362,24 @@ def test_javascript_strips_the_token_exactly_like_python():
         + ".map(teamsLinkTemizle)));"
     )
     assert veri == [beklenen for _, beklenen in TEMIZ_ORNEKLER]
+
+
+def test_the_grid_never_cuts_a_token_in_half():
+    """Hucre kirpmasi belirtecin ortasindan gecerse cip cizilemezdi."""
+    from app import fields
+
+    dolgu = "x" * 190
+    ham = f"{dolgu} {BELIRTEC} kuyruk"
+    kirpik = fields.truncate(ham)
+    # Belirtec BUTUN halde iceride: ekranda kisa bir cipe donusur.
+    assert BELIRTEC in kirpik
+    assert kirpik.endswith("…")
+    assert "kuyruk" not in kirpik
+    # Belirtece hic dokunmayan kirpma eskisi gibi calisir.
+    assert fields.truncate("y" * 300) == "y" * 199 + "…"
+    assert fields.truncate("kısa") == "kısa"
+    # Belirtec kesim noktasindan SONRA basliyorsa metin yine kisalir.
+    assert fields.truncate(f"{'z' * 400} {BELIRTEC}") == "z" * 199 + "…"
 
 
 def test_the_helper_reports_whether_a_token_is_there():

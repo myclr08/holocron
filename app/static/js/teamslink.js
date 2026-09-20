@@ -36,6 +36,14 @@ const TEAMSLINK_SON_NOKTALAMA = /[.,;:!?)\]}'"»…]+$/;
 // Etiketin parcalari bununla ayrilir: "Ad · Sohbet · 16 Eyl 2026 14:14".
 const TEAMSLINK_AYRAC = " · ";
 
+// Cipte gorunen etiketin ust siniri. Fazlasi "…" ile kirpilir; tam bilgi
+// `title`'da durur. Sinir hucre yuksekligine gore secildi: tek satir.
+const TEAMSLINK_ETIKET_SINIRI = 48;
+
+// Sohbet adinin sonundaki sayac: Teams ayni basliktan ikincisini "… 2" diye
+// adlandiriyor. Karsilastirmada bu ek dusurulur.
+const TEAMSLINK_SAYAC = /\s*[(\[]?\d{1,3}[)\]]?$/;
+
 // On satiri olmayan baglantinin adi.
 const TEAMSLINK_ADSIZ = "Teams mesajı";
 
@@ -212,18 +220,103 @@ function teamsLinkEtiketTemiz(metin) {
     .trim();
 }
 
+/** Gonderenin TAM basligi: on satirda `|` oncesi kalan. */
+function teamsLinkBaslikCoz(onSatir) {
+  const ham = String(onSatir || "");
+  const boru = ham.indexOf("|");
+  return teamsLinkEtiketTemiz(boru < 0 ? ham : ham.slice(0, boru));
+}
+
+/**
+ * Baslikta gonderenin adi: ilk `-` oncesi.
+ *
+ * Teams "Ad Soyad-Şirket-Birim-Unvan" yazar; cipte yalnizca ad durur, geri
+ * kalani `title`'a birakilir.
+ */
+function teamsLinkAdKirp(baslik) {
+  const ham = teamsLinkEtiketTemiz(baslik);
+  const tire = ham.indexOf("-");
+  return teamsLinkEtiketTemiz(tire < 0 ? ham : ham.slice(0, tire));
+}
+
 /**
  * On satirdan gonderen adini cikarir.
  *
- * Teams "Ad Soyad-Şirket-Birim-Unvan" yazar: ad ilk `-` oncesidir. Tire hic
- * yoksa `|` oncesindeki butun metin ad sayilir.
+ * Tire hic yoksa `|` oncesindeki butun metin ad sayilir.
  */
 function teamsLinkAdCoz(onSatir) {
-  const ham = String(onSatir || "");
-  const boru = ham.indexOf("|");
-  const bas = (boru < 0 ? ham : ham.slice(0, boru)).trim();
-  const tire = bas.indexOf("-");
-  return teamsLinkEtiketTemiz(tire < 0 ? bas : bas.slice(0, tire));
+  return teamsLinkAdKirp(teamsLinkBaslikCoz(onSatir));
+}
+
+/** Sondaki sayaci atar: "Deniz Akgün-… 2" -> "Deniz Akgün-…". */
+function teamsLinkSayacKirp(metin) {
+  return String(metin || "").replace(TEAMSLINK_SAYAC, "").trim();
+}
+
+/**
+ * Sohbet adi gondereni tekrar mi ediyor?
+ *
+ * Birebir yazismalarda Teams sohbete gonderenin basligini veriyor ("Ad
+ * Soyad-Şirket-Birim-Unvan", ikincisine " 2" ekleyerek). Boyle bir ad cipte
+ * hicbir sey anlatmaz: atlanir.
+ */
+function teamsLinkSohbetTekrar(baslik, ad, sohbet) {
+  const konu = teamsLinkEtiketTemiz(sohbet);
+  if (!konu) return true;
+  const tam = teamsLinkEtiketTemiz(baslik);
+  const kisa = teamsLinkEtiketTemiz(ad);
+  if (kisa && konu === kisa) return true;
+  if (!tam) return false;
+  if (konu === tam || konu.indexOf(tam) === 0) return true;
+  return teamsLinkSayacKirp(konu) === teamsLinkSayacKirp(tam);
+}
+
+/** "Ad · Sohbet · zaman"; gondereni tekrar eden sohbet adi yazilmaz. */
+function teamsLinkEtiketKur(baslik, sohbet, zaman) {
+  const ad = teamsLinkAdKirp(baslik) || TEAMSLINK_ADSIZ;
+  const parcalar = [ad];
+  if (sohbet && !teamsLinkSohbetTekrar(baslik, ad, sohbet)) parcalar.push(sohbet);
+  if (zaman) parcalar.push(zaman);
+  return parcalar.join(TEAMSLINK_AYRAC);
+}
+
+/**
+ * Hazir bir etiketi parcalarina ayirir: `{baslik, sohbet, zaman}`.
+ *
+ * Son parca cozulebilen bir zamansa zamandir; degilse sohbet adinin parcasi
+ * sayilir. Eski kayitlardaki uzun etiketler de boyle okunur.
+ */
+function teamsLinkEtiketBol(etiket) {
+  const bolum = String(etiket || "")
+    .split(TEAMSLINK_AYRAC.trim())
+    .map((parca) => parca.trim())
+    .filter((parca) => parca !== "");
+  if (!bolum.length) return { baslik: "", sohbet: "", zaman: "" };
+  const zamanli = bolum.length > 1 && teamsLinkZamanCoz(bolum[bolum.length - 1]) !== null;
+  const orta = bolum.slice(1, zamanli ? bolum.length - 1 : bolum.length);
+  return {
+    baslik: bolum[0],
+    sohbet: orta.join(TEAMSLINK_AYRAC),
+    zaman: zamanli ? bolum[bolum.length - 1] : "",
+  };
+}
+
+/**
+ * Etiketi cipe sigdirir.
+ *
+ * Sirayla: gonderen basligi ada iner, gondereni tekrar eden sohbet adi
+ * duser, hala uzunsa sohbet adi tamamen gider, en son metin kirpilir. Veri
+ * DEGISMEZ: bu yalnizca cizimdir, belirtec kayitta oldugu gibi kalir.
+ */
+function teamsLinkEtiketKisalt(etiket, sinir) {
+  const limit = sinir || TEAMSLINK_ETIKET_SINIRI;
+  const bolum = teamsLinkEtiketBol(etiket);
+  let kisa = teamsLinkEtiketKur(bolum.baslik, bolum.sohbet, bolum.zaman);
+  if (kisa.length > limit && bolum.sohbet) {
+    kisa = teamsLinkEtiketKur(bolum.baslik, "", bolum.zaman);
+  }
+  if (kisa.length <= limit) return kisa;
+  return kisa.slice(0, Math.max(1, limit - 1)).trim() + "…";
 }
 
 /** On satirdaki sohbet adi: "| <sohbet> sohbetinde gönderildi" arasi. */
@@ -253,16 +346,14 @@ function teamsLinkCozumle(url, onSatir) {
   const adres = String(url || "").trim();
   const yol = teamsLinkYol(adres);
   const parametreler = teamsLinkParametreler(adres);
-  const ad = teamsLinkAdCoz(onSatir) || TEAMSLINK_ADSIZ;
+  const baslik = teamsLinkBaslikCoz(onSatir);
+  const ad = teamsLinkAdKirp(baslik) || TEAMSLINK_ADSIZ;
   const sohbet = teamsLinkSohbetCoz(onSatir) || teamsLinkKanalAdi(parametreler);
   const an = teamsLinkZamanCoz(onSatir) || teamsLinkKimlikZamani(yol.mesaj);
   const zaman = teamsLinkZamanYaz(an);
 
-  const parcalar = [ad];
   // Sohbet adi yalnizca gondereni tekrar etmiyorsa yazilir.
-  if (sohbet && sohbet !== ad) parcalar.push(sohbet);
-  if (zaman) parcalar.push(zaman);
-  const etiket = parcalar.join(TEAMSLINK_AYRAC);
+  const etiket = teamsLinkEtiketKur(baslik || ad, sohbet, zaman);
   return {
     ad: ad,
     sohbet: sohbet,
@@ -404,19 +495,19 @@ function teamsLinkParcala(metin) {
   TEAMSLINK_BELIRTEC.lastIndex = 0;
   while ((bulunan = TEAMSLINK_BELIRTEC.exec(ham)) !== null) {
     duzMetin(ham.slice(imlec, bulunan.index));
-    const etiket = String(bulunan[1] || "").trim();
-    const bolum = etiket ? etiket.split(TEAMSLINK_AYRAC.trim()).map((p) => p.trim()) : [];
-    const ad = bolum.length ? bolum[0] : TEAMSLINK_ADSIZ;
-    const zaman = bolum.length > 1 ? bolum[bolum.length - 1] : "";
-    const sohbet = bolum.length > 2 ? bolum.slice(1, -1).join(TEAMSLINK_AYRAC) : "";
+    // Kayittaki etiket ne kadar uzun olursa olsun cipe kisaltilmis hali
+    // girer; tam hali `title`'da durur, veri hic degismez.
+    const tam = String(bulunan[1] || "").trim();
+    const bolum = teamsLinkEtiketBol(tam);
     parcalar.push({
       tur: "teams",
       metin: bulunan[0],
       url: String(bulunan[2] || "").trim(),
-      ad: ad,
-      sohbet: sohbet,
-      zaman: zaman,
-      etiket: zaman ? `${ad}${TEAMSLINK_AYRAC}${zaman}` : ad,
+      ad: teamsLinkAdKirp(bolum.baslik) || TEAMSLINK_ADSIZ,
+      sohbet: bolum.sohbet,
+      zaman: bolum.zaman,
+      tam: tam,
+      etiket: teamsLinkEtiketKisalt(tam),
     });
     imlec = bulunan.index + bulunan[0].length;
     TEAMSLINK_BELIRTEC.lastIndex = imlec;
@@ -468,13 +559,27 @@ function teamsLinkAc(url) {
   return acildi;
 }
 
-/** Tek bir belirtec parcasinin cipi. */
-function teamsLinkCip(parca) {
+/**
+ * Tek bir belirtec parcasinin cipi.
+ *
+ * `secenekler.atomik` verilirse cip bir DUZENLEYICININ icinde duracaktir:
+ * icine imlec girmez (`contenteditable="false"`), surtuklenmez ve belirtecin
+ * kendisi `data-teams` icinde tasinir (bkz. zenginalan.js).
+ * `secenekler.tik` cipe basildiginda ne olacagini degistirir.
+ */
+function teamsLinkCip(parca, secenekler) {
+  const opt = secenekler || {};
   const web = teamsLinkWebAdresi(parca.url) || parca.url;
   const cip = document.createElement("a");
   cip.className = "teams-msg";
   cip.setAttribute("href", web);
-  cip.setAttribute("title", parca.sohbet || TEAMSLINK_ADSIZ);
+  // Tam bilgi burada: kisaltilan baslik, sohbet adi ve zaman.
+  cip.setAttribute("title", parca.tam || parca.etiket || TEAMSLINK_ADSIZ);
+  if (opt.atomik) {
+    cip.setAttribute("contenteditable", "false");
+    cip.setAttribute("draggable", "false");
+    cip.setAttribute("data-teams", parca.metin || `[[teams: ${parca.tam}|${parca.url}]]`);
+  }
   cip.appendChild(teamsLinkSimge());
   const yazi = document.createElement("span");
   yazi.className = "teams-msg-text";
@@ -484,9 +589,23 @@ function teamsLinkCip(parca) {
     event.preventDefault();
     // Hucre/kart tiklamasi duzenleyiciyi acmasin.
     event.stopPropagation();
-    teamsLinkAc(parca.url);
+    if (typeof opt.tik === "function") opt.tik(event, cip, parca);
+    else teamsLinkAc(parca.url);
   });
   return cip;
+}
+
+/**
+ * Belirtecleri kisa etiketleriyle degistirir: `title`, tooltip, kisa ozet.
+ *
+ * Cip cizilemeyen yerlerde (bir `title` niteligi duz metindir) ham belirtec
+ * gorunmesin diye. Metinden SILMEZ, bu is `teamsLinkTemizle`nin.
+ */
+function teamsLinkDuzMetin(metin) {
+  const ham = String(metin === null || metin === undefined ? "" : metin);
+  if (!ham) return "";
+  TEAMSLINK_BELIRTEC.lastIndex = 0;
+  return ham.replace(TEAMSLINK_BELIRTEC, (hepsi, etiket) => teamsLinkEtiketKisalt(etiket));
 }
 
 /**

@@ -14,6 +14,8 @@ from datetime import date, datetime, timezone, tzinfo
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from app import teamslink
+
 # Grid hucresinde gosterilecek en fazla karakter; tamami detay cekmecesinde.
 GRID_TEXT_LIMIT = 200
 
@@ -166,10 +168,26 @@ def parse_number(value: Any) -> float | None:
 
 
 def truncate(text: str, limit: int = GRID_TEXT_LIMIT) -> str:
-    """Grid hucresi icin kirpar; tam metin detay cekmecesinde kalir."""
+    """Grid hucresi icin kirpar; tam metin detay cekmecesinde kalir.
+
+    Teams belirtecinin ORTASINDAN kesilmez: yarim kalan belirtec ekranda cipe
+    donusemez, ham metin olarak gorunur. Kesim bir belirtecin icine denk
+    gelirse belirtec butun halde alinir; ekranda zaten kisa bir cip olarak
+    cizilir (bkz. teamsLinkEtiketKisalt).
+    """
     if len(text) <= limit:
         return text
-    return text[: limit - 1].rstrip() + "…"
+    cut = limit - 1
+    for found in teamslink.BELIRTEC.finditer(text):
+        start, end = found.span()
+        if start >= cut:
+            break
+        if start < cut < end:
+            cut = end
+            break
+    if cut >= len(text):
+        return text
+    return text[:cut].rstrip() + "…"
 
 
 def plain_text(value: Any) -> str:

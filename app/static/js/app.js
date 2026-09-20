@@ -208,12 +208,31 @@ function field(labelText, control) {
  *
  * Teams yapistirma cevirisi de burada takilir: "Düzelt" dugmesi tasiyan her
  * alana (gorev Aciklama/Son durum/Not ve cekmecedeki cok satirli yerel
- * alanlar) panodaki Teams mesaj blogu belirtec olarak duser.
+ * alanlar) panodaki Teams mesaj blogu belirtec olarak duser. Zengin alan
+ * (zenginalan.js) yapistirmayi kendi karsilar: orada belirtec aninda cip
+ * olur, ham metin hic gorunmez.
  */
 function duzeltKutusu(alan, ad) {
-  if (typeof attachTeamsLink === "function") attachTeamsLink(alan);
+  if (!alan.zenginAlan && typeof attachTeamsLink === "function") attachTeamsLink(alan);
   if (typeof attachDuzelt !== "function") return alan;
   return attachDuzelt(alan, { ad: ad }) || alan;
+}
+
+/** Cok satirli metin alani: belirtec CIP olarak gorunur (zenginalan.js).
+ *
+ * Bilesen yuklenmediyse duz bir textarea'ya duseriz; kayit bicimi ikisinde
+ * de aynidir.
+ */
+function metinAlani(secenekler) {
+  const opt = secenekler || {};
+  if (typeof zenginAlanYap === "function") return zenginAlanYap(opt);
+  const alan = h("textarea", {
+    class: opt.class || null,
+    placeholder: opt.placeholder || null,
+    title: opt.title || null,
+  });
+  alan.value = opt.deger || "";
+  return alan;
 }
 
 /** Salt-okunur metin: Teams belirteci cipe, baglantilar tiklanir hale gelir.
@@ -225,6 +244,16 @@ function metinCiz(dugum, metin) {
   if (typeof teamsLinkDoldur === "function") return teamsLinkDoldur(dugum, metin);
   dugum.textContent = metin === null || metin === undefined ? "" : String(metin);
   return dugum;
+}
+
+/** `title` gibi DUZ METIN yerler icin: belirtec kisa etiketine iner.
+ *
+ * Nitelik degeri cip cizemez; hic olmazsa ham belirtec gorunmesin.
+ */
+function metinDuz(metin) {
+  const ham = metin === null || metin === undefined ? "" : String(metin);
+  if (typeof teamsLinkDuzMetin === "function") return teamsLinkDuzMetin(ham);
+  return ham;
 }
 
 // --- gruplar ------------------------------------------------------------
@@ -524,7 +553,8 @@ function renderRow(row) {
     const changed = changedFields.indexOf(cell.field) >= 0;
     const td = h("td", {
       class: "cell-" + cssName(cell.field) + (changed ? " changed" : ""),
-      title: cell.text,
+      // Nitelik duz metindir: belirtec orada kisa etiketiyle durur.
+      title: metinDuz(cell.text),
     });
     if (column.local && !column.derived) {
       renderLocalCell(td, row, cell, column);
@@ -552,7 +582,8 @@ function renderRow(row) {
     } else if (isStatusCell(cell)) {
       td.appendChild(statusPill(cell));
     } else {
-      td.textContent = cell.text;
+      // Turetilmis yerel sutunlar da buradan gecer: belirtec cip olur.
+      metinCiz(td, cell.text);
     }
     tr.appendChild(td);
   });
@@ -714,7 +745,7 @@ function renderDrawerBody() {
       body.appendChild(
         h("div", { class: "detail-row" + (item.empty ? " is-empty" : "") }, [
           h("div", { class: "label", text: `${item.name} (${item.field})` }),
-          h("div", { class: "value", text: item.empty ? "—" : item.text }),
+          metinCiz(h("div", { class: "value" }, []), item.empty ? "—" : item.text),
         ])
       );
     });
@@ -978,12 +1009,12 @@ function localEditor(field, value, hooks, options) {
     node.addEventListener("change", commit);
   } else if (wide) {
     // Cekmecedeki uzun metin alani: Enter yeni satir acar, Ctrl+Enter kaydeder.
-    node = h("textarea", {
+    // Teams belirteci burada CIP olarak durur (bkz. zenginalan.js).
+    node = metinAlani({
       class: "local-input local-area",
-      rows: "4",
       title: "Ctrl+Enter kaydeder, Esc vazgeçer",
+      deger: value || "",
     });
-    node.value = value || "";
     box = duzeltKutusu(node, field.name);
   } else {
     // Sayi icin de metin kutusu: tarayicinin number girdisi Turkce ondalik
@@ -1028,7 +1059,8 @@ function localEditor(field, value, hooks, options) {
       // kolaylastiriyor, orada eski davranis kaliyor.
       if (wide) {
         try {
-          node.setSelectionRange(node.value.length, node.value.length);
+          if (node.imlecSona) node.imlecSona();
+          else node.setSelectionRange(node.value.length, node.value.length);
         } catch (err) {
           // Tarayici desteklemiyorsa odak yeter.
         }
@@ -2619,12 +2651,12 @@ async function scanMailNow() {
 function taskModal(existing, preset) {
   const seed = existing || preset || {};
   const titleInput = h("input", { type: "text", value: seed.title || "" });
-  const descInput = h("textarea", { placeholder: "Görev ne hakkında?" });
-  descInput.value = seed.description || "";
-  const sonInput = h("textarea", { placeholder: "Nerede kaldı?", rows: "3" });
-  sonInput.value = seed.son_durum || "";
-  const noteInput = h("textarea", { placeholder: "Kendine not" });
-  noteInput.value = seed.note || "";
+  const descInput = metinAlani({
+    placeholder: "Görev ne hakkında?",
+    deger: seed.description || "",
+  });
+  const sonInput = metinAlani({ placeholder: "Nerede kaldı?", deger: seed.son_durum || "" });
+  const noteInput = metinAlani({ placeholder: "Kendine not", deger: seed.note || "" });
   // "Düzelt" dugmesi alani sarmalayan bir kutuya girer; pencereye o kutu
   // konur, alanin kendisi degil (bkz. duzelt.js).
   const descBox = duzeltKutusu(descInput, "Açıklama");
