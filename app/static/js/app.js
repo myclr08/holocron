@@ -204,10 +204,27 @@ function field(labelText, control) {
   return h("div", { class: "field" }, [h("label", { text: labelText }), control]);
 }
 
-/** Alani "Düzelt" dugmesiyle sarmalar; bilesen yoksa alanin kendisi doner. */
+/** Alani "Düzelt" dugmesiyle sarmalar; bilesen yoksa alanin kendisi doner.
+ *
+ * Teams yapistirma cevirisi de burada takilir: "Düzelt" dugmesi tasiyan her
+ * alana (gorev Aciklama/Son durum/Not ve cekmecedeki cok satirli yerel
+ * alanlar) panodaki Teams mesaj blogu belirtec olarak duser.
+ */
 function duzeltKutusu(alan, ad) {
+  if (typeof attachTeamsLink === "function") attachTeamsLink(alan);
   if (typeof attachDuzelt !== "function") return alan;
   return attachDuzelt(alan, { ad: ad }) || alan;
+}
+
+/** Salt-okunur metin: Teams belirteci cipe, baglantilar tiklanir hale gelir.
+ *
+ * Metin HTML olarak BASILMAZ: parcalar metin dugumu, baglantilar bizim
+ * urettigimiz `a` elemanlaridir (bkz. teamslink.js).
+ */
+function metinCiz(dugum, metin) {
+  if (typeof teamsLinkDoldur === "function") return teamsLinkDoldur(dugum, metin);
+  dugum.textContent = metin === null || metin === undefined ? "" : String(metin);
+  return dugum;
 }
 
 // --- gruplar ------------------------------------------------------------
@@ -872,7 +889,7 @@ function stamp(iso) {
 function renderLocalCell(td, row, cell, column) {
   td.classList.add("local-cell");
   if (!cell.text) td.classList.add("is-empty");
-  td.appendChild(h("span", { class: "local-text", text: cell.text || "—" }));
+  td.appendChild(metinCiz(h("span", { class: "local-text" }, []), cell.text || "—"));
 
   const tracked = column.local.track_history || cell.changes > 0;
   if (tracked) {
@@ -1063,6 +1080,7 @@ async function openHistory(anchor, key, field) {
   const body = el("history-body");
   clear(body);
   body.appendChild(h("p", { class: "hint", text: "Okunuyor..." }));
+  historyFootShow(true);
   box.hidden = false;
   placePopover(box, anchor);
   state.popover = { key: key, field: field };
@@ -1070,6 +1088,45 @@ async function openHistory(anchor, key, field) {
   try {
     const data = await api(`/api/issues/${encodeURIComponent(key)}/local/${field.id}/history`);
     renderHistory(data.entries || []);
+    placePopover(box, anchor);
+  } catch (err) {
+    clear(body);
+    body.appendChild(h("p", { class: "hint", text: err.message }));
+  }
+}
+
+/**
+ * Gorevin "son durum" defteri.
+ *
+ * Jira yerel alan gecmisiyle AYNI kaliba cizilir: eskiden yeniye bloklar,
+ * ilk giriste "ilk değer" rozeti, son giris vurgulu, 20'den fazlasi katlanir.
+ * Tek fark: defter silinmez, bu yuzden satir silme ve "Geçmişi temizle" yok.
+ */
+async function openTaskHistory(anchor, task) {
+  const box = el("history-popover");
+  el("history-title").textContent = `Son durum · ${task.title}`;
+  const body = el("history-body");
+  clear(body);
+  body.appendChild(h("p", { class: "hint", text: "Okunuyor..." }));
+  historyFootShow(false);
+  box.hidden = false;
+  placePopover(box, anchor);
+  state.popover = { task: task };
+
+  try {
+    const data = await api(`/api/tasks/${task.id}/son-durum-gecmisi`);
+    // Sunucu eskiden yeniye yollar: cizim sirasi da aynidir.
+    const chrono = (data.entries || []).map((entry) => ({
+      id: entry.id,
+      changed_at: entry.olusturma,
+      new_text: entry.metin,
+    }));
+    clear(body);
+    if (!chrono.length) {
+      body.appendChild(h("p", { class: "hint", text: "Bu görevde henüz son durum yazılmadı." }));
+      return;
+    }
+    paintHistory(body, chrono);
     placePopover(box, anchor);
   } catch (err) {
     clear(body);
@@ -1124,20 +1181,24 @@ function historyBlock(entry, isFirst, isLast) {
     h("div", { class: "history-meta" }, [
       h("span", { class: "when", text: meta.join(" · ") }),
       isFirst ? h("span", { class: "history-badge", text: "ilk değer" }) : null,
-      h("button", {
-        class: "drop",
-        text: "×",
-        title: "Bu satırı sil",
-        onclick: () => dropHistoryEntry(entry.id),
-      }),
+      // Gorevin son durum defteri silinmez; silme dugmesi yalnizca yerel
+      // alan gecmisinde durur.
+      state.popover && state.popover.field
+        ? h("button", {
+            class: "drop",
+            text: "×",
+            title: "Bu satırı sil",
+            onclick: () => dropHistoryEntry(entry.id),
+          })
+        : null,
     ]),
-    h("div", { class: "history-value", text: value || "— (boş)" }),
+    metinCiz(h("div", { class: "history-value" }, []), value || "— (boş)"),
   ]);
 }
 
 async function dropHistoryEntry(historyId) {
   const target = state.popover;
-  if (!target) return;
+  if (!target || !target.field) return;
   try {
     await api(
       `/api/issues/${encodeURIComponent(target.key)}/local/${target.field.id}/history/${historyId}`,
@@ -1156,7 +1217,7 @@ async function dropHistoryEntry(historyId) {
 
 async function clearHistory() {
   const target = state.popover;
-  if (!target) return;
+  if (!target || !target.field) return;
   if (!confirm(`${target.key} için "${target.field.name}" geçmişi tamamen silinsin mi?`)) return;
   try {
     await api(`/api/issues/${encodeURIComponent(target.key)}/local/${target.field.id}/history`, {
@@ -1179,6 +1240,14 @@ function placePopover(box, anchor) {
   const top = below + height > window.innerHeight ? Math.max(8, spot.top - height - 6) : below;
   box.style.left = left + "px";
   box.style.top = top + "px";
+}
+
+/** Popover'in alt seridi: defter silinmeyen gorunumde hic gorunmez. */
+function historyFootShow(acik) {
+  const button = el("history-clear");
+  button.hidden = !acik;
+  const foot = button.parentNode;
+  if (foot) foot.hidden = !acik;
 }
 
 function closeHistory() {
@@ -1204,12 +1273,10 @@ function renderDrawerLocal(body) {
     const show = () => {
       clear(value);
       value.appendChild(
-        h("button", {
-          class: "local-open",
-          text: item.text || "—",
-          title: "Düzenle",
-          onclick: () => edit(),
-        })
+        metinCiz(
+          h("button", { class: "local-open", title: "Düzenle", onclick: () => edit() }, []),
+          item.text || "—"
+        )
       );
     };
     const edit = () => {
@@ -1245,9 +1312,9 @@ function renderDrawerLocal(body) {
           h("div", { class: "history-line" }, [
             h("span", { class: "when", text: stamp(entry.changed_at) }),
             h("span", { class: "what" }, [
-              h("span", { class: "old", text: entry.old_text || "—" }),
+              metinCiz(h("span", { class: "old" }, []), entry.old_text || "—"),
               document.createTextNode(" → "),
-              h("span", { class: "new", text: entry.new_text || "—" }),
+              metinCiz(h("span", { class: "new" }, []), entry.new_text || "—"),
             ]),
           ])
         );
@@ -2335,8 +2402,9 @@ function taskCard(task, column) {
   if (task.issue) card.appendChild(taskIssueLine(task.issue));
 
   if (task.description) {
-    card.appendChild(h("div", { class: "task-desc", text: task.description }));
+    card.appendChild(metinCiz(h("div", { class: "task-desc" }, []), task.description));
   }
+  if (task.son_durum) card.appendChild(taskStatusLine(task));
   if (task.status === "done" && task.done_at) {
     card.appendChild(h("div", { class: "task-done-at", text: "Bitti: " + stamp(task.done_at) }));
   }
@@ -2352,6 +2420,29 @@ function taskCard(task, column) {
     card.classList.remove("dragging");
   });
   return card;
+}
+
+/** Kartin son durum satiri: metnin ILK satiri + tarih, tiklayinca defter acilir.
+ *
+ * Kart dar: tam metin gorev penceresinde durur, burada yalnizca "nerede
+ * kaldi" sorusunun bir satirlik cevabi gorunur.
+ */
+function taskStatusLine(task) {
+  const ilk = String(task.son_durum || "").split("\n")[0];
+  const line = h("button", {
+    class: "task-status",
+    type: "button",
+    title: "Son durum geçmişi",
+    onclick: (event) => {
+      event.stopPropagation();
+      openTaskHistory(event.currentTarget, task);
+    },
+  }, [icon("clock")]);
+  if (task.son_durum_at) {
+    line.appendChild(h("span", { class: "when", text: shortStamp(task.son_durum_at) }));
+  }
+  line.appendChild(metinCiz(h("span", { class: "task-status-text" }, []), ilk));
+  return line;
 }
 
 /** E-postadan gelen kartin kaynak satiri: zarf, rozet, gonderen, mesaj sayisi. */
@@ -2530,12 +2621,33 @@ function taskModal(existing, preset) {
   const titleInput = h("input", { type: "text", value: seed.title || "" });
   const descInput = h("textarea", { placeholder: "Görev ne hakkında?" });
   descInput.value = seed.description || "";
+  const sonInput = h("textarea", { placeholder: "Nerede kaldı?", rows: "3" });
+  sonInput.value = seed.son_durum || "";
   const noteInput = h("textarea", { placeholder: "Kendine not" });
   noteInput.value = seed.note || "";
   // "Düzelt" dugmesi alani sarmalayan bir kutuya girer; pencereye o kutu
   // konur, alanin kendisi degil (bkz. duzelt.js).
   const descBox = duzeltKutusu(descInput, "Açıklama");
+  const sonBox = duzeltKutusu(sonInput, "Son durum");
   const noteBox = duzeltKutusu(noteInput, "Not");
+
+  // "Son durum" her degistiginde deftere yazilir; etiketin yaninda defteri
+  // acan bag durur (kartin son durum satiriyla AYNI popover).
+  const sonLabel = h("label", { text: "Son durum" });
+  if (existing && existing.son_durum_changes) {
+    sonLabel.appendChild(
+      h("button", {
+        class: "history-link",
+        type: "button",
+        text: `Geçmiş (${existing.son_durum_changes})`,
+        onclick: (event) => {
+          event.preventDefault();
+          openTaskHistory(event.currentTarget, existing);
+        },
+      })
+    );
+  }
+  const sonAlan = h("div", { class: "field" }, [sonLabel, sonBox]);
   const dueInput = h("input", { type: "date", value: seed.due_date || "" });
 
   const statusSelect = h("select", {}, []);
@@ -2588,6 +2700,7 @@ function taskModal(existing, preset) {
   const body = h("div", {}, [
     field("Ad", titleInput),
     field("Açıklama", descBox),
+    sonAlan,
     field("Not", noteBox),
     h("div", { class: "row" }, [field("Son tarih", dueInput), field("Durum", statusSelect)]),
     field("Jira kaydı", h("div", {}, [keyInput, suggestions, keyNote])),
@@ -2604,6 +2717,7 @@ function taskModal(existing, preset) {
     const payload = {
       title: titleInput.value,
       description: descInput.value,
+      son_durum: sonInput.value,
       note: noteInput.value,
       due_date: dueInput.value,
       status: statusSelect.value,

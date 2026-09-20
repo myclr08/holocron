@@ -430,6 +430,7 @@ def create_task(request: Request, payload: dict[str, Any] = Body(default_factory
             due_date=payload.get("due_date"),
             status=payload.get("status"),
             issue_key=payload.get("issue_key"),
+            son_durum=payload.get("son_durum"),
         )
     return {"task": _task_payload(context, task)}
 
@@ -532,6 +533,9 @@ def _task_payload(context: AppContext, task: dict[str, Any]) -> dict[str, Any]:
     """Tek gorev: kart ile ayni bicimde (due_state + bagli kayit)."""
     card = dict(task)
     card["due_state"] = task_utils.due_state(task["due_date"])
+    stat = repository.task_status_stats(context.connection()).get(task["id"], {})
+    card["son_durum_at"] = stat.get("at", "")
+    card["son_durum_changes"] = stat.get("count", 0)
     base_url = (context.settings.get("jira.base_url", "") or "").rstrip("/")
     if task["issue_key"]:
         record = repository.get_issue(context.connection(), task["issue_key"])
@@ -587,6 +591,23 @@ def scan_mail(request: Request, payload: dict[str, Any] = Body(default_factory=d
     with context.db_lock:
         summary = mail_intake.scan(context.connection(), source, config)
     return {"summary": summary, "board": _board_payload(task_utils.build_board(context))}
+
+
+@router.get("/tasks/{task_id}/son-durum-gecmisi")
+def read_task_status_history(request: Request, task_id: int) -> dict[str, Any]:
+    """Gorevin "son durum" defteri: ESKIDEN YENIYE.
+
+    Defter yalnizca okunur; satirlar silinmez, duzenlenmez. Gorev silinince
+    gecmisi de gider (`ON DELETE CASCADE`).
+    """
+    context = get_context(request)
+    conn = context.connection()
+    task = repository.require_task(conn, task_id)
+    return {
+        "task_id": task["id"],
+        "title": task["title"],
+        "entries": repository.list_task_status_history(conn, task["id"]),
+    }
 
 
 @router.post("/tasks/{task_id}/open-mail")

@@ -21,7 +21,7 @@ import re
 from typing import Any
 from urllib.parse import quote
 
-from . import fields as field_utils
+from . import fields as field_utils, teamslink
 
 # Kayit basina Teams kisilerini grid'de ve Excel'de gosteren sanal sutun.
 CONTACTS_COLUMN = "teams:contacts"
@@ -147,7 +147,8 @@ def render_template(
             return _local_text(values, argument.strip())
         return ""
 
-    return _PLACEHOLDER.sub(resolve, str(body or ""))
+    # Yerel alan degerinde Teams mesaj belirteci olabilir; mesaja girmez.
+    return teamslink.temizle(_PLACEHOLDER.sub(resolve, str(body or "")))
 
 
 def issue_url(base_url: str, key: str) -> str:

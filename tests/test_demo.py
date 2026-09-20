@@ -297,3 +297,58 @@ def test_the_mail_tasks_look_like_they_came_from_outlook(context, sahte):
         assert gorev["mail_conversation_id"]
         assert gorev["mail_sender"].endswith("@example.com")
         assert repository.get_mail_conversation(conn, gorev["mail_conversation_id"])
+
+
+# --- Teams belirteci ve "son durum" defteri -----------------------------
+
+
+def test_the_seed_plants_teams_tokens_and_a_plain_link(context, sahte):
+    """Demo acilir acilmaz cip de duz baglanti da ekranda gorunsun."""
+    from app import repository, teamslink
+
+    conn = context.connection()
+    repository.upsert_issues(conn, sahte.kayitlar[:30])
+    anahtarlar = [str(kayit["key"]) for kayit in sahte.kayitlar[:30]]
+    tohum.geri_kalani_kur(context, anahtarlar, SIMDI)
+
+    gorevler = repository.list_tasks(conn)
+    belirtecli = [gorev for gorev in gorevler if teamslink.var_mi(gorev["description"])]
+    assert len(belirtecli) == 1
+    assert tohum.TEAMS_SOHBET_BELIRTEC in belirtecli[0]["description"]
+    # Ikinci gorevde duz https baglantisi: dokumde oldugu gibi kalir.
+    assert any("https://ornek.local/" in gorev["description"] for gorev in gorevler)
+
+    # Bir kaydin yerel metin alaninda kanal bicimli belirtec.
+    alan = repository.list_local_fields(conn)[0]
+    degerler = [
+        repository.get_local_value(conn, anahtar, alan["id"]) for anahtar in anahtarlar
+    ]
+    assert any(tohum.TEAMS_KANAL_BELIRTEC in str(deger or "") for deger in degerler)
+
+    # Uydurma kimlikler: gercek kiracı ya da sohbet kimligi sizmasin.
+    assert tohum.TEAMS_KIRACI == "00000000-0000-4000-8000-000000000001"
+
+
+def test_five_seeded_tasks_carry_a_status_ledger(context, sahte):
+    from app import repository
+
+    conn = context.connection()
+    repository.upsert_issues(conn, sahte.kayitlar[:30])
+    anahtarlar = [str(kayit["key"]) for kayit in sahte.kayitlar[:30]]
+    tohum.geri_kalani_kur(context, anahtarlar, SIMDI)
+
+    defterli = {}
+    for gorev in repository.list_tasks(conn):
+        kayitlar = repository.list_task_status_history(conn, gorev["id"])
+        if kayitlar:
+            defterli[gorev["title"]] = kayitlar
+    assert len(defterli) == 5
+    for baslik, kayitlar in defterli.items():
+        assert 2 <= len(kayitlar) <= 4, baslik
+        # Eskiden yeniye ve son satir gorevin guncel son durumu.
+        assert [item["olusturma"] for item in kayitlar] == sorted(
+            item["olusturma"] for item in kayitlar
+        )
+    gorevler = {gorev["title"]: gorev for gorev in repository.list_tasks(conn)}
+    for baslik, kayitlar in defterli.items():
+        assert gorevler[baslik]["son_durum"] == kayitlar[-1]["metin"]

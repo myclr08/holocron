@@ -20,6 +20,8 @@ from datetime import date, datetime
 from html import escape
 from typing import Any, Iterable, Sequence
 
+from . import teamslink
+
 # Govdede tabloyu tasiyan isaret; konuda kullanilirsa sessizce dusurulur.
 TABLE_TOKEN = "{tablo}"
 
@@ -160,8 +162,13 @@ def values_for(
 
 
 def render_text(text: Any, values: dict[str, str]) -> str:
-    """Yer tutuculari degistirir; bilinmeyen ad bos kalir."""
-    return _PLACEHOLDER.sub(lambda match: values.get(match.group(1), ""), str(text or ""))
+    """Yer tutuculari degistirir; bilinmeyen ad bos kalir.
+
+    Teams mesaj belirteci burada SILINIR: postaya ne adres ne cip gider
+    (bkz. `app/teamslink.py`).
+    """
+    filled = _PLACEHOLDER.sub(lambda match: values.get(match.group(1), ""), str(text or ""))
+    return teamslink.temizle(filled)
 
 
 def looks_like_html(text: Any) -> bool:
@@ -203,7 +210,8 @@ def build_table(rows: Sequence[dict[str, Any]], columns: Sequence[dict[str, Any]
 
 
 def _cell_html(head: dict[str, Any], cell: dict[str, Any], row: dict[str, Any]) -> str:
-    text = str((cell or {}).get("text") or "")
+    # Yerel alanin metninde Teams belirteci olabilir; postada gorunmez.
+    text = teamslink.temizle(str((cell or {}).get("text") or ""))
     if str(head.get("id") or "") in KEY_COLUMNS:
         label = text or str(row.get("key") or "")
         url = str(row.get("url") or "")

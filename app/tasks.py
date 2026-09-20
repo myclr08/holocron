@@ -106,6 +106,7 @@ def matches(task: dict[str, Any], needle: str) -> bool:
             task["title"],
             task["description"],
             task["note"],
+            task.get("son_durum"),
             task["issue_key"],
             issue.get("summary"),
             issue.get("status_text"),
@@ -128,6 +129,9 @@ def build_board(
     raw_tasks = repository.list_tasks(conn)
     keys = [task["issue_key"] for task in raw_tasks if task["issue_key"]]
     stored = repository.get_issues(conn, keys) if keys else {}
+    # Kartin son durum satiri tarihini ve "Geçmiş (n)" sayisini defterden alir;
+    # tek sorgu, gorev basina ayri okuma yok.
+    status_log = repository.task_status_stats(conn)
 
     needle = field_utils.fold(q.strip()) if q else ""
     old_done_count = 0
@@ -135,6 +139,9 @@ def build_board(
     for task in raw_tasks:
         card = dict(task)
         card["due_state"] = due_state(task["due_date"], now)
+        stat = status_log.get(task["id"], {})
+        card["son_durum_at"] = stat.get("at", "")
+        card["son_durum_changes"] = stat.get("count", 0)
         card["issue"] = (
             issue_view(task["issue_key"], stored.get(task["issue_key"]), base_url)
             if task["issue_key"]

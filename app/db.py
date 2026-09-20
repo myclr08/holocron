@@ -833,6 +833,32 @@ def _migration_0017_rozet_etkinlikleri(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0018_gorev_son_durum(conn: sqlite3.Connection) -> None:
+    """Gorevlerde "Son durum" alani ve gecmisi.
+
+    Aciklama gorevin ne oldugunu anlatir, "son durum" ise NEREDE kaldigini.
+    Ikisi ayri alanlardir cunku son durum sik degisir ve her degisimi
+    saklanir: `task_status_history` bir defterdir, satirlari degismez.
+    Bosaltma da bir satirdir (bos metin), boylece "burasi temizlendi" bilgisi
+    kaybolmaz. Gorev silinince gecmisi de gider (ON DELETE CASCADE).
+    """
+    _add_column(conn, "tasks", "son_durum", "TEXT")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS task_status_history (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id   INTEGER NOT NULL,
+            metin     TEXT,
+            olusturma TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_task_status_history_task
+            ON task_status_history(task_id, id);
+        """
+    )
+
+
 # Eski `calls.copilot_*` / ozet anahtarlarinin yeni `copilot.*` karsiliklari.
 COPILOT_AYAR_GOCU: tuple[tuple[str, str], ...] = (
     ("calls.copilot_yolu", "copilot.yolu"),
@@ -862,6 +888,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (15, "meeting notes", _migration_0015_gorusme_notlari),
     (16, "drop teams calls and meeting notes", _migration_0016_gorusme_ve_aramalar_kaldirildi),
     (17, "gamify activity log", _migration_0017_rozet_etkinlikleri),
+    (18, "task status field and history", _migration_0018_gorev_son_durum),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

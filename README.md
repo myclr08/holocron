@@ -402,7 +402,7 @@ yazılabilir ve **önizleme her yerde çalışır**.
 
 Sol kenarda, grupların üstünde duran **Görevlerim** kendi işlerinizin panosudur.
 Jira'dan bağımsızdır: üç sütun (**Yapılacak**, **Yapılıyor**, **Yapıldı**), her
-kartta ad, açıklama, not ve son tarih vardır. Rozet açık görev sayısını gösterir,
+kartta ad, açıklama, son durum, not ve son tarih vardır. Rozet açık görev sayısını gösterir,
 gecikmiş görev varsa kırmızıya döner.
 
 - **Yeni görev** düğmesi pencereyi açar; `Ctrl+Enter` kaydeder, `Esc` kapatır.
@@ -413,10 +413,25 @@ gecikmiş görev varsa kırmızıya döner.
   silinir.
 - Son tarih rozeti geciken kartta kırmızı, bugün bitmesi gerekende sarı, üç gün
   içinde gelende turuncu, uzaktakinde nötrdür.
-- Arama kutusu (`/` kısayolu burada da çalışır) ad, açıklama, not, bağlı kayıt
-  anahtarı ve bağlı kaydın özeti üzerinde süzer.
+- Arama kutusu (`/` kısayolu burada da çalışır) ad, açıklama, son durum, not,
+  bağlı kayıt anahtarı ve bağlı kaydın özeti üzerinde süzer.
 - Biten kartlardan tamamlanması **30 günden eski** olanlar panoyu doldurmasın
   diye gizlenir; kaç tane olduğu yazar, **Eskileri göster** hepsini geri getirir.
+
+#### Son durum ve geçmişi
+
+Açıklama işin **ne** olduğunu anlatır, **Son durum** ise **nerede kaldığını**.
+Pencerede Açıklama ile Not arasında durur ve her değiştiğinde bir deftere yazılır;
+defterin satırları silinmez, düzenlenmez. Aynı metni tekrar kaydetmek yeni satır
+açmaz, alanı **boşaltmak** ise açar (defterde `— (boş)` görünür).
+
+- Kartta son durumun **ilk satırı** tarihiyle birlikte küçük gri bir satır olarak
+  durur; tıklayınca geçmiş popover'ı açılır.
+- Popover Jira yerel alan geçmişiyle aynı kalıptadır: eskiden yeniye bloklar, ilk
+  girişte "ilk değer" rozeti, son giriş vurgulu, 20'den fazlası katlanır.
+  Görev penceresinde etiketin yanındaki **Geçmiş (n)** bağı da aynı popover'ı açar.
+- Defter okunur: `GET /api/tasks/{id}/son-durum-gecmisi` (eskiden yeniye).
+- Son durum yazmak Sefer'de XP vermez.
 
 #### Bir görevi Jira kaydına bağlamak
 
@@ -428,9 +443,11 @@ Kartın üstündeki anahtara tıklamak sağdaki detay çekmecesini açar. Ters y
 var: grid'de satırın sonundaki görev düğmesi, adı Jira özetiyle önden dolu bir
 görev penceresi açar.
 
-Görevler **Excel'e aktar** ile tek sayfalık bir dosyaya yazılır: Durum, Ad,
-Açıklama, Not, Son tarih (gerçek tarih hücresi), Jira kaydı (köprü), Jira özeti,
-Jira durumu, Oluşturma, Tamamlanma. Dosya eski biten kartları da kapsar.
+Görevler **Excel'e aktar** ile iki sayfalık bir dosyaya yazılır. İlk sayfa
+(**Görevlerim**): Durum, Ad, Açıklama, Son durum (yalnız güncel metin), Not,
+Son tarih (gerçek tarih hücresi), Jira kaydı (köprü), Jira özeti, Jira durumu,
+Oluşturma, Tamamlanma. İkincisi (**Son durum geçmişi**): görev, tarih, metin.
+Dosya eski biten kartları da kapsar.
 Doğrudan da indirilebilir: `GET /api/tasks/export.xlsx?status=all|todo|doing|done`
 
 ### Teams'e mesaj (kayıttan tek tıkla)
@@ -500,6 +517,34 @@ Nasıl çalışır:
 Kayıtta kişi yoksa düğme mesaj açmaz; çekmeceyi açıp önce kişi eklemenizi ister.
 Adres defteri de boşsa kutunun altında "Rehber boş — Ayarlar → Teams → Rehberi
 Outlook'tan yenile" ipucu çıkar.
+
+### Teams mesajı iliştirme
+
+Teams'te bir mesaja sağ tıklayıp **Bağlantıyı kopyala** dediğinizde panoya iki
+parça düşer: gönderenin ve sohbetin yazdığı bir ön satır, altında uzun bir derin
+bağlantı. İkisini olduğu gibi bir açıklama alanına yapıştırmak metni boğuyordu;
+Holocron bunu **tek satırlık bir işarete** çevirir:
+
+```
+[[teams: Deniz Akgün · Ödeme ekibi · 16 Eyl 2026 14:14|https://teams.microsoft.com/l/message/…]]
+```
+
+- **Nerede çalışır.** Görev penceresindeki Açıklama / Son durum / Not alanları ve
+  Jira kaydı çekmecesindeki çok satırlı yerel metin alanları — yani "Düzelt"
+  düğmesi olan her alan. Panoda başka metin de varsa yalnızca blok dönüşür.
+- **Ne yazar.** Gönderenin adı ön satırdaki ilk tireye kadar okunur, sohbet adı
+  "… sohbetinde" arasından; kanal mesajında bağlantının kendi
+  `teamName` / `channelName` bilgisi kullanılır. Zaman ön satırdan çözülür
+  (Türkçe/İngilizce ay adları, 12 ya da 24 saat); çözülemezse mesaj kimliğinden
+  (Unix milisaniye) türetilir. Ön satır hiç yoksa işaret "Teams mesajı" der.
+- **Nasıl görünür.** İşaret düz metindir: düzenleme kipinde onu görür ve
+  silebilirsiniz. Salt-okunur görünümlerde (kanban kartı, grid hücresi, çekmece
+  değeri, geçmiş popover'ı) küçük bir çipe döner; tıklayınca önce `msteams:`
+  denenir, açılmazsa tarayıcı yolu kullanılır. Sohbet adı çipin ipucunda durur.
+  Metin içindeki düz `http(s)://` bağlantılar da aynı görünümde tıklanabilir.
+- **Nereye girmez.** İşaret **uygulamanın içinde kalır**: Excel dökümlerinde ve
+  e-posta / Teams mesaj gövdelerinde ne adres ne çip ne yer tutucu olarak görünür,
+  metinden temizlenir. Düz `http(s)://` bağlantılar dışa aktarımda olduğu gibi kalır.
 
 ### E-posta (görev üretme)
 
@@ -1168,6 +1213,7 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/tasks.py` | Görev panosunun kurulması (sütunlar, son tarih durumu) |
 | `app/teams.py` | Teams derin bağlantısı ve şablon çözümü (saf mantık) |
 | `app/desktop.py` | Adresi işletim sistemine açtırır (`msteams:` protokolü dahil) |
+| `app/teamslink.py` | Teams mesaj işaretini dışa aktarılan metinden siler (JS eşi) |
 | `app/export.py` | Grup / görev / XP defteri → Excel (.xlsx) dosyası |
 | `app/refresh.py` | Arka planda çalışan Güncelle işi |
 | `app/mail/` | Outlook'tan görev üretme (kaynak sözleşmesi, COM sarmalayıcı, iş mantığı) |
@@ -1191,6 +1237,7 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/static/js/campaign.js` | Sefer paneli (kahraman şeridi, emirler, rozetler, defter) |
 | `app/static/js/campaign-settings.js` | Ayarlar → Sefer kartı (XP kuralları, koruma durumu) |
 | `app/static/js/duzelt.js` | "Düzelt" bileşeni: düğme, öneri paneli, kelime düzeyinde fark |
+| `app/static/js/teamslink.js` | Teams mesajı iliştirme: yapıştırma çevirisi, çip, temizleme |
 | `app/static/img/gamify/` | Rütbe görselleri ve elle çizilmiş rozet PNG'leri |
 | `app/static/rozetler/` | Rozet simgeleri (`tools/rozet_simgeleri.py` üretir) |
 | `tests/` | pytest testleri, sahte Jira sunucusu |

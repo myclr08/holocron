@@ -271,6 +271,7 @@ CSS_VARIABLES = (
 
 SCRIPTS = (
     "common.js",
+    "teamslink.js",
     "duzelt.js",
     "app.js",
     "settings.js",
@@ -1590,3 +1591,119 @@ process.stdout.write(JSON.stringify(out));
     assert out["hrefWithNoStoredView"] == "/"
     assert out["hrefWithStoredView"] == "/#gorevlerim"
 
+
+
+# --- Teams mesaj belirteci: yapistirma, cip, temizleme -------------------
+#
+# Tasarim (kullanici onayi, 20 Eyl 2026): Teams'ten kopyalanan blok gorev
+# aciklama/son durum/not alanlarinda ve Jira cekmecesinin yerel metin
+# alanlarinda tek satirlik bir belirtece doner, salt-okunur gorunumlerde
+# cipe. Davranis testleri `tests/test_teamslink.py` icinde gercek JavaScript
+# ile kosuyor; burada yalnizca kancalar ve baglanti duzeni denetleniyor.
+
+
+def test_the_teams_link_component_is_loaded_before_the_app(api_client):
+    page = api_client.get("/").text
+    assert '<script src="/static/js/teamslink.js"></script>' in page
+    # Bilesen `app.js`ten ONCE yuklenir: pencere cizilirken hazir olmali.
+    assert page.index("teamslink.js") < page.index("js/app.js")
+
+
+def test_the_teams_link_script_carries_the_token_the_chip_and_the_stripper(api_client):
+    script = api_client.get("/static/js/teamslink.js").text
+    for marker in (
+        "function attachTeamsLink",
+        "function teamsLinkYapistir",
+        "function teamsLinkTemizle",
+        "function teamsLinkCiz",
+        "function teamsLinkDoldur",
+        "function teamsLinkUygulamaAdresi",
+        '"Teams mesajı"',
+        "teams-msg",
+        "text-link",
+        '"msteams:" + ham.slice(yer)',
+    ):
+        assert marker in script, marker
+    # Ay adlari iki dilde de cozulur.
+    assert '"Oca", "Şub", "Mar"' in script
+    assert "jan: 1, feb: 2" in script
+    # Metin HTML olarak basilmaz: yalnizca metin dugumu ve uretilen `a`.
+    assert "createTextNode" in script
+    assert "innerHTML" not in script
+
+
+def test_teams_paste_is_wired_where_the_fix_button_is(api_client):
+    script = api_client.get("/static/js/app.js").text
+    assert 'if (typeof attachTeamsLink === "function") attachTeamsLink(alan);' in script
+    # Salt-okunur gorunumler ciziciden gecer.
+    assert "function metinCiz" in script
+    for marker in (
+        'metinCiz(h("div", { class: "task-desc" }, []), task.description)',
+        'metinCiz(h("span", { class: "local-text" }, []), cell.text || "—")',
+        'metinCiz(h("div", { class: "history-value" }, []), value || "— (boş)")',
+        'h("button", { class: "local-open", title: "Düzenle", onclick: () => edit() }, [])',
+    ):
+        assert marker in script, marker
+
+
+def test_the_teams_chip_has_its_own_style_and_no_uppercase(api_client):
+    css = api_client.get("/static/css/app.css").text
+    block = css.split(".teams-msg {", 1)[1].split("}", 1)[0]
+    assert "border-radius: 999px" in block
+    # Turkce metne `uppercase` uygulanmaz.
+    assert "text-transform: none" in block
+    assert ".teams-msg-icon" in css
+    assert ".text-link" in css
+
+
+# --- Görevlerim: "Son durum" alani ve defteri ---------------------------
+
+
+def test_the_task_window_has_a_status_field_between_description_and_note(api_client):
+    script = api_client.get("/static/js/app.js").text
+    assert 'field("Açıklama", descBox),\n    sonAlan,\n    field("Not", noteBox),' in script
+    assert 'const sonBox = duzeltKutusu(sonInput, "Son durum");' in script
+    assert 'son_durum: sonInput.value,' in script
+    # Etiketin yanindaki defter bagi ve kartin son durum satiri ayni popover'i acar.
+    assert 'text: `Geçmiş (${existing.son_durum_changes})`' in script
+    assert "function taskStatusLine" in script
+    assert "openTaskHistory(event.currentTarget, task)" in script
+    assert '`/api/tasks/${task.id}/son-durum-gecmisi`' in script
+
+
+def test_task_status_history_uses_the_same_chronological_blocks():
+    """Defter Jira alan gecmisiyle AYNI kalipla cizilir; satir silme yok."""
+    fake_entries = r"""
+globalThis.api = async () => ({
+  entries: [
+    { id: 1, metin: "Başladı", olusturma: "2026-01-01T10:00:00+00:00" },
+    { id: 2, metin: "Devam ediyor", olusturma: "2026-01-02T10:00:00+00:00" },
+    { id: 3, metin: "", olusturma: "2026-01-03T10:00:00+00:00" },
+  ],
+});
+"""
+    probe = r"""
+(async () => {
+  await openTaskHistory(document.getElementById("clock"), { id: 7, title: "Rapor" });
+  const body = document.getElementById("history-body");
+  process.stdout.write(JSON.stringify({
+    count: body.children.length,
+    values: body.children.map((c) => c.children[1].textContent),
+    firstBadge: body.children[0].text(),
+    lastClass: body.children[body.children.length - 1].className,
+    title: document.getElementById("history-title").textContent,
+    clearHidden: document.getElementById("history-clear").hidden,
+    html: body.text(),
+  }));
+})();
+"""
+    report = _run_history_probe(fake_entries, probe)
+    assert report["count"] == 3, report
+    # Eskiden yeniye; bosaltma da bir satirdir.
+    assert report["values"] == ["Başladı", "Devam ediyor", "— (boş)"], report
+    assert "ilk değer" in report["firstBadge"], report
+    assert "current" in report["lastClass"], report
+    assert report["title"] == "Son durum · Rapor", report
+    # Defter silinmez: "Geçmişi temizle" ve satir silme dugmesi yok.
+    assert report["clearHidden"] is True, report
+    assert "×" not in report["html"], report

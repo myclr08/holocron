@@ -20,7 +20,14 @@ from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from . import __version__, fields as field_utils, grid, repository, tasks as task_utils
+from . import (
+    __version__,
+    fields as field_utils,
+    grid,
+    repository,
+    tasks as task_utils,
+    teamslink,
+)
 
 MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -171,7 +178,8 @@ def _write_cell(
     tz: tzinfo | None,
 ) -> int:
     """Hucreyi yazar ve sutun genisligi icin gorunen uzunlugu dondurur."""
-    text = cell.get("text") or ""
+    # Teams belirteci dokumde GORUNMEZ: yalnizca uygulama icinde anlamlidir.
+    text = teamslink.temizle(cell.get("text") or "")
     raw = cell.get("raw")
 
     if kind == KIND_DATE:
@@ -264,8 +272,8 @@ def _write_history(
                         item["changed_at"] or "",
                         key,
                         field["name"],
-                        item["old_text"],
-                        item["new_text"],
+                        teamslink.temizle(item["old_text"]),
+                        teamslink.temizle(item["new_text"]),
                     )
                 )
     # Yeniden eskiye: ayni anda dusen satirlarda kayit/alan sirasi korunur.
@@ -342,10 +350,12 @@ def _write_info(
 TASKS_SHEET = "Görevlerim"
 TASKS_NAME = "Görevlerim"
 
+# Ekrandaki pencere sirasi: Ad, Aciklama, Son durum, Not.
 TASK_HEADERS = (
     "Durum",
     "Ad",
     "Açıklama",
+    "Son durum",
     "Not",
     "Son tarih",
     "Jira kaydı",
@@ -356,7 +366,12 @@ TASK_HEADERS = (
 )
 
 # Basliklarin hucre tipleri; geri kalani metin.
-TASK_KINDS = {4: KIND_DATE, 8: KIND_DATETIME, 9: KIND_DATETIME}
+TASK_KINDS = {5: KIND_DATE, 9: KIND_DATETIME, 10: KIND_DATETIME}
+
+# Ikinci sayfa: son durum defteri.
+TASK_HISTORY_SHEET = "Son durum geçmişi"
+TASK_HISTORY_HEADERS = ("Görev", "Tarih", "Metin")
+NO_TASK_HISTORY_TEXT = "Son durum yazılmış görev yok"
 
 
 def build_tasks_workbook(
@@ -389,6 +404,7 @@ def build_tasks_workbook(
             repository.TASK_STATUS_LABELS.get(task["status"], task["status"]),
             task["title"],
             task["description"],
+            task["son_durum"],
             task["note"],
             task["due_date"],
             task["issue_key"],
@@ -400,7 +416,7 @@ def build_tasks_workbook(
         for index, value in enumerate(values):
             target = sheet.cell(row=line, column=index + 1)
             width = _write_task_cell(target, value, TASK_KINDS.get(index, KIND_TEXT), tz)
-            if index == 5 and value and issue.get("url"):
+            if index == 6 and value and issue.get("url"):
                 target.hyperlink = issue["url"]
                 target.style = "Hyperlink"
             if width > widths[index]:
@@ -415,9 +431,66 @@ def build_tasks_workbook(
             max(width + 2, COLUMN_WIDTH_MIN), COLUMN_WIDTH_LIMIT
         )
 
+    _write_task_history(book, context, _ordered_tasks(board), tz)
+
     buffer = io.BytesIO()
     book.save(buffer)
     return buffer.getvalue()
+
+
+def _write_task_history(
+    book: Workbook, context: Any, ordered: list[dict[str, Any]], tz: tzinfo | None
+) -> None:
+    """Ikinci sayfa: "son durum" defteri (gorev, tarih, metin).
+
+    Ilk sayfada yalnizca GUNCEL son durum vardir; degisimlerin tamami burada
+    eskiden yeniye durur.
+    """
+    sheet = book.create_sheet(sheet_title(TASK_HISTORY_SHEET))
+    conn = context.connection()
+    entries: list[tuple[str, str, str]] = []
+    for task in ordered:
+        for item in repository.list_task_status_history(conn, task["id"]):
+            entries.append(
+                (
+                    task["title"],
+                    item["olusturma"] or "",
+                    teamslink.temizle(item["metin"]) or repository.TASK_STATUS_EMPTY_TEXT,
+                )
+            )
+    if not entries:
+        sheet["A1"] = NO_TASK_HISTORY_TEXT
+        sheet.column_dimensions["A"].width = len(NO_TASK_HISTORY_TEXT) + 2
+        return
+
+    sheet.append(list(TASK_HISTORY_HEADERS))
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+
+    widths = [len(text) for text in TASK_HISTORY_HEADERS]
+    for line, (title, when, text) in enumerate(entries, start=2):
+        sheet.cell(row=line, column=1).value = title
+        widths[0] = max(widths[0], _display_width(title))
+        target = sheet.cell(row=line, column=2)
+        moment = field_utils.parse_moment(when)
+        if moment is None:
+            target.value = when
+            widths[1] = max(widths[1], len(when))
+        else:
+            local = moment.astimezone(tz) if tz is not None else moment.astimezone()
+            target.value = local.replace(tzinfo=None)
+            target.number_format = EXCEL_DATETIME_FORMAT
+            widths[1] = max(widths[1], len(EXCEL_DATETIME_FORMAT))
+        sheet.cell(row=line, column=3).value = text
+        widths[2] = max(widths[2], _display_width(text))
+
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:C{len(entries) + 1}"
+    for index, width in enumerate(widths):
+        letter = get_column_letter(index + 1)
+        sheet.column_dimensions[letter].width = min(
+            max(width + 2, COLUMN_WIDTH_MIN), COLUMN_WIDTH_LIMIT
+        )
 
 
 def _ordered_tasks(board: Any) -> list[dict[str, Any]]:
@@ -429,7 +502,7 @@ def _ordered_tasks(board: Any) -> list[dict[str, Any]]:
 
 
 def _write_task_cell(target: Any, value: Any, kind: str, tz: tzinfo | None) -> int:
-    text = "" if value is None else str(value)
+    text = "" if value is None else teamslink.temizle(str(value))
     if kind == KIND_NUMBER:
         number = _as_int_or_float(value)
         if number is not None:

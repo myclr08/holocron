@@ -1223,6 +1223,7 @@ def create_task(
     due_date: Any = None,
     status: Any = None,
     issue_key: Any = None,
+    son_durum: Any = None,
 ) -> dict[str, Any]:
     clean_status = clean_task_status(status or TASK_TODO)
     stamp = now_iso()
@@ -1232,12 +1233,14 @@ def create_task(
     ).fetchone()["p"]
     with conn:
         cursor = conn.execute(
-            "INSERT INTO tasks (title, description, note, due_date, status, issue_key, "
-            "position, created_at, updated_at, done_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (title, description, note, son_durum, due_date, status, "
+            "issue_key, position, created_at, updated_at, done_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 clean_task_title(title),
                 _task_text(description),
                 _task_text(note),
+                _task_text(son_durum),
                 clean_task_due_date(due_date),
                 clean_status,
                 clean_task_key(issue_key),
@@ -1247,7 +1250,11 @@ def create_task(
                 stamp if clean_status == TASK_DONE else None,
             ),
         )
-    return require_task(conn, int(cursor.lastrowid))  # type: ignore[arg-type]
+    task = require_task(conn, int(cursor.lastrowid))  # type: ignore[arg-type]
+    # Ilk son durum da deftere yazilir: kartin "ilk değer" blogu bos kalmasin.
+    if task["son_durum"]:
+        _log_task_status(conn, task["id"], task["son_durum"], stamp)
+    return task
 
 
 def update_task(
@@ -1263,6 +1270,8 @@ def update_task(
         updates["description"] = _task_text(payload["description"])
     if "note" in payload:
         updates["note"] = _task_text(payload["note"])
+    if "son_durum" in payload:
+        updates["son_durum"] = _task_text(payload["son_durum"])
     if "due_date" in payload:
         updates["due_date"] = clean_task_due_date(payload["due_date"])
     if "issue_key" in payload:
@@ -1281,12 +1290,19 @@ def update_task(
     if not updates:
         return task
 
-    updates["updated_at"] = now_iso()
+    stamp = now_iso()
+    # Son durum DEGISTIYSE deftere bir satir duser; ayni metin tekrar
+    # kaydedilirse yeni satir acilmaz (bosaltma degisimdir, satir acar).
+    logged = "son_durum" in updates and (updates["son_durum"] or "") != (task["son_durum"] or "")
+
+    updates["updated_at"] = stamp
     assignments = ", ".join(f"{column} = ?" for column in updates)
     with conn:
         conn.execute(
             f"UPDATE tasks SET {assignments} WHERE id = ?", (*updates.values(), task["id"])
         )
+    if logged:
+        _log_task_status(conn, task["id"], updates["son_durum"] or "", stamp)
     return require_task(conn, task["id"])
 
 
@@ -1381,6 +1397,79 @@ def reorder_tasks(
     return list_tasks(conn, column)
 
 
+# --- gorevin "son durum" defteri ----------------------------------------
+#
+# `task_status_history` bir DEFTERDIR: satirlari degismez, yalnizca eklenir.
+# Aciklama gorevin ne oldugunu anlatir, son durum nerede kaldigini; ikincisi
+# sik degisir ve her degisimi saklanir. Bosaltma da bir satirdir, boylece
+# "burasi temizlendi" bilgisi kaybolmaz.
+
+# Bos son durumun ekranda ve Excel'de gorunen karsiligi.
+TASK_STATUS_EMPTY_TEXT = "— (boş)"
+
+
+def _log_task_status(
+    conn: sqlite3.Connection, task_id: int, metin: Any, at: str | None = None
+) -> None:
+    with conn:
+        conn.execute(
+            "INSERT INTO task_status_history (task_id, metin, olusturma) VALUES (?, ?, ?)",
+            (int(task_id), str(metin or ""), str(at or now_iso())),
+        )
+
+
+def list_task_status_history(conn: sqlite3.Connection, task_id: int) -> list[dict[str, Any]]:
+    """Zaman cizelgesi: ESKIDEN YENIYE (ekranda blok blok boyle ciziliyor)."""
+    task = require_task(conn, task_id)
+    rows = conn.execute(
+        "SELECT id, metin, olusturma FROM task_status_history WHERE task_id = ? ORDER BY id",
+        (task["id"],),
+    ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "metin": row["metin"] or "",
+            "text": row["metin"] or "",
+            "olusturma": row["olusturma"],
+        }
+        for row in rows
+    ]
+
+
+def task_status_stats(conn: sqlite3.Connection) -> dict[int, dict[str, Any]]:
+    """Pano icin tek sorguda kayit sayisi ve son yazim zamani."""
+    rows = conn.execute(
+        "SELECT task_id, COUNT(*) AS n, MAX(olusturma) AS son "
+        "FROM task_status_history GROUP BY task_id"
+    ).fetchall()
+    return {
+        int(row["task_id"]): {"count": int(row["n"] or 0), "at": row["son"] or ""}
+        for row in rows
+    }
+
+
+def set_task_son_durum(
+    conn: sqlite3.Connection, task_id: int, metin: Any, at: str | None = None
+) -> dict[str, Any]:
+    """Son durumu yazar; metin degistiyse deftere satir duser.
+
+    `at` yalnizca demo tohumu ve testler icindir: gercek kullanimda zaman
+    damgasini saat verir.
+    """
+    task = require_task(conn, task_id)
+    text = _task_text(metin)
+    stamp = str(at or now_iso())
+    if (text or "") == (task["son_durum"] or ""):
+        return task
+    with conn:
+        conn.execute(
+            "UPDATE tasks SET son_durum = ?, updated_at = ? WHERE id = ?",
+            (text, stamp, task["id"]),
+        )
+    _log_task_status(conn, task["id"], text or "", stamp)
+    return require_task(conn, task["id"])
+
+
 def known_issue_keys(
     conn: sqlite3.Connection, q: str = "", limit: int = 20
 ) -> list[dict[str, Any]]:
@@ -1427,6 +1516,7 @@ def _task_dict(row: sqlite3.Row) -> dict[str, Any]:
         "title": row["title"],
         "description": row["description"] or "",
         "note": row["note"] or "",
+        "son_durum": row["son_durum"] or "",
         "due_date": row["due_date"] or "",
         "status": row["status"],
         "issue_key": row["issue_key"] or "",

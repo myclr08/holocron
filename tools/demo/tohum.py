@@ -75,6 +75,26 @@ FILOLAR: tuple[dict[str, Any], ...] = (
     },
 )
 
+# Teams mesaj belirteci (uydurma kiraci/sohbet kimlikleriyle): bir gorevin
+# aciklamasinda ve bir kaydin yerel alaninda duruyor. Ekranda tiklanabilir bir
+# cipe donusur, Excel'e ve e-postaya HIC girmez (bkz. app/teamslink.py).
+TEAMS_KIRACI = "00000000-0000-4000-8000-000000000001"
+TEAMS_SOHBET_BELIRTEC = (
+    "[[teams: Deniz Akgün · Ödeme ekibi · 16 Eyl 2026 14:14|"
+    "https://teams.microsoft.com/l/message/"
+    "19:2f1c9a7b4d8e4f0b9c3a5d6e7f801234@unq.gbl.spaces/1789557243396"
+    "?groupId=&parentMessageId=1789557243396"
+    f"&tenantId={TEAMS_KIRACI}"
+    "&context=%7B%22contextType%22%3A%22chat%22%7D]]"
+)
+TEAMS_KANAL_BELIRTEC = (
+    "[[teams: Ayça Yıldırım · Ödemeler / Duyurular · 15 Eyl 2026 09:40|"
+    "https://teams.microsoft.com/l/message/"
+    "19:7b3d5e9a1c2f4068b8d7e6a5c4b30099@thread.tacv2/1789461612874"
+    f"?tenantId={TEAMS_KIRACI}&groupId=00000000-0000-4000-8000-000000000002"
+    "&parentMessageId=&teamName=%C3%96demeler&channelName=Duyurular&createdTime=]]"
+)
+
 # Yerel ek alanlar: Jira'da olmayan, kullanicinin kendi tuttugu alanlar.
 YEREL_ALANLAR: tuple[dict[str, Any], ...] = (
     {"name": "Benim notum", "type": "text", "track_history": True},
@@ -101,7 +121,10 @@ YEREL_NOTLAR: tuple[str, ...] = (
 GOREVLER: tuple[dict[str, Any], ...] = (
     {
         "title": "Mutabakat raporu farkını çıkar",
-        "description": "Günsonu raporu ile kanal toplamı arasındaki farkı kalem kalem ayır.",
+        "description": (
+            "Günsonu raporu ile kanal toplamı arasındaki farkı kalem kalem ayır.\n"
+            f"Kaynak mesaj: {TEAMS_SOHBET_BELIRTEC}"
+        ),
         "note": "Önce son üç günün dosyalarını karşılaştır.",
         "status": "todo",
         "kayit_ara": "Mutabakat raporu",
@@ -109,7 +132,10 @@ GOREVLER: tuple[dict[str, Any], ...] = (
     },
     {
         "title": "Sürüm notlarını hazırla",
-        "description": "4.2.0 sürümüne giren kayıtların listesini çıkar.",
+        "description": (
+            "4.2.0 sürümüne giren kayıtların listesini çıkar.\n"
+            "Sürüm takvimi: https://ornek.local/wiki/surum-4-2-0"
+        ),
         "status": "todo",
         "son_tarih_gun": 5,
     },
@@ -172,6 +198,36 @@ GOREVLER: tuple[dict[str, Any], ...] = (
         "kayit_ara": "Döviz kuru önbelleği",
     },
 )
+
+# Gorevlerin "son durum" defteri: baslik -> (kac saat once, metin). Bes gorevde
+# ikiden dorde girdi var; demo acildiginda kartlarda gri son durum satiri ve
+# tiklaninca dolu bir gecmis popover'i gorunsun diye.
+SON_DURUMLAR: dict[str, tuple[tuple[int, str], ...]] = {
+    "Mutabakat raporu farkını çıkar": (
+        (72, "Fark listesi çıkarıldı, 14 kalem var."),
+        (30, "Sekiz kalem kur farkından; kalanı inceleniyor."),
+        (4, "İş birimine ara özet gönderildi, dönüş bekleniyor."),
+    ),
+    "Test ortamında veri maskeleme kontrolü": (
+        (96, "Maskeleme betiği test ortamında koştu."),
+        (20, "İki ekranda ad görünüyor; hata kaydı açıldı."),
+    ),
+    "EFT kuyruğu yeniden deneme mantığını gözden geçir": (
+        (120, "Mevcut mantık çıkarıldı."),
+        (60, "Ölü mektup kutusu tasarımı taslak halinde."),
+        (26, "Tasarım gözden geçirmede."),
+        (3, "Geri bildirimler işlendi, geliştirme başlıyor."),
+    ),
+    "Şube ekranı performans ölçümü": (
+        (48, "İlk ölçüm alındı: açılış 2,4 sn."),
+        (8, "İkinci tur için yük üretici hazırlandı."),
+    ),
+    "IBAN doğrulama kütüphanesini yükselt": (
+        (200, "Yükseltme dalı açıldı."),
+        (150, "Regresyon testleri geçti."),
+        (100, "Canlıya alındı, takip ediliyor."),
+    ),
+}
 
 # Adres defteri: 15 kisi + 2 dagitim listesi (hepsi uydurma).
 EK_KISILER: tuple[tuple[str, str], ...] = (
@@ -347,6 +403,15 @@ def yerel_alanlari_kur(context: Any, anahtarlar: list[str], an: datetime | None 
             hedef = (simdi + timedelta(days=3 + sira)).date().isoformat()
             repository.set_local_value(conn, anahtar, alanlar[2]["id"], hedef)
         repository.set_local_value(conn, anahtar, alanlar[3]["id"], durumlar[sira % len(durumlar)])
+    # Bir kaydin yerel metin alaninda Teams mesaj belirteci dursun: cekmecede
+    # ve grid hucresinde cip olarak gorunur.
+    if anahtarlar:
+        repository.set_local_value(
+            conn,
+            anahtarlar[0],
+            alanlar[0]["id"],
+            f"Kanal duyurusu: {TEAMS_KANAL_BELIRTEC} sonrasında kapsam netleşti.",
+        )
     # Gecmis dolu gorunsun: birkac alanin degeri bir kez daha degissin.
     for anahtar in anahtarlar[:5]:
         repository.set_local_value(conn, anahtar, alanlar[3]["id"], "Bitti")
@@ -363,7 +428,7 @@ def gorevleri_kur(context: Any, anahtarlar: list[str], an: datetime | None = Non
         son_tarih = None
         if "son_tarih_gun" in tanim:
             son_tarih = (simdi + timedelta(days=tanim["son_tarih_gun"])).date().isoformat()
-        repository.create_task(
+        gorev = repository.create_task(
             conn,
             title=tanim["title"],
             description=tanim.get("description"),
@@ -372,6 +437,10 @@ def gorevleri_kur(context: Any, anahtarlar: list[str], an: datetime | None = Non
             status=tanim["status"],
             issue_key=_kayit_bul(ozetler, tanim.get("kayit_ara")),
         )
+        for saat_once, metin in SON_DURUMLAR.get(tanim["title"], ()):
+            repository.set_task_son_durum(
+                conn, gorev["id"], metin, at=_damga(simdi - timedelta(hours=saat_once))
+            )
 
 
 def _ozetler(conn: Any, anahtarlar: list[str]) -> list[tuple[str, str]]:

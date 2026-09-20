@@ -397,6 +397,7 @@ def test_task_export_writes_one_sheet_with_real_cells(api_client, conn):
         "Rapor yaz",
         description="Aylık özet",
         note="Önce veriyi topla",
+        son_durum="İlk taslak çıktı",
         due_date="2026-09-11",
         issue_key="DEMO-1",
     )
@@ -409,6 +410,7 @@ def test_task_export_writes_one_sheet_with_real_cells(api_client, conn):
         "Durum",
         "Ad",
         "Açıklama",
+        "Son durum",
         "Not",
         "Son tarih",
         "Jira kaydı",
@@ -422,21 +424,22 @@ def test_task_export_writes_one_sheet_with_real_cells(api_client, conn):
     assert first["A"].value == "Yapılacak"
     assert first["B"].value == "Rapor yaz"
     assert first["C"].value == "Aylık özet"
-    assert first["D"].value == "Önce veriyi topla"
+    assert first["D"].value == "İlk taslak çıktı"
+    assert first["E"].value == "Önce veriyi topla"
     # Gercek tarih hucresi, metin degil.
-    assert first["E"].value == datetime(2026, 9, 11)
-    assert first["E"].number_format == "DD.MM.YYYY"
-    assert first["F"].value == "DEMO-1"
-    assert first["F"].hyperlink.target == f"{BASE}/browse/DEMO-1"
-    assert first["G"].value == "Özet DEMO-1"
-    assert first["H"].value == "Açık"
-    assert isinstance(first["I"].value, datetime)
-    assert first["J"].value is None
+    assert first["F"].value == datetime(2026, 9, 11)
+    assert first["F"].number_format == "DD.MM.YYYY"
+    assert first["G"].value == "DEMO-1"
+    assert first["G"].hyperlink.target == f"{BASE}/browse/DEMO-1"
+    assert first["H"].value == "Özet DEMO-1"
+    assert first["I"].value == "Açık"
+    assert isinstance(first["J"].value, datetime)
+    assert first["K"].value is None
 
     second = {cell.column_letter: cell for cell in sheet[3]}
     assert second["A"].value == "Yapıldı"
-    assert isinstance(second["J"].value, datetime)
-    assert second["J"].number_format == "DD.MM.YYYY HH:MM"
+    assert isinstance(second["K"].value, datetime)
+    assert second["K"].number_format == "DD.MM.YYYY HH:MM"
     assert sheet.max_row == 3
 
 
@@ -466,3 +469,144 @@ def test_task_export_file_name_is_dated(api_client):
     make_task(api_client, "Bir")
     disposition = api_client.get("/api/tasks/export.xlsx").headers["content-disposition"]
     assert f"Gorevlerim-{date.today().isoformat()}.xlsx" in disposition
+
+
+# --- "Son durum": alan ve defteri ---------------------------------------
+#
+# Tasarim (kullanici onayi, 20 Eylul 2026): Aciklama gorevin NE oldugunu,
+# "son durum" NEREDE kaldigini anlatir. Ikincisi sik degisir ve her degisimi
+# saklanir; `task_status_history` bir defterdir, satirlari degismez.
+
+
+def read_book(response):
+    assert response.status_code == 200, response.text
+    return load_workbook(io.BytesIO(response.content))
+
+
+def history(api_client, task_id):
+    response = api_client.get(f"/api/tasks/{task_id}/son-durum-gecmisi")
+    assert response.status_code == 200, response.text
+    return response.json()["entries"]
+
+
+def test_the_migration_adds_the_status_field_and_its_ledger(conn):
+    assert "task_status_history" in db.table_names(conn)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+    assert "son_durum" in columns
+    ledger = {row["name"] for row in conn.execute("PRAGMA table_info(task_status_history)")}
+    assert ledger == {"id", "task_id", "metin", "olusturma"}
+
+
+def test_a_new_task_can_carry_a_status_and_it_opens_the_ledger(api_client):
+    task = make_task(api_client, "Rapor", son_durum="İlk taslak çıktı")
+    assert task["son_durum"] == "İlk taslak çıktı"
+    assert [item["metin"] for item in history(api_client, task["id"])] == ["İlk taslak çıktı"]
+
+
+def test_writing_the_same_status_again_does_not_open_a_new_ledger_row(api_client):
+    task = make_task(api_client, "Rapor", son_durum="Başladı")
+    for _ in range(3):
+        api_client.put(f"/api/tasks/{task['id']}", json={"son_durum": "Başladı"})
+    assert len(history(api_client, task["id"])) == 1
+
+    api_client.put(f"/api/tasks/{task['id']}", json={"son_durum": "Devam ediyor"})
+    assert [item["metin"] for item in history(api_client, task["id"])] == [
+        "Başladı",
+        "Devam ediyor",
+    ]
+
+
+def test_clearing_the_status_is_a_ledger_row_too(api_client):
+    task = make_task(api_client, "Rapor", son_durum="Başladı")
+    updated = api_client.put(f"/api/tasks/{task['id']}", json={"son_durum": ""}).json()["task"]
+    assert updated["son_durum"] == ""
+    assert [item["metin"] for item in history(api_client, task["id"])] == ["Başladı", ""]
+
+
+def test_the_ledger_runs_oldest_to_newest_and_the_card_carries_its_count(api_client, conn):
+    task = make_task(api_client, "Rapor")
+    for text in ("Bir", "İki", "Üç"):
+        api_client.put(f"/api/tasks/{task['id']}", json={"son_durum": text})
+    assert [item["metin"] for item in history(api_client, task["id"])] == ["Bir", "İki", "Üç"]
+
+    card = next(
+        item for item in column(board(api_client), "todo")["tasks"] if item["id"] == task["id"]
+    )
+    assert card["son_durum"] == "Üç"
+    assert card["son_durum_changes"] == 3
+    assert card["son_durum_at"]
+
+
+def test_deleting_the_task_takes_its_ledger_with_it(api_client, conn):
+    task = make_task(api_client, "Rapor", son_durum="Başladı")
+    api_client.delete(f"/api/tasks/{task['id']}")
+    rows = conn.execute(
+        "SELECT COUNT(*) AS n FROM task_status_history WHERE task_id = ?", (task["id"],)
+    ).fetchone()
+    assert rows["n"] == 0
+    assert api_client.get(f"/api/tasks/{task['id']}/son-durum-gecmisi").status_code == 404
+
+
+def test_the_status_text_is_searchable(api_client):
+    make_task(api_client, "Rapor", son_durum="Kur farkı inceleniyor")
+    make_task(api_client, "Başka iş")
+    assert titles(board(api_client, q="kur farkı"), "todo") == ["Rapor"]
+
+
+def test_the_export_carries_the_status_column_and_its_own_history_sheet(api_client):
+    task = make_task(api_client, "Rapor", son_durum="Başladı")
+    api_client.put(f"/api/tasks/{task['id']}", json={"son_durum": "Bitmek üzere"})
+    make_task(api_client, "Durumsuz iş")
+
+    book = read_book(api_client.get("/api/tasks/export.xlsx"))
+    sheet = book.active
+    assert [cell.value for cell in sheet[1]][3] == "Son durum"
+    # Ilk sayfada YALNIZCA guncel metin durur.
+    assert [row[3].value for row in sheet.iter_rows(min_row=2)] == ["Bitmek üzere", None]
+
+    ledger = book["Son durum geçmişi"]
+    assert [cell.value for cell in ledger[1]] == ["Görev", "Tarih", "Metin"]
+    assert [(row[0].value, row[2].value) for row in ledger.iter_rows(min_row=2)] == [
+        ("Rapor", "Başladı"),
+        ("Rapor", "Bitmek üzere"),
+    ]
+    assert isinstance(ledger["B2"].value, datetime)
+
+
+def test_an_empty_ledger_row_is_named_in_the_export(api_client):
+    task = make_task(api_client, "Rapor", son_durum="Başladı")
+    api_client.put(f"/api/tasks/{task['id']}", json={"son_durum": ""})
+    ledger = read_book(api_client.get("/api/tasks/export.xlsx"))["Son durum geçmişi"]
+    assert [row[2].value for row in ledger.iter_rows(min_row=2)] == ["Başladı", "— (boş)"]
+
+
+def test_the_export_says_so_when_no_task_has_a_status(api_client):
+    make_task(api_client, "Durumsuz iş")
+    ledger = read_book(api_client.get("/api/tasks/export.xlsx"))["Son durum geçmişi"]
+    assert ledger["A1"].value == "Son durum yazılmış görev yok"
+
+
+def test_the_teams_token_is_stored_in_the_field_but_never_exported(api_client):
+    """Belirtec alanda DURUR (uygulamada cipe doner), Excel'e girmez."""
+    belirtec = (
+        "[[teams: Deniz Akgün · 16 Eyl 2026 14:14|"
+        "https://teams.microsoft.com/l/message/19:abc@unq.gbl.spaces/1789557243396]]"
+    )
+    task = make_task(
+        api_client,
+        "Rapor",
+        description=f"Kaynak: {belirtec} notlara bak",
+        son_durum=f"Beklemede {belirtec}",
+    )
+    kart = column(board(api_client), "todo")["tasks"][0]
+    assert belirtec in kart["description"]
+
+    book = read_book(api_client.get("/api/tasks/export.xlsx"))
+    sheet = book.active
+    assert sheet["C2"].value == "Kaynak: notlara bak"
+    assert sheet["D2"].value == "Beklemede"
+    assert book["Son durum geçmişi"]["C2"].value == "Beklemede"
+    for row in sheet.iter_rows():
+        for cell in row:
+            assert "teams.microsoft.com" not in str(cell.value or "")
+    assert task["son_durum"].endswith("]]")
