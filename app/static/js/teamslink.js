@@ -677,20 +677,37 @@ function teamsLinkYaz(alan, metin) {
 }
 
 /**
+ * Blok DISI satir sonlarini boslukla degistirir.
+ *
+ * Yalnizca tek satirlik hedeflerde (grid hucresi, tek satirlik yerel alan)
+ * kullanilir: belirtecin kendisi zaten tek satirdir, geri kalan metindeki
+ * (kullanicinin ayni yapistirmada getirdigi baska satirlarin) satir sonlari
+ * boslukga iner ki deger tek satirlik `input`'a duzgun sigsin.
+ */
+function teamsLinkTekSatiraIndir(metin) {
+  return String(metin || "").replace(/\r\n|\r|\n/g, " ");
+}
+
+/**
  * Bir metin alanina Teams yapistirma cevirisini takar.
  *
  * Ayni alana ikinci kez cagrilmak zararsizdir (pencere yeniden cizilince
  * kanca iki kez takilmasin). Panoda Teams baglantisi yoksa olaya hic
  * karisilmaz: tarayici kendi yapistirmasini yapar.
+ *
+ * `secenekler.tekSatir` verilirse (grid hucresi gibi tek satirlik alanlar)
+ * donen metindeki blok disi satir sonlari boslukga indirgenir.
  */
-function attachTeamsLink(alan) {
+function attachTeamsLink(alan, secenekler) {
   if (!alan || alan.teamsLinkBagli) return alan;
   alan.teamsLinkBagli = true;
+  const tekSatir = !!(secenekler && secenekler.tekSatir);
   alan.addEventListener("paste", (event) => {
     const pano = event.clipboardData ? event.clipboardData.getData("text/plain") : "";
     if (!pano) return;
-    const cevrilmis = teamsLinkYapistir(pano);
+    let cevrilmis = teamsLinkYapistir(pano);
     if (cevrilmis === pano) return;
+    if (tekSatir) cevrilmis = teamsLinkTekSatiraIndir(cevrilmis);
     event.preventDefault();
     teamsLinkYaz(alan, cevrilmis);
   });

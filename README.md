@@ -529,9 +529,12 @@ Holocron bunu **tek satırlık bir işarete** çevirir:
 [[teams: Deniz Akgün · Ödeme ekibi · 16 Eyl 2026 14:14|https://teams.microsoft.com/l/message/…]]
 ```
 
-- **Nerede çalışır.** Görev penceresindeki Açıklama / Son durum / Not alanları ve
+- **Nerede çalışır.** Görev penceresindeki Açıklama / Son durum / Not alanları,
   Jira kaydı çekmecesindeki çok satırlı yerel metin alanları — yani "Düzelt"
-  düğmesi olan her alan. Panoda başka metin de varsa yalnızca blok dönüşür.
+  düğmesi olan her alan — ve filo tablosundaki (grid) tek satırlık yerel metin
+  hücresi. Panoda başka metin de varsa yalnızca blok dönüşür; grid hücresi gibi
+  tek satırlık yerlerde bloğun dışında kalan satır sonları boşluğa iner, çünkü
+  değer tek satıra sığmak zorundadır.
 - **Ne yazar.** Gönderenin adı ön satırdaki ilk tireye kadar okunur ("Ad
   Soyad-Şirket-Birim-Unvan" → "Ad Soyad"), sohbet adı "… sohbetinde" arasından;
   kanal mesajında bağlantının kendi `teamName` / `channelName` bilgisi
@@ -548,7 +551,10 @@ Holocron bunu **tek satırlık bir işarete** çevirir:
   (`zenginalan.js`): yapıştırdığınız anda, **kaydetmeyi beklemeden** çipi
   görürsünüz. Çip bir bütündür — imleç içine girmez, tek Backspace/Delete onu
   siler, tıklayınca "Teams'te aç / Kaldır" menüsü açılır. Alanın değeri yine
-  düz metindir: veritabanına `[[teams:…|…]]` olarak yazılır.
+  düz metindir: veritabanına `[[teams:…|…]]` olarak yazılır. Grid hücresi gibi
+  tek satırlık düzenleyicilerde çip düzenleme kipinde çizilmez — işaret orada
+  düz metin olarak durur; hücreden çıkıp (Enter/odak kaybı) kaydedilince
+  salt-okunur gösterim onu çipe çevirir.
   Salt-okunur görünümlerde (kanban kartı, grid hücresi, çekmece değeri, geçmiş
   popover'ı, "Düzelt" fark paneli) aynı çip çizilir; tıklayınca önce `msteams:`
   denenir, açılmazsa tarayıcı yolu kullanılır. Metin içindeki düz `http(s)://`
@@ -669,6 +675,9 @@ maskelenir.
 gider; imla, yazım, noktalama, anlam düşüklüğü ve bozuk cümle düzeltilir.
 **Anlam, maddeler ve sıra korunur; yeni bilgi eklenmez, madde silinmez**; özel
 adlar, kısaltmalar ve kayıt anahtarları (`PRJ-1432`, `EKAP`) olduğu gibi kalır.
+**Düzelt bağlantılara dokunmaz**: alandaki Teams işaretleri Copilot'a gitmeden
+önce yer tutucuya (`[[T1]]`) iner, dönen metinde yerine konur (bkz. "Teams
+mesajı iliştirme").
 
 - **Bekliyor.** Alan boşken düğme soluk ve pasiftir, metin yazılınca sarıya
   döner. Metin 4000 karakteri aşarsa düğme "çok uzun" der.

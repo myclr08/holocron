@@ -1025,6 +1025,13 @@ function localEditor(field, value, hooks, options) {
       inputmode: field.type === "number" ? "decimal" : null,
     });
     node.value = value || "";
+    // Tek satirlik yerel alan (grid hucresi ve cekmecedeki sayi alanlari):
+    // yapistirilan Teams blogu belirtece doner. Tek satirlik input'ta cip
+    // cizilmez, belirtec duz metin olarak durur - bu kabul edilen davranis;
+    // kaydedilince salt-okunur gosterim (metinCiz) onu cipe cevirir.
+    if (field.type === "text" && typeof attachTeamsLink === "function") {
+      attachTeamsLink(node, { tekSatir: true });
+    }
   }
 
   node.addEventListener("keydown", (event) => {
