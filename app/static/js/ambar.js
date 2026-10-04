@@ -65,8 +65,8 @@ function leaveAmbar() {
 function setAmbarCount(count) {
   const box = el("ambar-count");
   const value = Number(count || 0);
-  box.hidden = value <= 0;
-  box.textContent = value > 0 ? `· ${value}` : "";
+  // Gorevlerim gibi: bos olsa da ayni hapta "0" durur.
+  box.textContent = String(value);
   el("ambar-entry").title = value > 0
     ? `Ambarda ${value} PR bekliyor`
     : "Ambar: birleşmiş PR'ları PR yoluyla geri al / geri getir";

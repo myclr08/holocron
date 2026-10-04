@@ -2831,15 +2831,6 @@ html.no-motion .fix-spin { animation: none; }
 
 /* --- Ambar ---------------------------------------------------------------- */
 
-/* Kenar cubugunda simgesiz satir: serit yok, yazi ayni hizada durur. */
-.ambar-entry { padding-left: 13px; }
-.ambar-entry .ambar-count {
-  margin-left: 6px;
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: 12px;
-}
-
 #ambar-view { display: flex; flex-direction: column; min-height: 0; }
 #ambar-view[hidden] { display: none; }
 .ambar-lead { color: var(--muted); margin: -4px 0 14px; max-width: 900px; line-height: 1.55; font-size: 13px; }

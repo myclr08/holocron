@@ -509,7 +509,7 @@ def test_sidebar_count_sums_held_prs_across_repos(api_client, context, tmp_path,
     assert data["repos"] == {ids[one.name]: 2, ids[two.name]: 1}
 
 
-def test_sidebar_entry_has_no_icon_and_a_count():
+def test_sidebar_entry_matches_sefer_and_tasks():
     from pathlib import Path
 
     html = (Path(__file__).resolve().parent.parent / "app" / "static" / "index.html").read_text(
@@ -517,9 +517,11 @@ def test_sidebar_entry_has_no_icon_and_a_count():
     )
     start = html.index('id="ambar-entry"')
     entry = html[html.rfind("<div", 0, start): html.index("</div>", start)]
+    # Sefer ve Gorevlerim ile ayni satir: ayni sinif, serit ve sayac hapi; simge yok.
+    assert 'class="tasks-entry"' in html[html.rfind("<div", 0, start): start]
     assert ">Ambar<" in entry
-    assert "<svg" not in entry and "color-strip" not in entry
-    assert 'id="ambar-count"' in entry
+    assert "<svg" not in entry and 'class="color-strip color-yellow"' in entry
+    assert 'class="count" id="ambar-count"' in entry
     settings = (Path(__file__).resolve().parent.parent / "app" / "static" / "settings.html").read_text(
         encoding="utf-8"
     )
