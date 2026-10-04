@@ -254,6 +254,11 @@ def test_every_category_can_be_earned(context, conn):
         repo.upsert_contact(conn, f"kisi{index}@example.com", f"Kişi {index}")
     repo.create_group(conn, "Filo", repo.KIND_FILTER, jql="project = DEMO")
     store.log_activity(conn, store.ACTIVITY_FIX, "bir", at=gamify.stamp_of(MONDAY))
+    store.log_activity(
+        conn, store.ACTIVITY_AMBAR,
+        '{"op": "al", "repo": "o/r", "prs": 1, "run": "1", "result": "ok"}',
+        at=gamify.stamp_of(MONDAY),
+    )
     gamify.evaluate(context, MONDAY)
 
     won = earned(context)

@@ -511,7 +511,9 @@ def delete_events_by_ref(
 
 ACTIVITY_FIX = "duzelt"
 ACTIVITY_EXCEL = "excel"
-ACTIVITY_KINDS: tuple[str, ...] = (ACTIVITY_FIX, ACTIVITY_EXCEL)
+# Ambar: depo basina bir islem sonucu (JSON ref: op, repo, prs, run, result).
+ACTIVITY_AMBAR = "ambar"
+ACTIVITY_KINDS: tuple[str, ...] = (ACTIVITY_FIX, ACTIVITY_EXCEL, ACTIVITY_AMBAR)
 
 
 def log_activity(
@@ -544,6 +546,17 @@ def activity_stamps(conn: sqlite3.Connection, kind: str) -> list[str]:
     except sqlite3.Error:
         return []
     return [str(row["at"] or "") for row in rows if row["at"]]
+
+
+def activity_rows(conn: sqlite3.Connection, kind: str) -> list[tuple[str, str]]:
+    """Bir turun (damga, referans) ikilileri, eskiden yeniye."""
+    try:
+        rows = conn.execute(
+            "SELECT at, ref FROM gamify_events WHERE kind = ? ORDER BY at, id", (kind,)
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    return [(str(row["at"] or ""), str(row["ref"] or "")) for row in rows if row["at"]]
 
 
 # --- haftalik emirler ---------------------------------------------------

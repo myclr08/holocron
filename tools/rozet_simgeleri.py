@@ -50,6 +50,7 @@ HALKA_DESENI = {
     gamify.CATEGORY_RITUAL: "2 1.6",
     gamify.CATEGORY_CONTACT: "4 1.6 1 1.6",
     gamify.CATEGORY_TOOL: "0.1 2.6",
+    gamify.CATEGORY_AMBAR: "6 1.4 0.1 1.4",
 }
 
 
@@ -224,6 +225,16 @@ GOVDELER: dict[str, list[str]] = {
     gamify.BADGE_CARTOGRAPHER: [p("M5.6 7.8 l4.2-1.6 v10.4 l-4.2 1.6z"),
                                 p("M9.8 6.2 l4.4 1.6 v10.4 l-4.4-1.6z"),
                                 p("M14.2 7.8 l4.2-1.6 v10.4 l-4.2 1.6z")],
+    # --- Ambar ---
+    gamify.BADGE_AMBAR_FIRST: [r(6.2, 9.2, 11.6, 8.4, 1), l(6.2, 12, 17.8, 12),
+                               p("M10.6 12 v1.6 h2.8 v-1.6"), p("M8.4 9.2 l1.6-2.6 h4 l1.6 2.6")],
+    gamify.BADGE_AMBAR_CLEAN: [r(7, 12.4, 10, 5.6, 1), l(7, 14.6, 17, 14.6),
+                               l(12, 10.4, 12, 5.4), p("M9.8 7.6 l2.2-2.2 l2.2 2.2")],
+    gamify.BADGE_AMBAR_REROUTE: [p("M6.4 17.6 c0-4.6 3.4-5 5.6-5.4 s5.6-1.4 5.6-5.6"),
+                                 p("M15.4 8.6 l2.2-2.2 l2.2 2.2"), nokta(6.4, 17.6),
+                                 l(9.4, 7.4, 11.4, 9.4), l(11.4, 7.4, 9.4, 9.4)],
+    gamify.BADGE_AMBAR_HEAVY: [r(6, 13, 5.6, 4.8, .8), r(12.4, 13, 5.6, 4.8, .8),
+                               r(9.2, 7.6, 5.6, 4.8, .8), l(5.2, 18.6, 18.8, 18.6)],
 }
 
 
