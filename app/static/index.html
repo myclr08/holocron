@@ -64,6 +64,13 @@
         <span class="name">Görevlerim</span>
         <span class="count" id="tasks-badge">0</span>
       </div>
+      <!-- Ambar: Sefer ve Gorevlerim ile ayni satir; sayac ambardaki PR sayisi. -->
+      <div class="tasks-entry" id="ambar-entry" role="button" tabindex="0"
+           title="Ambar: birleşmiş PR'ları PR yoluyla geri al / geri getir">
+        <span class="color-strip color-yellow"></span>
+        <span class="name">Ambar</span>
+        <span class="count" id="ambar-count">0</span>
+      </div>
       <div id="group-list"></div>
     </aside>
 
@@ -232,6 +239,72 @@
           <div class="history-row" id="campaign-history"></div>
         </div>
       </section>
+
+      <section id="ambar-view" hidden>
+        <div class="group-head">
+          <div class="group-title">
+            <h2>AMBAR</h2>
+            <span class="badge" id="ambar-held-badge"></span>
+          </div>
+          <div class="group-actions">
+            <button id="ambar-reload" title="Depoları çeker (git fetch) ve listeyi yeniler">Yenile</button>
+          </div>
+        </div>
+        <p class="ambar-lead">
+          Ana dala birleşmiş PR'ları sürümden önce PR yoluyla geri alır, sürümden sonra geri
+          getirir. Holocron ana dala yazmaz, PR birleştirmez; yalnızca <code>ambar/</code> dalı
+          ve PR açar.
+        </p>
+
+        <div class="toolbar">
+          <div class="window-picker ambar-tabs" id="ambar-tabs" role="tablist" aria-label="Depolar"></div>
+          <label class="ambar-days">Son
+            <select id="ambar-days">
+              <option value="7">7</option>
+              <option value="14">14</option>
+              <option value="30" selected>30</option>
+              <option value="60">60</option>
+              <option value="90">90</option>
+            </select>
+            gün
+          </label>
+          <input type="search" id="ambar-search" placeholder="Ara (#, başlık, kişi, dosya)" autocomplete="off" />
+          <span class="hint" id="ambar-hint"></span>
+        </div>
+
+        <div class="campaign-empty" id="ambar-empty" hidden>
+          <h3>Depo tanımlı değil</h3>
+          <p class="hint">
+            Önce <a href="/settings#ambar">Ayarlar → Ambar</a> ekranında GitHub token'ını ve depoları
+            (kuruluş/depo adı + yerel klon klasörü) tanımlayın.
+          </p>
+        </div>
+
+        <div id="ambar-body" hidden>
+          <div class="ambar-section">
+            <div class="ambar-section-head">
+              <h3 class="campaign-head">Ambardakiler</h3>
+              <button class="primary" id="ambar-release" disabled>Ambardan çıkar</button>
+            </div>
+            <div class="ambar-rows" id="ambar-held"></div>
+          </div>
+
+          <div class="ambar-section" id="ambar-pending-box" hidden>
+            <div class="ambar-section-head">
+              <h3 class="campaign-head">Onay bekleyen ambar PR'ları</h3>
+            </div>
+            <div id="ambar-pending"></div>
+          </div>
+
+          <div class="ambar-section">
+            <div class="ambar-section-head">
+              <h3 class="campaign-head">Son birleşenler</h3>
+              <button class="primary" id="ambar-hold" disabled>Ambara al</button>
+            </div>
+            <div class="ambar-rows" id="ambar-list"></div>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -320,6 +393,7 @@
   <script src="/static/js/duzelt.js"></script>
   <script src="/static/js/app.js"></script>
   <script src="/static/js/campaign.js"></script>
+  <script src="/static/js/ambar.js"></script>
   <script src="/static/js/addressbox.js"></script>
   <script src="/static/js/mailsend.js"></script>
 </body>

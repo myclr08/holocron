@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.14.0** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.15.0** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -30,6 +30,7 @@ Güncel sürüm: **v0.14.0** (bkz. [Sürüm notları](#sürüm-notları)).
 | **E-posta ile gönder** (Windows) | Grubun kayıtlarını seçili sütunlarla Excel'e çevirip şablonlu bir postaya ekler; Kime/CC şablondan gelir, posta Outlook'ta açılır ya da gönderilir. |
 | **Copilot** | Makinenizde kurulu **Copilot CLI**'yi bulup çalıştırabilen köprü: yol, vekil sunucu ve model sırası Ayarlar'dan yönetilir, **Copilot'u sına** gerçekten çalışıp çalışmadığını söyler. |
 | **Sefer** | Bitiş tarihi olan XP hedefi: görev kapatmak, kaydın filodan düşmesi ve durum geçişleri puan verir; rütbe, rozetler, haftalık emirler ve "ne için puan aldım" defteri (yanlış satır silinebilir). |
+| **Ambar** | Ana dala birleşmiş PR'ları sürümden önce **PR yoluyla** geri alır, sürümden sonra geri getirir. Holocron ana dala yazmaz, PR birleştirmez; yalnızca `ambar/` dalı ve PR açar. |
 | **Excel'e aktarma** | Gruplar, görevler ve XP defteri için gerçek tarih/sayı hücreli, köprülü `.xlsx` dosyaları. |
 | **Tema** | Koyu Star Wars atmosferi: yıldız alanı, ışın kılıcı renkleri, açılış akışı — hepsi kapatılabilir. Dış kaynak, CDN, izleme yok. |
 
@@ -128,7 +129,7 @@ Hepsi **Ayarlar** ekranındadır ve sırayla yapılması en kolayıdır. Yalnız
 adım zorunludur; geri kalanı kullanmadığınız özellikleri kapalı bırakır.
 
 Ayarlar ekranı **gruplara** bölünmüştür: solda dikey bir menü (Jira bağlantısı,
-Ağ, Kişiler, E-posta, Teams, Copilot, Sefer, Görünüm), sağda yalnızca seçili
+Ağ, Kişiler, E-posta, Teams, Copilot, Sefer, Ambar, Görünüm), sağda yalnızca seçili
 grubun kartları. Seçim adreste `#grup` olarak durur (`/settings#copilot` gibi
 bir bağlantı doğrudan o grubu açar) ve tarayıcıda hatırlanır, sayfayı
 yenileyince aynı yerde kalırsınız.
@@ -920,7 +921,7 @@ sabittir: `rank-padawan.png`, `rank-knight.png`, `rank-master.png`,
 Rozetlerin **simgesi** `app/static/rozetler/<kod>.svg` altındadır: her rozet için
 ayrı, 24×24 kutuda, çizgi tabanlı, tek renk gövde + nadirlik halkası. Halka deseni
 kategoriyi (Görev düz, Jira kesikli, Seri noktalı, Emir uzun kesikli, Rütbe çift
-halka, Ritim ince kesikli, İletişim nokta-çizgi, Keşif noktalı), halka rengi
+halka, Ritim ince kesikli, İletişim nokta-çizgi, Keşif noktalı, Ambar uzun çizgi-nokta), halka rengi
 nadirliği (yaygın gri, nadir mavi, efsanevi sarı) söyler. Dosyaları
 `python tools/rozet_simgeleri.py` üretir ve depoya girer; uygulama çalışırken
 hiçbir şey üretmez. Elle çizilmiş bir `badge-<kod>.png` varsa arayüz onu yeğler
@@ -928,6 +929,79 @@ hiçbir şey üretmez. Elle çizilmiş bir `badge-<kod>.png` varsa arayüz onu y
 `streak_20`, `streak_60`, `cartographer`, `archivist`, `envoy`,
 `campaign_complete`); ikisi de okunamazsa kendi çizdiği hologramı gösterir, ekran
 hiçbir zaman boş kalmaz.
+
+### Ambar
+
+**Neden var.** Bazı ekiplerde ana dal (master/main) salt okunurdur, değişiklik
+yalnızca onaylı PR ile girer ve **bütün ortamlar** (UAT, prod) ana daldan derlenir.
+Birleşmiş ama UAT testi süren bir değişiklik böylece prod sürümüne sızar. Ambar
+bunu PR yoluyla çözer: sürümden önce seçilen PR'lar geri alınır (**ambara al**),
+sürümden sonra geri getirilir (**ambardan çıkar**). Eşleştirme Jira anahtarıyla
+değil, PR ve commit üzerinden yapılır. Sürüm takibi yoktur: hatırlatma, tarih ya
+da etiket tutulmaz, düğmeye ne zaman basılacağına siz karar verirsiniz.
+
+**Kurulum** (Ayarlar → Ambar):
+
+1. **GitHub token**: `repo` yetkili klasik token (ya da depoya okuma + PR yazma
+   yetkili ince ayarlı token). Kuruluş SSO kullanıyorsa token'ı GitHub'da
+   kuruluş için yetkilendirin. Token şifreli saklanır, bir daha gösterilmez,
+   log'a yazılmaz. İsterseniz depo başına ayrı token verilebilir.
+2. **API adresi**: varsayılan `https://api.github.com`; GitHub Enterprise için
+   `https://ghe.example.com/api/v3`.
+3. **Depolar**: her depo için `kurulus/depo` adı ve makinenizdeki **yerel klon
+   klasörü**. **Sına** düğmesi git'i, klonu, `origin`'i, ana dalı ve API
+   erişimini tek tek dener.
+4. Gerekirse **Git yolu** (`where git` çıktısı) ve yalnız GitHub'a giden bir
+   **vekil sunucu**. Boş bırakılırsa Ağ ayarları kullanılır.
+
+**Ekran.** Sol menüdeki **Ambar** satırı, ambarda PR varsa toplam sayıyı gösterir
+(`Ambar · 5`). Sayfada **Tümü** ve depo başına sekmeler, son N günde (7–90)
+ana dala birleşen PR'lar (numara, başlık, yazar, birleşme anı, değişen dosyalar,
+isteğe bağlı not) ve ayrı bir **Ambardakiler** listesi durur. "Ambarda mı"
+bilgisi ayrıca saklanmaz, ana dalın kendisinden okunur: birleşme commit'inin ana
+dalda `git revert` izi ("This reverts commit …") varsa ve o geri alma da geri
+alınmamışsa PR ambardadır.
+
+**Ambara al.** Seçilen PR'lar için her depoda: klonda `git fetch`, Holocron'un veri
+klasöründe geçici bir `git worktree` içinde `origin/<ana dal>`dan
+`ambar/al-<yyyymmdd-hhmm>` dalı, PR'ların **yeniden eskiye** `git revert` ile geri
+alınması (birleşme commit'inde `-m 1`, squash commit'i tek commit), dalın
+itilmesi ve depo başına **tek PR** ("Ambara alındı: #142, #151"; gövdede PR'lar,
+notlarınız ve "Holocron ile hazırlandı" satırı). PR'ı ekip her zamanki gibi
+onaylayıp birleştirir.
+
+**Ambardan çıkar.** Ambardaki PR'lar önceden işaretli gelir, istemediğinizin
+işaretini kaldırırsınız. Her depoda `ambar/cikar-…` dalı açılır, ambara alırken
+yapılan geri almalar yeniden eskiye geri alınır, tek PR açılır ("Ambardan
+çıkarıldı: #142, #151"). **Tümü** sekmesinde bir tık bütün depoları, depo
+sekmesinde yalnızca o depoyu kapsar.
+
+**Güvenlik ve çakışma.** Holocron ana dala hiçbir zaman yazmaz, PR birleştirmez,
+zorla itmez (`--force` yok); yalnızca dal ve PR açar. **Klonunuza dokunmaz**:
+dalınız değişmez, kaydedilmemiş ya da izlenmeyen dosyalarınız olduğu gibi kalır,
+çünkü bütün iş veri klasöründeki (`ambar-wt/`) geçici bir `git worktree` içinde
+yapılır. İş bitince (çakışmada da) geçici ağaç ve yerel `ambar/…` dalı silinir;
+dal yalnızca uzakta, PR için kalır. Windows'ta git `core.longpaths` ile çalışır;
+kilitli bir dosya geçici ağacın silinmesini engellerse birkaç kez yeniden
+denenir, olmazsa sonuç ekranında not düşülür ve bir sonraki işlemde temizlenir.
+Bir geri alma çakışırsa (**Rota hesaplama
+hatası**) işlem temizce iptal edilir, hiçbir şey itilmez, çakışan PR ve dosyalar
+sonuç ekranında listelenir; diğer depolar işlemeye devam eder. Sonuç ekranı her
+depo için PR bağlantısını ya da hatayı gösterir.
+
+**Sefer.** İki yeni kural: *Ambara alındı* (20 XP) ve *Ambardan çıkarıldı*
+(30 XP); diğer kurallar gibi Ayarlar → Sefer'den değiştirilir ya da kapatılır.
+Puan yalnızca depodaki işlem hatasız bitince (PR açılınca) yazılır; aynı depo ve
+aynı PR kümesi ikinci kez puan vermez. Dört rozet: **İlk Kargo** (ilk ambara
+alma), **Temiz Kalkış** (tek seferde, hiç çakışmadan ambardan çıkarma), **Rota
+Ustası** (çakışmaya takılan bir işlemi sonradan tamamlama), **Ağır Yük** (tek
+işlemde 5+ PR'ı ambara alma). Süren sefer yoksa hiçbir şey yazılmaz.
+
+> Sınırlar: "Rebase and merge" ile birden çok commit olarak birleşmiş bir PR'da
+> yalnızca birleşme kaydındaki son commit geri alınır; "Create a merge commit"
+> ve "Squash and merge" tam desteklenir. Geçici çalışma ağacı için git 2.17 ya da
+> üstü gerekir; ağaç açılamazsa (bozuk klon, disk) klona dokunulmadan anlaşılır
+> bir hata verilir. Push, klonun kendi git kimlik bilgisiyle yapılır.
 
 ### Güncelle
 
@@ -962,13 +1036,14 @@ Arayüz hiçbir CDN'e, hiçbir dış adrese istek atmaz.
 Holocron bir istemcidir; kendi sunucusu, hesabı, bulutu yoktur.
 
 - **Her şey yerelde.** Sunucu yalnız `127.0.0.1` dinler. Dışarıya çıkan tek
-  trafik sizin tanımladığınız **Jira** adresidir. Teams ve Outlook özellikleri
+  trafik sizin tanımladığınız **Jira** adresi ve (Ambar'ı kurduysanız) **GitHub
+  API** adresiyle klonlarınızın `origin`'idir. Teams ve Outlook özellikleri
   ağa hiç çıkmaz: biri işletim sistemine bir adres verir, diğeri makinenizdeki
   COM oturumunu okur.
 - **`holocron.db`** bütün verinizi taşır: gruplar, kayıtların ham JSON'u, yerel
   alanlar ve geçmişleri, görevler, kişiler, şablonlar. Yedeği
   dosyayı kopyalamaktır.
-- **`holocron.key`** Jira token'ınızı şifreleyen anahtardır, yalnız sahibine
+- **`holocron.key`** Jira ve GitHub token'larınızı şifreleyen anahtardır, yalnız sahibine
   okunur izinle oluşturulur. **Kaybederseniz kayıtlı token çözülemez**; Ayarlar
   ekranından yeniden girmeniz gerekir. `holocron.db` ile birlikte yedekleyin.
 - **`holocron.log` paylaşılabilir.** `urllib3` ve `asyncio` günlükçüleri
@@ -1145,11 +1220,12 @@ python tools/demo/demo.py
 py tools\demo\demo.py
 ```
 
-Tek komut iki sunucu kaldırır:
+Tek komut üç sunucu kaldırır:
 
 | Sunucu | Adres | Ne yapar |
 | --- | --- | --- |
 | Sahte Jira Data Center | `http://127.0.0.1:8090` | ~120 uydurma kayıt, 3 proje (PRJ / OPS / MOB), JQL, sayfalama |
+| Sahte GitHub (Ambar) | `http://127.0.0.1:8091` | Uydurma depoların birleşmiş PR'ları, PR açma |
 | Holocron | `http://127.0.0.1:8765` | Demo veritabanıyla açılır, tarayıcı kendiliğinden gelir |
 
 Açılışta veritabanı tohumlanır: 4 filo (ikisi JQL filtreli, ikisi elle
@@ -1158,6 +1234,16 @@ kartlar, adres defterinde 15 kişi + 2 dağıtım listesi, e-posta/Teams
 şablonları, "Outlook'tan görev" satırları ve yaklaşık üç haftalık XP geçmişi
 olan bir Sefer (rütbe, rozet, haftalık emirler, XP defteri).
 
+**Ambar** için veri klasöründeki `ambar-depolar/` altına üç uydurma depo kurulur
+(`ornek-org/odeme-servisi`, `musteri-portali`, `raporlama`): her birinde çıplak
+bir `origin`, Ambar'ın kullandığı çalışma klonu ve son 30 güne yayılmış on
+`--no-ff` birleşmiş PR. Üç PR baştan ambardadır. Sahte GitHub açılan ambar
+PR'ını hemen birleştirir (ekip onayı taklidi), yani **Ambara al** / **Ambardan
+çıkar** sonucu listede hemen görünür; `--ambar-elle` verilirse PR açık kalır ve
+"Onay bekleyen" listesine düşer. `raporlama` deposunda "Aylık özet raporu"nu
+tek başına ambara almak bilerek çakışır: **Rota hesaplama hatası** ekranını
+görmek için.
+
 **Güncelle**'ye her bastığınızda sahte Jira birkaç kaydın durumunu ve
 güncelleme damgasını oynatır: akış canlı görünür, Sefer puanı işler.
 
@@ -1165,6 +1251,8 @@ güncelleme damgasını oynatır: akış canlı görünür, Sefer puanı işler.
 | --- | --- |
 | `--port 8765` | Holocron portu |
 | `--jira-port 8090` | Sahte Jira portu |
+| `--github-port 8091` | Sahte GitHub portu (Ambar) |
+| `--ambar-elle` | Sahte GitHub ambar PR'larını birleştirmesin, açık kalsın |
 | `--data-dir <yol>` | Veri klasörü (varsayılan: `~/.local/share/holocron-demo`, Windows'ta `%LOCALAPPDATA%\Holocron-Demo`) |
 | `--reset` | Veritabanını silip sıfırdan tohumlar |
 | `--no-browser` | Tarayıcıyı açma |
@@ -1173,7 +1261,7 @@ güncelleme damgasını oynatır: akış canlı görünür, Sefer puanı işler.
 
 Veri klasörü gerçek kurulumunuzdan ayrıdır: demo hiçbir zaman sizin
 `holocron.db` dosyanıza dokunmaz. İkinci çalıştırmada aynı veriden devam
-edilir, `--reset` sıfırdan başlatır. `Ctrl+C` her iki sunucuyu da kapatır.
+edilir, `--reset` sıfırdan başlatır (Ambar depoları dahil). `Ctrl+C` bütün sunucuları kapatır.
 
 Demo verisinin **tamamı uydurmadır**: kişi adları, projeler ve adresler
 (`@example.com`) gerçek hiçbir kurumla ya da kişiyle ilişkili değildir.
@@ -1250,6 +1338,10 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/gamify.py` | Sefer motoru: XP kuralları, rütbe, rozet, emir, seri (saf mantık) |
 | `app/gamify_repo.py` | Seferler, XP defteri, kurallar, rozetler, emirler, seri (SQL) |
 | `app/api_gamify.py` | Sefer uçları (ayrı router) |
+| `app/ambar.py` | Ambar: ayarlar, depo doğrulama, depo depo ambara al / ambardan çıkar |
+| `app/ambar_git.py` | Ambar'ın git işleri (alt süreç, kabuk yok): dal, revert, push, klonu geri döndürme, ambardakileri ana daldan türetme |
+| `app/ambar_github.py` | GitHub REST istemcisi (PR listesi, PR açma; Enterprise adresi) |
+| `app/api_ambar.py` | Ambar uçları (ayrı router) |
 | `app/copilot.py` | Copilot CLI'yi bulma, çağırma, sınama, metin düzeltme (genel yardımcı) |
 | `app/copilot_sablon_duzelt.txt` | "Metni düzelt" istem şablonu (Ayarlar'dan değiştirilebilir) |
 | `app/static/` | Vanilla HTML/CSS/JS arayüz, dış bağımlılık yok |
@@ -1260,6 +1352,8 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/static/js/mailsend-settings.js` | Ayarlar → E-posta şablonları kartı |
 | `app/static/js/campaign.js` | Sefer paneli (kahraman şeridi, emirler, rozetler, defter) |
 | `app/static/js/campaign-settings.js` | Ayarlar → Sefer kartı (XP kuralları, koruma durumu) |
+| `app/static/js/ambar.js` | Ambar ekranı (sekmeler, listeler, iki düğme, sonuç penceresi) |
+| `app/static/js/ambar-settings.js` | Ayarlar → Ambar kartı (token, API adresi, depolar, Sına) |
 | `app/static/js/duzelt.js` | "Düzelt" bileşeni: düğme, öneri paneli, kelime düzeyinde fark |
 | `app/static/js/teamslink.js` | Teams mesajı iliştirme: yapıştırma çevirisi, çip, etiket kısaltma, temizleme |
 | `app/static/js/zenginalan.js` | Çok satırlı alanların zengin düzenleyicisi: canlı, atomik Teams çipi |
@@ -1267,7 +1361,7 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/static/rozetler/` | Rozet simgeleri (`tools/rozet_simgeleri.py` üretir) |
 | `tests/` | pytest testleri, sahte Jira sunucusu |
 | `tools/build_portable.py` | Taşınabilir Windows/Linux paketlerini üretir |
-| `tools/demo/` | Demo ortamı: sahte Jira sunucusu, uydurma veri, tohumlama |
+| `tools/demo/` | Demo ortamı: sahte Jira ve GitHub sunucuları, uydurma veri ve depolar, tohumlama |
 | `holocron.db` | Yerel veritabanı (depoya girmez) |
 | `holocron.key` | Şifreleme anahtarı (depoya girmez, yedekleyin) |
 | `holocron.log` | Çalışma günlüğü (1 MB × 3, depoya girmez) |
@@ -1277,6 +1371,7 @@ git tag v0.7.3 && git push origin v0.7.3
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.15.0** | 4 Ekim 2026 | **Ambar**: ana dala birleşmiş PR'ları sürümden önce PR yoluyla geri almak (**Ambara al**) ve sürümden sonra geri getirmek (**Ambardan çıkar**). Sol menüde simgesiz **Ambar** satırı (`Ambar · 5`), Tümü + depo sekmeleri, son N günün birleşen PR'ları (yazar, tarih, değişen dosyalar, not), ana daldan türetilen **Ambardakiler** listesi ve onay bekleyen ambar PR'ları. Depo başına `ambar/al-…` / `ambar/cikar-…` dalı **geçici bir `git worktree` içinde** (kullanıcının klonunda dal değişmez, çalışma ağacına dokunulmaz; yerel dal ve ağaç iş bitince silinir), yeniden eskiye `git revert` (birleşme commit'inde `-m 1`), tek PR; çakışmada (**Rota hesaplama hatası**) temiz iptal, diğer depolar sürer. Ana dala yazma, birleştirme, zorla itme yok. Ayarlar → **Ambar**: GitHub token (şifreli, depo başına da), API adresi (Enterprise), git yolu, GitHub'a özel vekil, depolar ve **Sına**. Yeni bağımlılık yok (git alt süreci + mevcut `requests`). Sefer'e iki kural (*Ambara alındı* 20 XP, *Ambardan çıkarıldı* 30 XP) ve dört rozet (İlk Kargo, Temiz Kalkış, Rota Ustası, Ağır Yük) |
 | **v0.14.0** | 20 Eylül 2026 | **Teams mesajı iliştirme**: Teams'ten kopyalanan mesaj bloğu yapıştırıldığı yerde `[[teams: Ad · tarih|url]]` biçiminde tek satırlık bir işarete dönüşür — Görevlerim'in Açıklama/Not alanlarında, Jira kaydı çekmecesindeki yerel alanlarda ve grid'in tablo hücrelerindeki tek satırlık yerel alanda. Salt-okunur her yerde (kanban kartı, grid hücresi, çekmece değeri, geçmiş popover'ı, "Düzelt" fark paneli) küçük, tıklanabilir bir çip olarak çizilir; tıklayınca önce `msteams:` ile uygulamada açılmayı dener. Etiket kısa tutulur (en fazla 48 karakter: önce sohbet adı düşer, sonra metin kırpılır, tam hâli `title`'da durur). Çok satırlı alanlarda yapıştırma artık zengin bir düzenleyiciye (contenteditable) düşer: çip yapıştırılır yapıştırılmaz görünür, tek Backspace/Delete ile bütün olarak silinir, tıklayınca "Teams'te aç / Kaldır" menüsü açılır. İşaret Excel dökümüne, e-posta ve Teams mesaj gövdesine hiç girmez; "Düzelt" bağlantılara dokunmaz, tablo hücresi kırpması işaretin ortasından kesmez. Görevlerim'e geçmişli bir **"Son durum"** alanı eklendi: her değişim `task_status_history` defterine düşer, kartta son satır tarihiyle durur, tıklayınca Jira alan geçmişiyle aynı kalıptaki kronolojik pencere açılır; Excel'de ayrı sütun ve "Son durum geçmişi" sayfası var (göç 18). |
 | **v0.13.0** | 20 Eylül 2026 | **"Düzelt" düğmesi**: Görevlerim penceresindeki Açıklama/Not alanlarının ve Jira kaydı çekmecesindeki çok satırlı yerel metin alanlarının sağ alt köşesinde hap biçimli bir **Düzelt** düğmesi (kısayol `Ctrl+Shift+D`). Metin Copilot'a gider; imla, yazım, noktalama, anlam düşüklüğü ve bozuk cümle düzeltilir, anlam ve maddeler korunur, özel adlar ile kısaltmalar aynen kalır. Sonuç alanın yerinde **önce/sonra** paneliyle gelir: fark **tarayıcıda kelime düzeyinde** (LCS) hesaplanır, çıkan kırmızı üstü çizili, gelen yeşil altı çizili, sağ üstte "model · N sn · M değişiklik". Çipler "İmla ve noktalama" ve "Anlam düşüklüğü" varsayılan açık, "Daha resmi" ile "Kısalt" isteğe bağlı; **Yeniden dene** aynı metni seçili çiplerle tekrarlar. **Uygula** alanı değiştirir ama Kaydet'e kadar kaydetmez, `Ctrl+Z` eski metni geri getirir (önce tarayıcının kendi geri alma yığını denenir). Yeni uç `POST /api/copilot/duzelt` modelden JSON değil **düz metin** ister: metin bir dosyaya yazılır, model düzeltilmişini ayrı bir dosyaya yazar, Holocron oradan okur (yedek yol `stdout`), zaman aşımı **30 sn**, sınır **4000 karakter**; hata olursa panel yerine tek satır hata çıkar ve **alandaki metne dokunulmaz**. Ayarlar → Copilot'a **Metin düzeltme** bölümü geldi. Jira kaydı çekmecesindeki yerel **metin** alanları artık çok satırlı açılıyor (`Enter` yeni satır, `Ctrl+Enter` kaydeder, `Esc` vazgeçer). **Ayarlar Geri** artık her zaman ilk filoya değil, ana ekranda **son bakılan yere** dönüyor: görünüm (seçili filo, Görevlerim, Sefer) adres çubuğunda hash olarak tutuluyor (`#filo/<id>`, `#gorevlerim`, `#sefer`) ve yedek olarak `localStorage`'a yazılıyor. **Alan geçmişi popover'ı** artık ok kalıbı yerine **eskiden yeniye kronolojik bloklar** gösteriyor: ilk girdi **"ilk değer"** etiketiyle, son girdi vurguyla, boş değer **"— (boş)"**; 20 ve üzeri girdide en eskiler **"… önceki N değişikliği göster"** arkasına katlanır (kayıt çekmecesindeki satır içi ok kalıbı değişmedi). **Demo ortamı** (`tools/demo/demo.py`): tek komutla stdlib üzerinde sahte bir Jira Data Center sunucusu, 3 proje ve ~120 uydurma Türkçe kayıtla tohumlanmış veri (4 filo, yerel ek alanlar, 12 görev, 15 kişi, üç haftalık XP geçmişi), `--copilot-sahte` ile PATH'e sahte bir `copilot` betiği; gerçek kurulumun `holocron.db`'sine dokunmadan ayrı veri klasöründe çalışır, `--reset` sıfırdan tohumlar. **Sefer rozetleri 11 → 54**: katalog sekiz kategoriye (görev, Jira akışı, seri, haftalık emirler, XP/rütbe, zaman ve ritim, iletişim, keşif) ve üç nadirliğe (yaygın, nadir, efsanevi) ayrıldı; nadirlik hem simge rengini hem ödenen XP'yi belirler, seri rozetleri **geriye dönük** olarak eşiği dolduran olayın gününe yazılır. Copilot "Düzelt" ve Excel dökümü için kullanım defteri eklendi (`gamify_events`, göç 17). Rozet duvarı kategori sekmeleriyle yeniden düzenlendi, kilitli kutucuklar artık nasıl kazanılacağını, bir ilerleme çubuğunu ve "12/25" sayısını gösteriyor. **Kayıt çekmecesi**: "Alanları seç" ve "Boş alanları da göster" artık çekmece başlığının altında sağa yaslı tek satırlık bir araç çubuğunda, switch klavye/okuyucu erişilebilir (`role="switch"`). |
 | **v0.11.0** | 19 Eylül 2026 | **Teams Aramalar filosu ve görüşme notları tümden kaldırıldı** (kullanıcı kararı): arama geçmişi okuma, görüşme kaydı, yazıya dökme ve özet üretme koddan, veritabanından, arayüzden ve belgelerden çıktı. Sol menüdeki sabit filo, aramalar ekranı, görüşme notları sekmesi ve iki çekmece gitti; Excel'deki Aramalar/Kişiler/Gruplar/İstatistik/Görüşme notları sayfaları, Güncelle'nin arama tarama adımı ve `/api/calls/*` uçları kalktı. **Göç 0016 veri siler**: `teams_calls` ve bütün `gorusme_*` tabloları düşer, taranmış aramalar ve üretilmiş notlar geri gelmez. `faster-whisper`, `pyaudiowpatch` ve `winotify` `requirements.txt`'ten çıktı; release iş akışındaki whisper ve Teams sondası zip adımları ile başlatıcılardaki `whisper-wheels` satırları da gitti (requirements özet karşılaştırması kalıyor). **Copilot kalıyor**: `ozet.py`'nin genel parçaları yeni `app/copilot.py`'ye taşındı (bulma, `.cmd` → `cmd.exe`, vekil yalnız alt sürece, model sırası, `POST /api/copilot/sina`) ve Ayarlar'da kendi kartını aldı; kullanıcının yazdığı yol ve vekil `calls.*`'tan `copilot.*`'a göçte taşınır. **Ayarlar ekranı yeniden düzenlendi**: sekiz grup (Jira bağlantısı, Ağ, Kişiler, E-posta, Teams, Copilot, Sefer, Görünüm), solda yapışkan dikey menü, sağda seçili grubun kartları, kart içinde iki sütunlu alanlar, `#grup` ile derin bağlantı ve son grubun hatırlanması. Adres defteri Teams kartından çıkıp kendi **Kişiler** grubuna taşındı |

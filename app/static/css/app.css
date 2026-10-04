@@ -2828,3 +2828,136 @@ html.no-motion .fix-spin { animation: none; }
 }
 
 .history-link:hover { color: var(--accent-2); background: none; }
+
+/* --- Ambar ---------------------------------------------------------------- */
+
+#ambar-view { display: flex; flex-direction: column; min-height: 0; }
+#ambar-view[hidden] { display: none; }
+.ambar-lead { color: var(--muted); margin: -4px 0 14px; max-width: 900px; line-height: 1.55; font-size: 13px; }
+.ambar-lead code { font-family: var(--mono); color: var(--text); }
+
+.ambar-tabs { flex-wrap: wrap; }
+.ambar-tabs .tab-count {
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+}
+.ambar-days { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.ambar-days select { width: auto; padding: 3px 6px; }
+
+.ambar-section { margin-bottom: 22px; }
+.ambar-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0 8px;
+}
+.ambar-section-head .campaign-head { margin: 0; }
+/* Turkce basliga buyuk harf zorlanmaz (i/I sorunu); metin zaten yazildigi gibi. */
+#ambar-view .campaign-head {
+  font-family: var(--display);
+  letter-spacing: .06em;
+  font-weight: 400;
+  font-size: 18px;
+  color: var(--muted);
+}
+
+.ambar-rows { display: flex; flex-direction: column; }
+.ambar-repo-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 2px 6px;
+  border-bottom: 1px solid var(--line-strong);
+}
+.ambar-repo-head .repo-name { color: var(--text); font-weight: 600; text-decoration: none; }
+.ambar-repo-head .repo-name:hover { color: var(--accent); }
+.ambar-error-note { color: var(--saber-red); font-size: 12px; }
+
+.ambar-row {
+  display: grid;
+  grid-template-columns: 26px 62px minmax(180px, 1fr) 110px 128px 92px minmax(140px, 220px);
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.ambar-row:hover { background: rgba(255, 255, 255, .02); }
+.ambar-row .pick { display: flex; justify-content: center; }
+.ambar-row .pick input { width: auto; margin: 0; }
+.ambar-row .num { font-family: var(--mono); color: var(--accent); text-decoration: none; }
+.ambar-row a.num:hover { text-decoration: underline; }
+.ambar-row .ambar-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ambar-row .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ambar-row .who, .ambar-row .when { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ambar-row .when { font-family: var(--mono); font-size: 12px; }
+.ambar-row .files { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+.ambar-row details.files summary { cursor: pointer; }
+.ambar-row details.files ul {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: nowrap;
+}
+.ambar-row .note { padding: 4px 8px; font-size: 12px; }
+.ambar-row.is-held { opacity: .55; }
+.ambar-row.held .num { color: var(--saber-blue); }
+.ambar-row .held-tag { color: var(--saber-blue); border-color: rgba(46, 155, 255, .45); }
+.ambar-none { color: var(--muted); margin: 8px 2px; font-size: 13px; }
+
+.ambar-pending-line { display: flex; gap: 10px; padding: 4px 2px; font-size: 13px; }
+.ambar-pending-line a { font-family: var(--mono); color: var(--accent); }
+.ambar-pending-line .repo { color: var(--muted); }
+
+.ambar-confirm ul, .ambar-results ul { margin: 4px 0 10px; padding-left: 18px; }
+.ambar-confirm-repo { margin: 12px 0 2px; font-size: 14px; }
+.ambar-result {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--saber-green);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+.ambar-result.bad { border-left-color: var(--saber-red); }
+.ambar-result-head { display: flex; gap: 10px; align-items: baseline; margin-bottom: 4px; }
+.ambar-result-head .labels { font-family: var(--mono); color: var(--muted); font-size: 12px; }
+.ambar-result-title { color: var(--saber-red); font-weight: 600; }
+.ambar-result a { color: var(--accent); }
+.ambar-result .muted, .ambar-results .muted { color: var(--muted); }
+.ambar-result pre {
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
+  background: rgba(0, 0, 0, .3);
+  padding: 8px;
+  border-radius: 6px;
+}
+.ambar-files { font-family: var(--mono); font-size: 12px; }
+.ambar-reward { color: var(--accent); font-family: var(--mono); margin: 6px 0 0; }
+
+@media (max-width: 1100px) {
+  .ambar-row { grid-template-columns: 26px 62px minmax(160px, 1fr) 100px 92px; }
+  .ambar-row .when, .ambar-row .note { display: none; }
+}
+
+/* Ayarlar -> Ambar: depo listesi. */
+.ambar-repo-line {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(200px, 1.6fr) minmax(150px, 1fr) 72px 64px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.ambar-repo-line input { font-size: 13px; }
+.ambar-repo-labels { margin-bottom: 4px; color: var(--muted); font-size: 12px; }
+.ambar-check { margin: 4px 0 12px; padding-left: 4px; font-size: 12px; font-family: var(--mono); }
+.ambar-check .ok { color: var(--saber-green); }
+.ambar-check .bad { color: var(--saber-red); }

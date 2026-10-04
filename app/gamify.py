@@ -21,6 +21,7 @@ Zaman disaridan verilebilir (`now`), testler kendi gununu enjekte eder.
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Sequence
@@ -37,6 +38,7 @@ SOURCE_TEAMS = "teams"
 SOURCE_STREAK = "streak"
 SOURCE_QUEST = "quest"
 SOURCE_BADGE = "badge"
+SOURCE_AMBAR = "ambar"
 
 SOURCES: tuple[str, ...] = (
     SOURCE_TASK,
@@ -46,6 +48,7 @@ SOURCES: tuple[str, ...] = (
     SOURCE_STREAK,
     SOURCE_QUEST,
     SOURCE_BADGE,
+    SOURCE_AMBAR,
 )
 
 SOURCE_LABELS: dict[str, str] = {
@@ -56,6 +59,7 @@ SOURCE_LABELS: dict[str, str] = {
     SOURCE_STREAK: "Seri",
     SOURCE_QUEST: "Emir",
     SOURCE_BADGE: "Rozet",
+    SOURCE_AMBAR: "Ambar",
 }
 
 # Olay turleri. Tekillik indeksi tur + referans uzerinde oldugu icin tur adlari
@@ -71,6 +75,9 @@ KIND_STATUS_ASKED = "status_asked"
 KIND_STREAK_DAY = "day"
 KIND_QUEST_DONE = "quest_done"
 KIND_BADGE_EARNED = "badge_earned"
+# Ambar: bir depoda PR'lar ambara alindi / ambardan cikarildi (PR acildi).
+KIND_AMBAR_HOLD = "ambar_al"
+KIND_AMBAR_RELEASE = "ambar_cikar"
 
 # Kural tohumu: Ayarlar -> "Sefer" kartindan puanlar degistirilebilir.
 SEED_RULES: tuple[dict[str, Any], ...] = (
@@ -87,6 +94,8 @@ SEED_RULES: tuple[dict[str, Any], ...] = (
     {"source": SOURCE_STREAK, "kind": KIND_STREAK_DAY, "points": 3, "params_json": None},
     {"source": SOURCE_QUEST, "kind": KIND_QUEST_DONE, "points": 25, "params_json": None},
     {"source": SOURCE_BADGE, "kind": KIND_BADGE_EARNED, "points": 10, "params_json": None},
+    {"source": SOURCE_AMBAR, "kind": KIND_AMBAR_HOLD, "points": 20, "params_json": None},
+    {"source": SOURCE_AMBAR, "kind": KIND_AMBAR_RELEASE, "points": 30, "params_json": None},
 )
 
 RULE_LABELS: dict[str, str] = {
@@ -101,6 +110,8 @@ RULE_LABELS: dict[str, str] = {
     KIND_STREAK_DAY: "Seri: etkin iş günü",
     KIND_QUEST_DONE: "Haftalık emir tamamlandı",
     KIND_BADGE_EARNED: "Rozet kazanıldı",
+    KIND_AMBAR_HOLD: "Ambara alındı (depo başına PR açıldı)",
+    KIND_AMBAR_RELEASE: "Ambardan çıkarıldı (depo başına PR açıldı)",
 }
 
 # --- rutbeler -----------------------------------------------------------
@@ -211,6 +222,14 @@ BADGE_FLEET_5 = "fleet_5"
 BADGE_FIRST_LOCAL_FIELD = "first_local_field"
 BADGE_CARTOGRAPHER = "cartographer"
 
+# Ambar
+BADGE_AMBAR_FIRST = "ambar_first"
+BADGE_AMBAR_CLEAN = "ambar_clean"
+BADGE_AMBAR_REROUTE = "ambar_reroute"
+BADGE_AMBAR_HEAVY = "ambar_heavy"
+# "Agir Yuk" tek islemde kac PR'in ambara alinmasini ister.
+AMBAR_HEAVY_LOAD = 5
+
 CATEGORY_TASK = "gorev"
 CATEGORY_JIRA = "jira"
 CATEGORY_STREAK = "seri"
@@ -219,6 +238,7 @@ CATEGORY_RANK = "rutbe"
 CATEGORY_RITUAL = "ritim"
 CATEGORY_CONTACT = "iletisim"
 CATEGORY_TOOL = "kesif"
+CATEGORY_AMBAR = "ambar"
 
 BADGE_CATEGORIES: tuple[dict[str, str], ...] = (
     {"code": CATEGORY_TASK, "label": "Görev"},
@@ -229,6 +249,7 @@ BADGE_CATEGORIES: tuple[dict[str, str], ...] = (
     {"code": CATEGORY_RITUAL, "label": "Zaman ve ritim"},
     {"code": CATEGORY_CONTACT, "label": "İletişim"},
     {"code": CATEGORY_TOOL, "label": "Keşif ve araçlar"},
+    {"code": CATEGORY_AMBAR, "label": "Ambar"},
 )
 
 CATEGORY_LABELS: dict[str, str] = {
@@ -373,6 +394,15 @@ BADGES: tuple[dict[str, Any], ...] = (
            CATEGORY_TOOL, RARITY_COMMON),
     _badge(BADGE_CARTOGRAPHER, "Haritacı", "Bütün filolarda sütun düzeni tanımlı",
            CATEGORY_TOOL, RARITY_RARE),
+    # --- Ambar ---
+    _badge(BADGE_AMBAR_FIRST, "İlk Kargo", "İlk kez PR'ları ambara al",
+           CATEGORY_AMBAR, RARITY_COMMON),
+    _badge(BADGE_AMBAR_CLEAN, "Temiz Kalkış", "Ambardan tek seferde, hiç çakışmadan çıkar",
+           CATEGORY_AMBAR, RARITY_COMMON),
+    _badge(BADGE_AMBAR_REROUTE, "Rota Ustası", "Çakışmaya takılan bir ambar işlemini tamamla",
+           CATEGORY_AMBAR, RARITY_RARE),
+    _badge(BADGE_AMBAR_HEAVY, "Ağır Yük", "Tek işlemde 5 ya da daha çok PR'ı ambara al",
+           CATEGORY_AMBAR, RARITY_RARE),
 )
 
 BADGE_CODES: tuple[str, ...] = tuple(badge["code"] for badge in BADGES)
@@ -401,11 +431,12 @@ SERIES_BADGES: dict[str, tuple[str, int]] = {
     BADGE_FIRST_FIX: ("fix", 1),
     BADGE_FIX_25: ("fix", 25),
     BADGE_FIRST_EXCEL: ("excel", 1),
+    BADGE_AMBAR_FIRST: ("ambar_hold", 1),
 }
 
 SERIES_NAMES: tuple[str, ...] = (
     "task_done", "task_early", "issue_done", "issue_drop", "quest_done",
-    "mail_fast", "dawn", "friday", "fix", "excel",
+    "mail_fast", "dawn", "friday", "fix", "excel", "ambar_hold",
 )
 
 # Kod -> (olcu adi, esik). Olcu anlik sayidir; kazanma ani bugundur.
@@ -430,12 +461,13 @@ GAUGE_BADGES: dict[str, tuple[str, int]] = {
     BADGE_FIRST_FLEET: ("fleets", 1),
     BADGE_FLEET_5: ("fleets", 5),
     BADGE_FIRST_LOCAL_FIELD: ("local_fields", 1),
+    BADGE_AMBAR_HEAVY: ("ambar_load", AMBAR_HEAVY_LOAD),
 }
 
 GAUGE_NAMES: tuple[str, ...] = (
     "noted_tasks", "linked_tasks", "clean_days", "old_done", "group_max",
     "local_values", "streak", "xp", "asked", "mail_issues", "teams_issues",
-    "contacts", "fleets", "local_fields",
+    "contacts", "fleets", "local_fields", "ambar_load",
 )
 
 # Kod -> bayrak adi. "Oldu ya da olmadi": ara ilerleme anlamli degildir.
@@ -453,6 +485,8 @@ FLAG_BADGES: dict[str, str] = {
     BADGE_YEAR_FIRST: "year_first",
     BADGE_COMPLETE: "target_reached",
     BADGE_CARTOGRAPHER: "all_columns",
+    BADGE_AMBAR_CLEAN: "ambar_clean",
+    BADGE_AMBAR_REROUTE: "ambar_reroute",
 }
 
 FLAG_NAMES: tuple[str, ...] = tuple(sorted(set(FLAG_BADGES.values())))
@@ -946,6 +980,72 @@ def on_status_asked(
     return event
 
 
+# --- kancalar: Ambar -----------------------------------------------------
+
+
+def on_ambar(
+    context: Any,
+    op: str,
+    results: Sequence[dict[str, Any]],
+    run_id: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Ambar islemi bitti: basarili depo basina XP, rozet izleri.
+
+    Sefer yoksa hicbir sey yazilmaz. XP yalnizca o depodaki islem hatasiz
+    bittiyse (PR acildiysa) yazilir; referans depo + sirali PR kumesidir, ayni
+    kume ayni islemle ikinci kez puan vermez.
+    """
+    empty: dict[str, Any] = {"points": 0, "events": [], "badges": []}
+    campaign = ensure_campaign(context, now)
+    if campaign is None:
+        return empty
+    conn = context.connection()
+    kind = KIND_AMBAR_HOLD if op == "al" else KIND_AMBAR_RELEASE
+    verb = "Ambara alındı" if op == "al" else "Ambardan çıkarıldı"
+    events: list[dict[str, Any]] = []
+    stamp = stamp_of(now)
+    for item in results:
+        labels = sorted(
+            str(entry.get("label") or "") for entry in item.get("items") or [] if entry.get("label")
+        )
+        error = item.get("error") or {}
+        outcome = "ok" if item.get("ok") else ("conflict" if error.get("code") == "conflict" else "error")
+        store.log_activity(
+            conn,
+            store.ACTIVITY_AMBAR,
+            json.dumps(
+                {
+                    "op": op,
+                    "repo": item.get("name") or "",
+                    "prs": len(labels),
+                    "run": run_id,
+                    "result": outcome,
+                },
+                ensure_ascii=False,
+            ),
+            at=stamp,
+        )
+        if outcome != "ok" or not labels:
+            continue
+        event = award(
+            context, SOURCE_AMBAR, kind, f"{item.get('name')}:{','.join(labels)}",
+            f"{verb}: {item.get('name')} {', '.join(labels)}", now=now,
+        )
+        if event:
+            events.append(event)
+    result = evaluate(context, now, touched=True)
+    return {
+        "points": sum(event["points"] for event in events),
+        "events": events,
+        "badges": [
+            {"code": code, "label": BADGES_BY_CODE[code]["label"]}
+            for code in result.get("badges") or []
+            if code in BADGES_BY_CODE
+        ],
+    }
+
+
 # --- degerlendirme: seri, emirler, rozetler -----------------------------
 
 
@@ -1392,6 +1492,9 @@ def badge_facts(
             stamp for stamp in store.activity_stamps(conn, kind) if local_day(stamp) >= start
         ]
 
+    ambar = _ambar_facts(conn, start)
+    series["ambar_hold"] = ambar["holds"]
+
     marks = store.marked_days(conn, campaign["id"])
     total = store.total_xp(conn, campaign["id"])
     target = int(campaign["target_xp"] or 0)
@@ -1411,6 +1514,7 @@ def badge_facts(
         "contacts": _row_count(conn, "contacts"),
         "fleets": 0,
         "local_fields": len(repository.list_local_fields(conn)),
+        "ambar_load": ambar["load"],
     }
 
     groups = repository.list_groups(conn)
@@ -1444,6 +1548,8 @@ def badge_facts(
         "year_first": _worked_year_opening(active_days),
         "target_reached": target > 0 and total >= target,
         "all_columns": bool(groups) and all(group["columns"] for group in groups),
+        "ambar_clean": ambar["clean"],
+        "ambar_reroute": ambar["reroute"],
     }
 
     return {
@@ -1454,6 +1560,48 @@ def badge_facts(
             rank["code"]: int(round(rank["at"] * target)) for rank in RANKS
         },
     }
+
+
+def _ambar_facts(conn: Any, start: str) -> dict[str, Any]:
+    """Ambar rozetlerinin olculeri, `gamify_events`teki depo sonuclarindan.
+
+    Her satir bir depo sonucudur: islem (al/cikar), depo, PR sayisi, calisma
+    kimligi (ayni dugme basisi) ve sonuc (ok / cakisma / hata).
+    """
+    rows: list[tuple[str, dict[str, Any]]] = []
+    for stamp, ref in store.activity_rows(conn, store.ACTIVITY_AMBAR):
+        if local_day(stamp) < start:
+            continue
+        try:
+            record = json.loads(ref or "{}")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(record, dict):
+            rows.append((stamp, record))
+    holds = [
+        stamp for stamp, rec in rows if rec.get("op") == "al" and rec.get("result") == "ok"
+    ]
+    runs: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for _stamp, rec in rows:
+        runs.setdefault((str(rec.get("op")), str(rec.get("run"))), []).append(rec)
+    load = 0
+    clean = False
+    for (op, _run), recs in runs.items():
+        if op == "al":
+            load = max(load, sum(int(rec.get("prs") or 0) for rec in recs if rec.get("result") == "ok"))
+        if op == "cikar" and any(rec.get("result") == "ok" for rec in recs) and not any(
+            rec.get("result") == "conflict" for rec in recs
+        ):
+            clean = True
+    reroute = False
+    conflicts: dict[tuple[str, str], str] = {}
+    for stamp, rec in rows:
+        key = (str(rec.get("op")), str(rec.get("repo")))
+        if rec.get("result") == "conflict":
+            conflicts.setdefault(key, stamp)
+        elif rec.get("result") == "ok" and key in conflicts and conflicts[key] <= stamp:
+            reroute = True
+    return {"holds": holds, "load": load, "clean": clean, "reroute": reroute}
 
 
 def _row_count(conn: Any, table: str) -> int:

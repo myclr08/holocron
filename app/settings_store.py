@@ -28,6 +28,15 @@ PROXY_MODES = (PROXY_SYSTEM, PROXY_MANUAL, PROXY_DIRECT)
 
 # Sifrelenerek saklanan anahtarlar.
 SECRET_KEYS: frozenset[str] = frozenset({"jira.secret"})
+# Adi bu on ekle baslayan anahtarlar da sirdir: Ambar'in genel GitHub tokeni
+# (`ambar.token`) ve depo basina tokenlar (`ambar.token.<depo>`).
+SECRET_PREFIXES: tuple[str, ...] = ("ambar.token",)
+
+
+def is_secret_key(key: str) -> bool:
+    return key in SECRET_KEYS or any(
+        key == prefix or key.startswith(prefix + ".") for prefix in SECRET_PREFIXES
+    )
 
 DEFAULTS: dict[str, str] = {
     "jira.mode": MODE_SERVER,  # yaygin kurulum: Server/DC + PAT
@@ -168,7 +177,7 @@ class SettingsStore:
         value = row["value"]
         if value is None:
             return DEFAULTS.get(key, default)
-        if key in SECRET_KEYS:
+        if is_secret_key(key):
             try:
                 return self._box.decrypt(value)
             except SecretError:
@@ -180,7 +189,7 @@ class SettingsStore:
         if value is None:
             self.delete(key)
             return
-        stored = self._box.encrypt(value) if key in SECRET_KEYS else value
+        stored = self._box.encrypt(value) if is_secret_key(key) else value
         self._conn.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",

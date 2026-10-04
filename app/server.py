@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__, gamify, paths
 from .api import router
+from .api_ambar import router as ambar_router
 from .api_gamify import router as gamify_router
 from .api_mailsend import router as mailsend_router
 from .context import AppContext
@@ -65,6 +66,8 @@ def create_app(context: AppContext) -> FastAPI:
     app.include_router(mailsend_router)
     # Asama 11: Sefer paneli (XP, rutbe, rozet, haftalik emirler).
     app.include_router(gamify_router)
+    # Ambar: birlesmis PR'lari PR yoluyla geri almak / geri getirmek.
+    app.include_router(ambar_router)
 
     # Acilista suresi dolmus sefer kapatilir: kullanici uygulamayi gunlerce
     # acmasa da sefer dogru gunde bitmis gorunur. Puan ikincil, uygulama

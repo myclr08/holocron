@@ -859,6 +859,7 @@ SETTINGS_GROUPS = (
     ("teams", "Teams"),
     ("copilot", "Copilot"),
     ("sefer", "Sefer"),
+    ("ambar", "Ambar"),
     ("gorunum", "Görünüm"),
 )
 
@@ -882,7 +883,7 @@ def test_every_card_sits_in_exactly_one_group(api_client):
     page = api_client.get("/settings").text
     govde = page.split('class="settings-panes"', 1)[1]
     for kart in ("mail-card", "mailsend-card", "teams-card", "contacts-card",
-                 "copilot-card", "campaign-card", "appearance", "net-card"):
+                 "copilot-card", "campaign-card", "appearance", "net-card", "ambar-card"):
         assert f'id="{kart}"' in govde, kart
     # Gruplarin disinda kart kalmadi.
     assert page.split('class="settings-panes"', 1)[0].count('class="card"') == 0
