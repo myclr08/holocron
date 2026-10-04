@@ -434,7 +434,8 @@ async function runAmbar(op, items) {
       });
     }
     if (typeof refreshCampaignBadge === "function") refreshCampaignBadge();
-    loadAmbar(false);
+    // fetch ile: PR hemen birlestiyse (ya da baskasi birlestirdiyse) liste guncel olsun.
+    loadAmbar(true);
   } catch (err) {
     closeModal();
     fail(err);

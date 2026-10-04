@@ -1220,11 +1220,12 @@ python tools/demo/demo.py
 py tools\demo\demo.py
 ```
 
-Tek komut iki sunucu kaldırır:
+Tek komut üç sunucu kaldırır:
 
 | Sunucu | Adres | Ne yapar |
 | --- | --- | --- |
 | Sahte Jira Data Center | `http://127.0.0.1:8090` | ~120 uydurma kayıt, 3 proje (PRJ / OPS / MOB), JQL, sayfalama |
+| Sahte GitHub (Ambar) | `http://127.0.0.1:8091` | Uydurma depoların birleşmiş PR'ları, PR açma |
 | Holocron | `http://127.0.0.1:8765` | Demo veritabanıyla açılır, tarayıcı kendiliğinden gelir |
 
 Açılışta veritabanı tohumlanır: 4 filo (ikisi JQL filtreli, ikisi elle
@@ -1233,6 +1234,16 @@ kartlar, adres defterinde 15 kişi + 2 dağıtım listesi, e-posta/Teams
 şablonları, "Outlook'tan görev" satırları ve yaklaşık üç haftalık XP geçmişi
 olan bir Sefer (rütbe, rozet, haftalık emirler, XP defteri).
 
+**Ambar** için veri klasöründeki `ambar-depolar/` altına üç uydurma depo kurulur
+(`ornek-org/odeme-servisi`, `musteri-portali`, `raporlama`): her birinde çıplak
+bir `origin`, Ambar'ın kullandığı çalışma klonu ve son 30 güne yayılmış on
+`--no-ff` birleşmiş PR. Üç PR baştan ambardadır. Sahte GitHub açılan ambar
+PR'ını hemen birleştirir (ekip onayı taklidi), yani **Ambara al** / **Ambardan
+çıkar** sonucu listede hemen görünür; `--ambar-elle` verilirse PR açık kalır ve
+"Onay bekleyen" listesine düşer. `raporlama` deposunda "Aylık özet raporu"nu
+tek başına ambara almak bilerek çakışır: **Rota hesaplama hatası** ekranını
+görmek için.
+
 **Güncelle**'ye her bastığınızda sahte Jira birkaç kaydın durumunu ve
 güncelleme damgasını oynatır: akış canlı görünür, Sefer puanı işler.
 
@@ -1240,6 +1251,8 @@ güncelleme damgasını oynatır: akış canlı görünür, Sefer puanı işler.
 | --- | --- |
 | `--port 8765` | Holocron portu |
 | `--jira-port 8090` | Sahte Jira portu |
+| `--github-port 8091` | Sahte GitHub portu (Ambar) |
+| `--ambar-elle` | Sahte GitHub ambar PR'larını birleştirmesin, açık kalsın |
 | `--data-dir <yol>` | Veri klasörü (varsayılan: `~/.local/share/holocron-demo`, Windows'ta `%LOCALAPPDATA%\Holocron-Demo`) |
 | `--reset` | Veritabanını silip sıfırdan tohumlar |
 | `--no-browser` | Tarayıcıyı açma |
@@ -1248,7 +1261,7 @@ güncelleme damgasını oynatır: akış canlı görünür, Sefer puanı işler.
 
 Veri klasörü gerçek kurulumunuzdan ayrıdır: demo hiçbir zaman sizin
 `holocron.db` dosyanıza dokunmaz. İkinci çalıştırmada aynı veriden devam
-edilir, `--reset` sıfırdan başlatır. `Ctrl+C` her iki sunucuyu da kapatır.
+edilir, `--reset` sıfırdan başlatır (Ambar depoları dahil). `Ctrl+C` bütün sunucuları kapatır.
 
 Demo verisinin **tamamı uydurmadır**: kişi adları, projeler ve adresler
 (`@example.com`) gerçek hiçbir kurumla ya da kişiyle ilişkili değildir.
@@ -1348,7 +1361,7 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/static/rozetler/` | Rozet simgeleri (`tools/rozet_simgeleri.py` üretir) |
 | `tests/` | pytest testleri, sahte Jira sunucusu |
 | `tools/build_portable.py` | Taşınabilir Windows/Linux paketlerini üretir |
-| `tools/demo/` | Demo ortamı: sahte Jira sunucusu, uydurma veri, tohumlama |
+| `tools/demo/` | Demo ortamı: sahte Jira ve GitHub sunucuları, uydurma veri ve depolar, tohumlama |
 | `holocron.db` | Yerel veritabanı (depoya girmez) |
 | `holocron.key` | Şifreleme anahtarı (depoya girmez, yedekleyin) |
 | `holocron.log` | Çalışma günlüğü (1 MB × 3, depoya girmez) |

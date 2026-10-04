@@ -2,12 +2,18 @@
 """Holocron demo ortami: tek komutla, gercek Jira olmadan dolu bir Holocron.
 
     python tools/demo/demo.py [--port 8765] [--data-dir <yol>] [--reset]
-                              [--no-browser] [--copilot-sahte]
+                              [--no-browser] [--copilot-sahte] [--ambar-elle]
 
-Iki sunucu kalkar:
+Uc sunucu kalkar:
 
   * sahte Jira Data Center  -> http://127.0.0.1:8090
+  * sahte GitHub (Ambar)    -> http://127.0.0.1:8091
   * Holocron                -> http://127.0.0.1:8765
+
+Ambar icin veri klasorunde uc uydurma git deposu kurulur (ciplak origin +
+calisma klonu, son 30 gune yayilmis birlesmis PR'lar, birkaci ambarda).
+Sahte GitHub acilan PR'i hemen birlestirir (ekip onayi taklidi);
+`--ambar-elle` verilirse PR acik kalir.
 
 Veri `~/.local/share/holocron-demo` altinda durur (Windows'ta
 `%LOCALAPPDATA%\\Holocron-Demo`); ikinci calistirmada oradan devam eder,
@@ -36,6 +42,7 @@ for _yol in (str(KOK), str(KOK / "tools")):
 
 VARSAYILAN_PORT = 8765
 VARSAYILAN_JIRA_PORTU = 8090
+VARSAYILAN_GITHUB_PORTU = 8091
 
 
 def veri_klasoru() -> Path:
@@ -60,6 +67,17 @@ def argumanlari_oku(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=VARSAYILAN_JIRA_PORTU,
         help="Sahte Jira portu (varsayilan 8090)",
+    )
+    ayristirici.add_argument(
+        "--github-port",
+        type=int,
+        default=VARSAYILAN_GITHUB_PORTU,
+        help="Sahte GitHub portu (Ambar, varsayilan 8091)",
+    )
+    ayristirici.add_argument(
+        "--ambar-elle",
+        action="store_true",
+        help="Sahte GitHub acilan ambar PR'larini birlestirmesin (acik kalsin)",
     )
     ayristirici.add_argument(
         "--data-dir", type=Path, default=None, help="Veri klasoru (varsayilan: demo klasoru)"
@@ -140,6 +158,28 @@ class _SahteSunucu:
         self._sunucu.server_close()
 
 
+def _ambar_kur(context, klasor: Path, args: argparse.Namespace):
+    """Ambar demosu: uydurma depolar + sahte GitHub + ayarlar. git yoksa atlanir."""
+    import shutil
+
+    from demo import sahte_github
+
+    if shutil.which("git") is None:
+        print("[demo] git bulunamadı; Ambar demosu atlandı.", flush=True)
+        return None
+    try:
+        depolar = sahte_github.depolari_kur(klasor / "ambar-depolar", sifirla=args.reset)
+        durum = sahte_github.SahteGitHub(depolar, otomatik_birlestir=not args.ambar_elle)
+        sunucu, _ = sahte_github.baslat(durum, port=args.github_port)
+        sahte_github.ayarlari_yaz(context, depolar, args.github_port)
+    except Exception as hata:  # noqa: BLE001 - Ambar demosu digerlerini dusurmesin
+        print(f"[demo] Ambar demosu kurulamadı: {hata}", file=sys.stderr, flush=True)
+        return None
+    print(f"[demo] Sahte GitHub : http://127.0.0.1:{args.github_port} "
+          f"({len(depolar)} depo, {klasor / 'ambar-depolar'})", flush=True)
+    return sunucu
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argumanlari_oku(argv)
     klasor = klasoru_hazirla(args.data_dir or veri_klasoru(), args.reset)
@@ -184,6 +224,8 @@ def main(argv: list[str] | None = None) -> int:
         flush=True,
     )
 
+    github = _ambar_kur(context, klasor, args)
+
     adres = f"http://127.0.0.1:{args.port}/"
     app = create_app(context)
     yapilandirma = uvicorn.Config(
@@ -209,6 +251,9 @@ def main(argv: list[str] | None = None) -> int:
         pass
     finally:
         sahte.kapat()
+        if github is not None:
+            github.shutdown()
+            github.server_close()
         context.close()
         print("[demo] Kapandı.", flush=True)
     return 0
