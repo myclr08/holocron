@@ -129,6 +129,7 @@ const LAST_VIEW_KEY = "holocron.lastView";
 function viewHash(view, activeId) {
   if (view === "tasks") return "#gorevlerim";
   if (view === "campaign") return "#sefer";
+  if (view === "ambar") return "#ambar";
   if (view === "groups" && activeId) return "#filo/" + encodeURIComponent(activeId);
   return "";
 }
@@ -166,6 +167,7 @@ function resolveStartupView() {
   }
   if (hash === "#gorevlerim") return { view: "tasks", groupId: null };
   if (hash === "#sefer") return { view: "campaign", groupId: null };
+  if (hash === "#ambar") return { view: "ambar", groupId: null };
   const match = /^#filo\/(.+)$/.exec(hash);
   if (match) {
     // Grup id'leri sayisal (SQLite rowid); hash'ten string gelir, karsilastirma icin cevrilir.
@@ -336,7 +338,7 @@ async function move(index, delta) {
 }
 
 function showPlaceholder() {
-  if (state.view === "tasks" || state.view === "campaign") return;
+  if (state.view === "tasks" || state.view === "campaign" || state.view === "ambar") return;
   state.activeId = null;
   state.group = null;
   el("placeholder").hidden = false;
@@ -350,6 +352,7 @@ async function selectGroup(groupId, keepView) {
   if (!keepView) {
     leaveTasks();
     if (typeof leaveCampaign === "function") leaveCampaign();
+    if (typeof leaveAmbar === "function") leaveAmbar();
   }
   state.activeId = groupId;
   if (changing || !keepView) {
@@ -359,7 +362,7 @@ async function selectGroup(groupId, keepView) {
     clearSelection();
   }
   el("placeholder").hidden = true;
-  if (state.view !== "tasks" && state.view !== "campaign") {
+  if (state.view !== "tasks" && state.view !== "campaign" && state.view !== "ambar") {
     el("group-view").hidden = false;
   }
   renderGroups();
@@ -2265,6 +2268,7 @@ function dateText(iso) {
 function showTasks() {
   // Sefer ekrani aciksa once o kapanir: ikisi de ayni alanda durur.
   if (typeof leaveCampaign === "function") leaveCampaign();
+  if (typeof leaveAmbar === "function") leaveAmbar();
   state.view = "tasks";
   el("placeholder").hidden = true;
   el("group-view").hidden = true;
@@ -3137,13 +3141,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Son gorunum: hash/localStorage'daki filo/gorevlerim/sefer'e donulur.
   const startupView = resolveStartupView();
-  if (startupView.view === "tasks" || startupView.view === "campaign") {
+  if (["tasks", "campaign", "ambar"].includes(startupView.view)) {
     state.view = startupView.view;
   }
   loadGroups(startupView.groupId || undefined)
     .then(() => {
       if (startupView.view === "tasks") showTasks();
       else if (startupView.view === "campaign") showCampaign();
+      else if (startupView.view === "ambar" && typeof showAmbar === "function") showAmbar();
     })
     .catch(fail);
   refreshTaskBadge();

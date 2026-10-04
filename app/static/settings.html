@@ -32,6 +32,7 @@
           <button class="settings-tab" type="button" data-group="teams">Teams</button>
           <button class="settings-tab" type="button" data-group="copilot">Copilot</button>
           <button class="settings-tab" type="button" data-group="sefer">Sefer</button>
+          <button class="settings-tab" type="button" data-group="ambar">Ambar</button>
           <button class="settings-tab" type="button" data-group="gorunum">Görünüm</button>
         </nav>
 
@@ -561,6 +562,61 @@
             </div>
           </section>
 
+          <!-- Ambar ----------------------------------------------------->
+          <section class="settings-group" id="grup-ambar" data-group="ambar" hidden>
+            <p class="group-lead">
+              Ambar, ana dala birleşmiş PR'ları sürümden önce PR yoluyla geri alır ve sürümden
+              sonra geri getirir. Holocron ana dala yazmaz, PR birleştirmez, zorla itmez.
+            </p>
+
+            <div class="card" id="ambar-card">
+              <h2>GitHub bağlantısı</h2>
+              <p class="hint">
+                Token bu bilgisayarda şifreli saklanır ve bir daha gösterilmez. Gereken yetki:
+                <code>repo</code> (klasik token) ya da depoya okuma + PR yazma (ince ayarlı token).
+                Kuruluş SSO kullanıyorsa token'ı GitHub'da kuruluş için yetkilendirin.
+              </p>
+              <div class="field-grid">
+                <div class="field">
+                  <label for="ambar-api-url">API adresi</label>
+                  <input type="url" id="ambar-api-url" placeholder="https://api.github.com" />
+                  <p class="hint">GitHub Enterprise için <code>https://ghe.example.com/api/v3</code>.</p>
+                </div>
+                <div class="field">
+                  <label for="ambar-token">Genel GitHub token</label>
+                  <input type="password" id="ambar-token" autocomplete="off" placeholder="ghp_..." />
+                  <p class="hint" id="ambar-token-state"></p>
+                </div>
+                <div class="field">
+                  <label for="ambar-git">Git yolu (boş = otomatik bul)</label>
+                  <input type="text" id="ambar-git" placeholder="C:\Program Files\Git\cmd\git.exe" />
+                  <p class="hint">"git bulunamadı" derse komut istemine <code>where git</code> yazıp çıkan yolu girin.</p>
+                </div>
+                <div class="field">
+                  <label for="ambar-proxy">Vekil sunucu (boş = Ağ ayarları)</label>
+                  <input type="text" id="ambar-proxy" placeholder="http://vekil.kurum.local:8080" />
+                  <p class="hint">
+                    Jira "doğrudan bağlan" kipindeyken GitHub vekil istiyorsa buraya yazın. Yalnız
+                    GitHub isteklerine ve git alt sürecine verilir.
+                  </p>
+                </div>
+              </div>
+
+              <h3>Depolar</h3>
+              <p class="hint">
+                Her depo için GitHub adı (<code>kurulus/depo</code>), yerel klon klasörü ve
+                isterseniz ayrı bir token. Klonda kaydedilmemiş değişiklik varsa Holocron o depoda
+                işe başlamaz; iş bitince klon olduğu dala geri döner.
+              </p>
+              <div id="ambar-repos"></div>
+              <div class="actions">
+                <button id="ambar-add-repo">+ Depo ekle</button>
+                <button class="primary" id="ambar-save">Kaydet</button>
+              </div>
+              <div class="status" id="ambar-status" hidden></div>
+            </div>
+          </section>
+
           <!-- 8. Görünüm -------------------------------------------------->
           <section class="settings-group" id="grup-gorunum" data-group="gorunum" hidden>
             <p class="group-lead">
@@ -598,5 +654,6 @@
   <script src="/static/js/settings.js"></script>
   <script src="/static/js/mailsend-settings.js"></script>
   <script src="/static/js/campaign-settings.js"></script>
+  <script src="/static/js/ambar-settings.js"></script>
 </body>
 </html>

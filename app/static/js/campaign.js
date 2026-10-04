@@ -16,6 +16,7 @@ const SOURCE_ICONS = {
   streak: "flame",
   quest: "orders",
   badge: "medal",
+  ambar: "crate",
 };
 
 const campaignState = {
@@ -30,6 +31,7 @@ const campaignState = {
 
 function showCampaign() {
   if (typeof leaveTasks === "function") leaveTasks();
+  if (typeof leaveAmbar === "function") leaveAmbar();
   state.view = "campaign";
   el("placeholder").hidden = true;
   el("group-view").hidden = true;
