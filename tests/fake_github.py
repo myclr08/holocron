@@ -280,9 +280,26 @@ class GitWorld:
         return git(self.dev, "show", f"{ref}:{path}")
 
     def work_state(self) -> dict[str, Any]:
+        """Kullanicinin klonunun tam fotografi: dal, index, dallar, worktree'ler, dosya baytlari."""
+        files: dict[str, bytes] = {}
+        for path in sorted(self.work.rglob("*")):
+            if ".git" in path.relative_to(self.work).parts or not path.is_file():
+                continue
+            files[path.relative_to(self.work).as_posix()] = path.read_bytes()
         return {
             "head": git(self.work, "rev-parse", "HEAD"),
             "branch": git(self.work, "rev-parse", "--abbrev-ref", "HEAD"),
             "status": git(self.work, "status", "--porcelain"),
+            "staged": git(self.work, "diff", "--cached"),
             "branches": git(self.work, "for-each-ref", "--format=%(refname:short)", "refs/heads"),
+            "worktrees": git(self.work, "worktree", "list", "--porcelain").count("worktree "),
+            "files": files,
         }
+
+    def make_dirty(self) -> None:
+        """Gelistirici klonda calisiyor: baska dal, degismis + hazirlanmis + izlenmeyen dosya."""
+        git(self.work, "checkout", "--quiet", "-b", "gelistirici-dali")
+        (self.work / "app.txt").write_text("yarim kalmis is\n", encoding="utf-8")
+        (self.work / "README.md").write_text("hazirlanmis degisiklik\n", encoding="utf-8")
+        git(self.work, "add", "README.md")
+        (self.work / "notlarim.txt").write_text("izlenmeyen\n", encoding="utf-8")

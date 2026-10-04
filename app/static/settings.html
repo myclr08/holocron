@@ -605,8 +605,9 @@
               <h3>Depolar</h3>
               <p class="hint">
                 Her depo için GitHub adı (<code>kurulus/depo</code>), yerel klon klasörü ve
-                isterseniz ayrı bir token. Klonda kaydedilmemiş değişiklik varsa Holocron o depoda
-                işe başlamaz; iş bitince klon olduğu dala geri döner.
+                isterseniz ayrı bir token. Holocron klonunuzda dal değiştirmez, çalışma
+                ağacınıza dokunmaz: işi veri klasöründeki geçici bir <code>git worktree</code>
+                içinde yapar, sonra siler.
               </p>
               <div id="ambar-repos"></div>
               <div class="actions">

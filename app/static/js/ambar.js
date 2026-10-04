@@ -458,6 +458,7 @@ function showAmbarResult(op, data) {
           h("span", { class: "muted", text: `  ·  dal ${result.branch}` }),
         ])
       );
+      if (result.warning) line.appendChild(h("div", { class: "warn-note", text: result.warning }));
     } else {
       const error = result.error || {};
       line.appendChild(h("div", { class: "ambar-result-title", text: error.title || "Hata" }));

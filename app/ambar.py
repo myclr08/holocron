@@ -547,6 +547,7 @@ def _result(repo: dict[str, str]) -> dict[str, Any]:
         "pr_url": "",
         "branch": "",
         "error": None,
+        "warning": "",
     }
 
 
@@ -561,7 +562,6 @@ def _hold_repo(
         github = github_for(settings, repo)
         git = git_for(settings, repo)
         agit.check_work_tree(git)
-        agit.ensure_clean(git)
         agit.fetch(git)
         base = agit.default_branch(git)
         ref = f"refs/remotes/origin/{base}"
@@ -631,6 +631,7 @@ def _hold_repo(
             pr_number=created["number"],
             pr_url=created["url"],
             branch=prepared.branch,
+            warning=prepared.warning,
             items=[{"number": pr.number, "label": f"#{pr.number}"} for pr in ordered],
         )
     except (agit.GitError, GitHubError, RepositoryError) as exc:
@@ -654,7 +655,6 @@ def _release_repo(
         github = github_for(settings, repo)
         git = git_for(settings, repo)
         agit.check_work_tree(git)
-        agit.ensure_clean(git)
         agit.fetch(git)
         base = agit.default_branch(git)
         ref = f"refs/remotes/origin/{base}"
@@ -732,6 +732,7 @@ def _release_repo(
             pr_number=created["number"],
             pr_url=created["url"],
             branch=prepared.branch,
+            warning=prepared.warning,
             items=[
                 {"sha": item.sha, "label": labels[item.sha], "number": agit.pr_number_of(item.commit)}
                 for item in ordered

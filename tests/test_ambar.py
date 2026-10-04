@@ -234,6 +234,7 @@ def test_hold_and_release_merge_commits(api_client, context, world, github):
     a = world.merge_pr(142, {"a.txt": "a\n"}, title="Ozellik A")
     b = world.merge_pr(151, {"b.txt": "b\n"}, title="Ozellik B")
     ids = configure(context, github, world)
+    world.make_dirty()
     before = world.work_state()
 
     result = hold(api_client, ids[world.name], 142, 151, notes={151: "UAT'ta"})
@@ -264,6 +265,7 @@ def test_hold_and_release_merge_commits(api_client, context, world, github):
 
     back = release(api_client, ids[world.name], a, b)
     assert back["ok"] is True, back
+    assert world.work_state() == before
     assert github.created(world.name)[-1]["body"]["title"] == "Ambardan çıkarıldı: #142, #151"
     merge_last_ambar_pr(world, github)
     assert overview(api_client)["count"] == 0
@@ -299,8 +301,7 @@ def test_conflict_aborts_and_leaves_the_clone_untouched(api_client, context, wor
     world.merge_pr(1, {"app.txt": "satir 1\nBIR\nsatir 3\n"}, title="Birinci")
     world.merge_pr(2, {"app.txt": "satir 1\nIKI\nsatir 3\n"}, title="Ikinci")
     ids = configure(context, github, world)
-    git(world.work, "checkout", "--quiet", "-b", "benim-dalim")
-    (world.work / "notlarim.txt").write_text("izlenmeyen\n", encoding="utf-8")
+    world.make_dirty()
     before = world.work_state()
     branches_before = world.remote_branches()
 
@@ -317,18 +318,57 @@ def test_conflict_aborts_and_leaves_the_clone_untouched(api_client, context, wor
     assert github.created() == []
 
 
-def test_dirty_working_tree_is_refused(api_client, context, world, github):
+def test_dirty_working_tree_is_allowed_and_untouched(api_client, context, world, github, tmp_path):
+    """Gelistirici klonda calisirken: is gecici worktree'de yapilir, klona dokunulmaz."""
+    a = world.merge_pr(1, {"a.txt": "a\n"})
+    ids = configure(context, github, world)
+    world.make_dirty()
+    before = world.work_state()
+    assert before["branch"] == "gelistirici-dali" and before["status"]
+
+    result = hold(api_client, ids[world.name], 1)
+    assert result["ok"] is True, result
+    assert world.work_state() == before
+    merge_last_ambar_pr(world, github)
+    assert release(api_client, ids[world.name], a)["ok"] is True
+    assert world.work_state() == before
+    # Gecici agaclar Holocron'un veri klasorunde acilir ve hepsi silinir.
+    root = ambar_git.worktree_root()
+    assert root.is_relative_to(tmp_path) and not root.is_relative_to(world.work)
+    assert list(root.iterdir()) == []
+    assert "ambar/" not in git(world.work, "for-each-ref", "refs/heads")
+    assert len([b for b in world.remote_branches() if b.startswith("ambar/")]) == 2
+
+
+def test_locked_worktree_removal_is_retried_then_reported(world, monkeypatch, tmp_path):
+    tool = ambar_git.Git(shutil.which("git"), str(world.work))
+    path = tmp_path / "kilitli"
+    path.mkdir()
+    (path / "dosya").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(ambar_git, "REMOVE_WAIT", 0)
+    monkeypatch.setattr(ambar_git.shutil, "rmtree", lambda *args, **kwargs: None)
+    calls = []
+    original = ambar_git.Git.run
+
+    def spy(self, *args, **kwargs):
+        calls.append(args[:2])
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(ambar_git.Git, "run", spy)
+    note = ambar_git._remove_worktree(tool, path)
+    assert calls.count(("worktree", "remove")) == ambar_git.REMOVE_ATTEMPTS
+    assert "silinemedi" in note and str(path) in note
+
+
+def test_stale_worktrees_from_a_crash_are_cleaned(api_client, context, world, github):
     world.merge_pr(1, {"a.txt": "a\n"})
     ids = configure(context, github, world)
-    (world.work / "README.md").write_text("yarim is\n", encoding="utf-8")
-    before = world.work_state()
-    result = hold(api_client, ids[world.name], 1)
-    error = result["results"][0]["error"]
-    assert error["code"] == "dirty_tree"
-    assert "README.md" in error["message"]
-    assert world.work_state() == before
-    assert (world.work / "README.md").read_text(encoding="utf-8") == "yarim is\n"
-    assert github.created() == []
+    root = ambar_git.worktree_root()
+    root.mkdir(parents=True, exist_ok=True)
+    git(world.work, "worktree", "add", "--quiet", "--detach", str(root / "eski"), "origin/master")
+    assert hold(api_client, ids[world.name], 1)["ok"] is True
+    assert world.work_state()["worktrees"] == 1
+    assert list(root.iterdir()) == []
 
 
 def test_release_conflict_is_reported_the_same_way(api_client, context, world, github):
@@ -337,6 +377,7 @@ def test_release_conflict_is_reported_the_same_way(api_client, context, world, g
     hold(api_client, ids[world.name], 1)
     merge_last_ambar_pr(world, github)
     world.merge_pr(3, {"app.txt": "satir 1\nUC\nsatir 3\n"})
+    world.make_dirty()
     before = world.work_state()
     result = release(api_client, ids[world.name], a)
     error = result["results"][0]["error"]

@@ -1,8 +1,10 @@
 """Ambar: yerel klondaki git isleri (alt surec, kabuk yok).
 
-Holocron burada YALNIZCA su isleri yapar: `fetch`, `origin/<ana dal>`dan yeni
-bir `ambar/...` dali acmak, secilen commit'leri `git revert` ile geri almak,
-o dali `origin`e itmek ve kullanicinin klonunu aldigi hale geri dondurmek.
+Holocron burada YALNIZCA su isleri yapar: ana klonda `fetch`, Holocron'un veri
+klasorunde GECICI bir `git worktree` acip orada `origin/<ana dal>`dan yeni bir
+`ambar/...` dali acmak, secilen commit'leri `git revert` ile geri almak, o dali
+`origin`e itmek, sonra gecici agaci ve yerel dali silmek. Kullanicinin klonunda
+dal degismez, calisma agacina ve kaydedilmemis degisikliklerine dokunulmaz.
 Ana dala (master/main) hicbir zaman yazilmaz, zorla itme (`--force`) yoktur,
 birlestirme yapilmaz.
 
@@ -24,6 +26,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -170,7 +173,11 @@ class Git:
         check: bool = True,
         timeout: float = LOCAL_TIMEOUT,
     ) -> subprocess.CompletedProcess[str]:
-        command = [self.exe, "-C", self.path, "-c", "core.quotepath=off", *args]
+        # core.longpaths: Windows'ta 260 karakteri asan yollar (derin depolar).
+        command = [
+            self.exe, "-C", self.path, "-c", "core.quotepath=off", "-c", "core.longpaths=true",
+            *args,
+        ]
         try:
             result = subprocess.run(  # noqa: S603 - arguman listesi, kabuk yok
                 command,
@@ -223,52 +230,7 @@ def check_work_tree(git: Git) -> str:
     return lines[-1].strip() if len(lines) > 1 else str(path)
 
 
-def busy_state(git: Git) -> str:
-    """Yarim kalmis bir revert/merge/rebase/cherry-pick varsa adini dondurur."""
-    for name in ("REVERT_HEAD", "MERGE_HEAD", "CHERRY_PICK_HEAD", "rebase-merge", "rebase-apply"):
-        resolved = git.out("rev-parse", "--git-path", name)
-        target = Path(resolved)
-        if not target.is_absolute():
-            target = Path(git.path) / target
-        if target.exists():
-            return name
-    return ""
-
-
-def dirty_files(git: Git) -> list[str]:
-    """Izlenen dosyalardaki kaydedilmemis degisiklikler (izlenmeyenler sayilmaz)."""
-    text = git.run("status", "--porcelain", "--untracked-files=no").stdout
-    return [line[3:] for line in text.splitlines() if line.strip()]
-
-
-def ensure_clean(git: Git) -> None:
-    busy = busy_state(git)
-    if busy:
-        raise GitError(
-            "repo_busy",
-            "Klonda yarım kalmış bir git işlemi var "
-            f"({busy}). Önce onu tamamlayın ya da iptal edin.",
-        )
-    dirty = dirty_files(git)
-    if dirty:
-        listed = ", ".join(dirty[:5]) + (" ..." if len(dirty) > 5 else "")
-        raise GitError(
-            "dirty_tree",
-            "Klonda kaydedilmemiş değişiklik var; Holocron başlamadı. Değişiklikleri commit "
-            f"edin ya da stash'leyin: {listed}",
-        )
-
-
 # --- dallar ---------------------------------------------------------------
-
-
-def current_position(git: Git) -> tuple[str, str]:
-    """('branch', ad) ya da ('detached', sha)."""
-    result = git.run("symbolic-ref", "--quiet", "--short", "HEAD", check=False)
-    name = result.stdout.strip()
-    if result.returncode == 0 and name:
-        return "branch", name
-    return "detached", git.out("rev-parse", "HEAD")
 
 
 def default_branch(git: Git) -> str:
@@ -524,6 +486,72 @@ class Prepared:
     branch: str
     base: str
     commits: list[Commit]
+    # Gecici calisma agaci silinemediyse kullaniciya gosterilecek not.
+    warning: str = ""
+
+
+# Gecici calisma agaclari Holocron'un veri klasorunde durur, klonun icinde degil.
+WORKTREE_DIR = "ambar-wt"
+REMOVE_ATTEMPTS = 4
+REMOVE_WAIT = 0.5
+
+
+def worktree_root(home: Path | None = None) -> Path:
+    """Gecici calisma agaclarinin koku.
+
+    Windows'ta yol kisa ve bosluksuz olsun diye (uzun yol siniri, bazi
+    araclarin bosluklu yolu bolmesi) veri klasoru bosluk iceriyorsa
+    %LOCALAPPDATA%\\Holocron denenir.
+    """
+    from . import paths
+
+    base = home or paths.home_dir()
+    root = base / WORKTREE_DIR
+    if " " in str(root) and sys.platform.startswith("win"):
+        local = os.environ.get("LOCALAPPDATA", "")
+        if local and " " not in local:
+            root = Path(local) / "Holocron" / WORKTREE_DIR
+    return root
+
+
+def _same_path(left: str, right: Path) -> bool:
+    try:
+        return os.path.normcase(os.path.realpath(left)).startswith(
+            os.path.normcase(os.path.realpath(str(right)))
+        )
+    except OSError:
+        return False
+
+
+def _remove_worktree(git: Git, path: Path) -> str:
+    """Calisma agacini siler; kilitli dosyada yeniden dener, olmazsa not dondurur."""
+    for attempt in range(REMOVE_ATTEMPTS):
+        git.run("worktree", "remove", "--force", "--force", str(path), check=False)
+        if not path.exists():
+            break
+        if attempt == REMOVE_ATTEMPTS - 1:
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            time.sleep(REMOVE_WAIT * (attempt + 1))
+    git.run("worktree", "prune", check=False)
+    if path.exists():
+        log.warning("Ambar: gecici calisma agaci silinemedi: %s", path)
+        return (
+            f"Geçici çalışma klasörü silinemedi ({path}); bir dosya kilitli olabilir. "
+            "Holocron bir sonraki işlemde yeniden dener, isterseniz klasörü elle silin."
+        )
+    return ""
+
+
+def cleanup_stale(git: Git, root: Path) -> None:
+    """Onceki (yarida kalmis) islemlerden kalan ambar calisma agaclarini temizler."""
+    git.run("worktree", "prune", check=False)
+    listing = git.run("worktree", "list", "--porcelain", check=False).stdout
+    for line in listing.splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):].strip()
+            if _same_path(path, root):
+                _remove_worktree(git, Path(path))
 
 
 def revert_onto_branch(
@@ -531,15 +559,15 @@ def revert_onto_branch(
     base: str,
     branch_base_name: str,
     shas: Sequence[str],
+    root: Path | None = None,
 ) -> Prepared:
-    """origin/<base>'den dal acar, commit'leri yeniden eskiye geri alir, iter.
+    """origin/<base>'den GECICI bir calisma agacinda dal acar, geri alir, iter.
 
-    Her durumda klon basladigi hale doner: ozgun dal geri gelir, gecici yerel
-    dal silinir. Cakismada revert iptal edilir ve `Conflict` firlatilir; o an
-    hicbir sey itilmemistir.
+    Kullanicinin klonuna dokunulmaz: dali degismez, calisma agaci ve
+    kaydedilmemis degisiklikleri oldugu gibi kalir. Is gecici bir `git
+    worktree` icinde yapilir; her durumda (cakisma dahil) agac silinir ve yerel
+    `ambar/...` dali da silinir (uzaktaki dal PR icin kalir).
     """
-    ensure_clean(git)
-    kind, original = current_position(git)
     commits = show_commits(git, list(dict.fromkeys(shas)))  # yeniden eskiye
     if len(commits) != len(set(shas)):
         raise GitError("commit_missing", "Seçilen commit'lerden biri klonda bulunamadı.")
@@ -547,51 +575,61 @@ def revert_onto_branch(
     if not branch.startswith(BRANCH_PREFIX) or branch in (base, f"origin/{base}"):
         raise GitError("bad_branch", "Ambar dalı ana dal olamaz.")
 
-    created = False
+    top = root or worktree_root()
     try:
-        git.run("checkout", "--quiet", "--no-track", "-b", branch, f"refs/remotes/origin/{base}")
+        top.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise GitError(
+            "worktree_failed", f"Geçici çalışma klasörü oluşturulamadı ({top}): {exc}"
+        ) from exc
+    cleanup_stale(git, top)
+    path = top / f"{branch.rsplit('/', 1)[-1]}-{os.getpid()}-{int(time.time() * 1000) % 100000}"
+
+    added = git.run(
+        "worktree", "add", "--quiet", "--detach", str(path), f"refs/remotes/origin/{base}",
+        check=False,
+    )
+    if added.returncode != 0:
+        shutil.rmtree(path, ignore_errors=True)
+        git.run("worktree", "prune", check=False)
+        raise GitError(
+            "worktree_failed",
+            "Geçici çalışma ağacı açılamadı; klonunuza dokunulmadı. Klon bozuk ya da çok eski "
+            "bir git olabilir (git 2.17+ gerekir); ayrıntı aşağıda.",
+            (added.stderr or added.stdout or "").strip()[-1500:],
+        )
+    tree = Git(git.exe, str(path), git.env)
+    created = False
+    warning = ""
+    try:
+        tree.run("checkout", "--quiet", "--no-track", "-b", branch)
         created = True
         for commit in commits:
             args = ["revert", "--no-edit"]
             if commit.is_merge:
                 args += ["-m", "1"]
-            result = git.run(*args, commit.sha, check=False)
+            result = tree.run(*args, commit.sha, check=False)
             if result.returncode != 0:
                 files = [
                     line.strip()
-                    for line in git.run(
+                    for line in tree.run(
                         "diff", "--name-only", "--diff-filter=U", check=False
                     ).stdout.splitlines()
                     if line.strip()
                 ]
-                git.run("revert", "--abort", check=False)
+                tree.run("revert", "--abort", check=False)
                 detail = (result.stderr or result.stdout or "").strip()[-1500:]
                 raise Conflict(sha=commit.sha, subject=commit.subject, files=files, detail=detail)
         # Yalnizca bu dal, acik refspec ile, zorlamasiz itilir.
-        git.run(
+        tree.run(
             "push", "--porcelain", "origin", f"refs/heads/{branch}:refs/heads/{branch}",
             timeout=NETWORK_TIMEOUT,
         )
     finally:
-        _restore(git, kind, original, branch if created else "")
-    return Prepared(branch=branch, base=base, commits=commits)
-
-
-def _restore(git: Git, kind: str, original: str, branch: str) -> None:
-    """Klonu islemden onceki haline getirir; hata yutulur ama loglanir."""
-    try:
-        if busy_state(git) == "REVERT_HEAD":
-            git.run("revert", "--abort", check=False)
-        target = ["checkout", "--quiet", original] if kind == "branch" else [
-            "checkout", "--quiet", "--detach", original
-        ]
-        if git.run(*target, check=False).returncode != 0:
-            # Gecici dalda yalnizca bizim yazdigimiz degisiklik olabilir.
-            git.run("checkout", "--quiet", "--force", *target[2:], check=False)
-        if branch:
+        warning = _remove_worktree(git, path)
+        if created:
             git.run("branch", "-D", branch, check=False)
-    except GitError:  # pragma: no cover - son care
-        log.warning("Ambar: klon eski haline döndürülemedi", exc_info=True)
+    return Prepared(branch=branch, base=base, commits=commits, warning=warning)
 
 
 def is_on(git: Git, sha: str, ref: str) -> bool:
