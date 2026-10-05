@@ -199,7 +199,7 @@ def _kos(govde: str) -> object:
     kaynak = "\n".join(
         (STATIC / "js" / ad).read_text(encoding="utf-8") for ad in ("teamslink.js", "app.js")
     )
-    sonuc = subprocess.run([node], input=SHIM + kaynak + govde, capture_output=True, text=True)
+    sonuc = subprocess.run([node], input=SHIM + kaynak + govde, capture_output=True, text=True, encoding="utf-8")
     assert sonuc.returncode == 0, sonuc.stderr
     return json.loads(sonuc.stdout)
 

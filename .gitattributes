@@ -1,0 +1,9 @@
+# Depoda her metin dosyasi LF'tir; Windows'ta da LF cikarilir. Testler
+# kaynak metinde "\n" arar ve Windows CI'da CRLF'li kopya yuzunden
+# dusuyordu. Toplu is dosyasi istisna: cmd.exe LF'li .bat'ta etiket ve
+# goto'yu sasirabilir, o yuzden CRLF.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.woff2 binary
+*.ico binary

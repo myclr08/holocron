@@ -145,7 +145,7 @@ process.stdout.write(JSON.stringify([
     setup, exercise = probe.split("function count", 1)
     result = subprocess.run(
         [node], input=setup + script + "\nfunction count" + exercise,
-        capture_output=True, text=True, check=True)
+        capture_output=True, text=True, encoding="utf-8", check=True)
     parsed = json.loads(result.stdout)
     assert parsed[0] == {"hidden": False, "text": "24/24"}
     assert parsed[1] == {"hidden": False, "text": "2/24"}
@@ -189,7 +189,7 @@ process.stdout.write(JSON.stringify([count(null), count([]), count(["local:2"])]
     setup, exercise = probe.split("function count", 1)
     result = subprocess.run(
         [node], input=setup + script + "\nfunction count" + exercise,
-        capture_output=True, text=True, check=True)
+        capture_output=True, text=True, encoding="utf-8", check=True)
     assert json.loads(result.stdout) == [2, 0, 1]
 
 
@@ -353,7 +353,7 @@ def test_javascript_files_parse(api_client):
         pytest.skip("node yok")
     for name in SCRIPTS:
         path = STATIC / "js" / name
-        result = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+        result = subprocess.run([node, "--check", str(path)], capture_output=True, text=True, encoding="utf-8")
         assert result.returncode == 0, f"{name}: {result.stderr}"
 
 
@@ -442,7 +442,7 @@ globalThis.api = async () => ({
 """
     source = "\n".join((STATIC / "js" / name).read_text(encoding="utf-8") for name in scripts)
     result = subprocess.run(
-        [node], input=shim + source + probe, capture_output=True, text=True, check=True
+        [node], input=shim + source + probe, capture_output=True, text=True, encoding="utf-8", check=True
     )
     report = json.loads(result.stdout)
     assert report["lines"] == 2, report
@@ -509,7 +509,7 @@ globalThis.document = {
     )
     source = "\n".join((STATIC / "js" / name).read_text(encoding="utf-8") for name in scripts)
     result = subprocess.run(
-        [node], input=shim + source + probe_js, capture_output=True, text=True, check=True
+        [node], input=shim + source + probe_js, capture_output=True, text=True, encoding="utf-8", check=True
     )
     return json.loads(result.stdout)
 
@@ -1224,7 +1224,7 @@ probe();
     setup, exercise = probe.split("async function probe", 1)
     result = subprocess.run(
         [node], input=setup + script + "\nasync function probe" + exercise,
-        capture_output=True, text=True, check=True)
+        capture_output=True, text=True, encoding="utf-8", check=True)
     assert json.loads(result.stdout) == [False, True, False, True, False, False]
 
 
@@ -1415,7 +1415,7 @@ process.stdout.write(JSON.stringify({
 }));
 """
     result = subprocess.run(
-        [node], input=shim + script + probe, capture_output=True, text=True, check=True
+        [node], input=shim + script + probe, capture_output=True, text=True, encoding="utf-8", check=True
     )
     assert json.loads(result.stdout) == {
         "tasks": "#gorevlerim",
@@ -1465,7 +1465,7 @@ out.nonNumericGroupFallsBack = resolveStartupView();
 process.stdout.write(JSON.stringify(out));
 """
     result = subprocess.run(
-        [node], input=shim + script + probe, capture_output=True, text=True, check=True
+        [node], input=shim + script + probe, capture_output=True, text=True, encoding="utf-8", check=True
     )
     out = json.loads(result.stdout)
     assert out["bothEmpty"] == {"view": "groups", "groupId": None}
@@ -1528,7 +1528,7 @@ out.threwWhenBlocked = threw;
 process.stdout.write(JSON.stringify(out));
 """
     result = subprocess.run(
-        [node], input=shim + script + probe, capture_output=True, text=True, check=True
+        [node], input=shim + script + probe, capture_output=True, text=True, encoding="utf-8", check=True
     )
     out = json.loads(result.stdout)
     assert out["hashAfterTasks"] == "#gorevlerim"
@@ -1582,7 +1582,7 @@ out.hrefWithStoredView = window.location.href;
 process.stdout.write(JSON.stringify(out));
 """
     result = subprocess.run(
-        [node], input=shim + script + probe, capture_output=True, text=True, check=True
+        [node], input=shim + script + probe, capture_output=True, text=True, encoding="utf-8", check=True
     )
     out = json.loads(result.stdout)
     assert out["sameOriginRoot"] is True

@@ -253,8 +253,15 @@ def test_copilot_is_found_in_the_npm_folder_when_the_process_path_is_stale(tmp_p
 
 
 def test_the_user_path_is_read_back_from_the_registry(tmp_path, monkeypatch):
-    """Surecin PATH'i bayat: kayit defterindeki kullanici PATH'i taze okunur."""
-    hedef = _sahte_copilot(tmp_path / "kayit")
+    """Surecin PATH'i bayat: kayit defterindeki kullanici PATH'i taze okunur.
+
+    Gercek Windows'ta `shutil.which` PATHEXT ile arar ve uzantisiz dosyayi
+    bulmaz; orada hedef npm'in biraktigi gibi `copilot.cmd`dir.
+    """
+    import sys
+
+    ad = "copilot.cmd" if sys.platform.startswith("win") else "copilot"
+    hedef = _sahte_copilot(tmp_path / "kayit", ad)
     monkeypatch.setattr(
         copilot, "kayit_defteri_path", lambda platform="": [str(tmp_path / "kayit")]
     )

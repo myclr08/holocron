@@ -272,7 +272,7 @@ def _node_kos(govde: str) -> object:
         pytest.skip("node yok")
     betik = (STATIC / "js" / "duzelt.js").read_text(encoding="utf-8")
     sonuc = subprocess.run(
-        [node], input=betik + govde, capture_output=True, text=True
+        [node], input=betik + govde, capture_output=True, text=True, encoding="utf-8"
     )
     assert sonuc.returncode == 0, sonuc.stderr
     return json.loads(sonuc.stdout)

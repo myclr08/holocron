@@ -983,7 +983,7 @@ def test_the_new_scripts_parse():
     static = Path(__file__).resolve().parent.parent / "app" / "static" / "js"
     for name in ("campaign.js", "campaign-settings.js"):
         result = subprocess.run(
-            [node, "--check", str(static / name)], capture_output=True, text=True
+            [node, "--check", str(static / name)], capture_output=True, text=True, encoding="utf-8"
         )
         assert result.returncode == 0, f"{name}: {result.stderr}"
 

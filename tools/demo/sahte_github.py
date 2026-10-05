@@ -137,17 +137,41 @@ class Depo:
         return (self.origin / "HEAD").exists() and (self.calisma / ".git").exists()
 
 
+def _sil(yol: Path) -> None:
+    """Klasoru siler. Windows'ta git nesne dosyalari salt okunurdur ve
+    `rmtree(ignore_errors=True)` onlari sessizce birakiyordu; yazilabilir
+    yapilip yeniden denenir."""
+    import os
+    import stat
+
+    def yeniden(islev, hedef, _hata):
+        try:
+            os.chmod(hedef, stat.S_IWRITE)
+            islev(hedef)
+        except OSError:
+            pass
+
+    if not yol.exists():
+        return
+    import sys
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(yol, onexc=yeniden)
+    else:  # pragma: no cover - 3.11
+        shutil.rmtree(yol, onerror=yeniden)
+
+
 def depolari_kur(kok: Path, sifirla: bool = False, an: datetime | None = None) -> list[Depo]:
     """Uc uydurma depoyu kurar; varsa oldugu gibi kullanir (`sifirla` hepsini siler)."""
     if sifirla and kok.exists():
-        shutil.rmtree(kok, ignore_errors=True)
+        _sil(kok)
     kok.mkdir(parents=True, exist_ok=True)
     simdi = an or datetime.now(timezone.utc)
     depolar: list[Depo] = []
     for sira, tanim in enumerate(DEPOLAR):
         depo = Depo(kok, tanim["ad"])
         if not depo.hazir:
-            shutil.rmtree(depo.klasor, ignore_errors=True)
+            _sil(depo.klasor)
             _depo_tohumla(depo, tanim, simdi, sira)
         depolar.append(depo)
     return depolar

@@ -231,7 +231,7 @@ def _kos(betikler: tuple[str, ...], govde: str) -> object:
         pytest.skip("node yok")
     kaynak = "\n".join((STATIC / "js" / ad).read_text(encoding="utf-8") for ad in betikler)
     sonuc = subprocess.run(
-        [node], input=SHIM + kaynak + govde, capture_output=True, text=True
+        [node], input=SHIM + kaynak + govde, capture_output=True, text=True, encoding="utf-8"
     )
     assert sonuc.returncode == 0, sonuc.stderr
     return json.loads(sonuc.stdout)
