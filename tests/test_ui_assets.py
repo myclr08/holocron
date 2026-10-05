@@ -861,6 +861,7 @@ SETTINGS_GROUPS = (
     ("sefer", "Sefer"),
     ("ambar", "Ambar"),
     ("gorunum", "Görünüm"),
+    ("guncelleme", "Güncelleme"),
 )
 
 

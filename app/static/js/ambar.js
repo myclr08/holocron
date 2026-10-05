@@ -43,6 +43,7 @@ function ambarWrite(key, value) {
 function showAmbar() {
   if (typeof leaveTasks === "function") leaveTasks();
   if (typeof leaveCampaign === "function") leaveCampaign();
+  if (typeof leaveArsiv === "function") leaveArsiv();
   state.view = "ambar";
   el("placeholder").hidden = true;
   el("group-view").hidden = true;

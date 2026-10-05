@@ -34,6 +34,8 @@
           <button class="settings-tab" type="button" data-group="sefer">Sefer</button>
           <button class="settings-tab" type="button" data-group="ambar">Ambar</button>
           <button class="settings-tab" type="button" data-group="gorunum">Görünüm</button>
+          <button class="settings-tab" type="button" data-group="guncelleme">Güncelleme<span
+              class="update-dot" id="update-tab-dot" hidden></span></button>
         </nav>
 
         <div class="settings-panes">
@@ -645,6 +647,40 @@
             </div>
           </section>
 
+
+          <!-- Güncelleme ------------------------------------------------>
+          <section class="settings-group" id="grup-guncelleme" data-group="guncelleme" hidden>
+            <p class="group-lead">
+              Holocron'un yeni sürümünü GitHub'dan denetler ve kurar. Kurmadan önce verileriniz
+              yedeklenir; uygulama kapanıp yeni sürümle yeniden açılır.
+            </p>
+
+            <div class="card" id="update-card">
+              <h2>Yazılım güncelleme</h2>
+              <div class="update-version">
+                <div>Yüklü sürüm <strong id="update-current"></strong></div>
+                <div class="muted" id="update-checked"></div>
+              </div>
+              <p class="hint">
+                Denetim, Ağ ayarlarındaki vekil sunucuyla GitHub'a gider. İndirilen paket yayımla
+                birlikte gelen SHA-256 özetiyle doğrulanır; özeti tutmayan paket kurulmaz.
+                Önce <code>holocron.db</code> ve <code>holocron.key</code>
+                <code>Belgeler\holocron\holocron-yedek</code> altına yedeklenir (son 10 yedek
+                tutulur); yedek alınamazsa güncelleme başlamaz.
+              </p>
+              <div class="actions">
+                <button class="primary" id="update-check">Güncellemeleri denetle</button>
+                <button class="primary" id="update-start" hidden>Güncelle</button>
+              </div>
+              <div class="status" id="update-status" hidden></div>
+              <div id="update-release" hidden>
+                <h3 id="update-release-title"></h3>
+                <div class="update-notes" id="update-notes"></div>
+              </div>
+              <ol class="update-steps" id="update-steps" hidden></ol>
+            </div>
+          </section>
+
         </div>
       </div>
     </main>
@@ -656,5 +692,6 @@
   <script src="/static/js/mailsend-settings.js"></script>
   <script src="/static/js/campaign-settings.js"></script>
   <script src="/static/js/ambar-settings.js"></script>
+  <script src="/static/js/guncelleme-settings.js"></script>
 </body>
 </html>

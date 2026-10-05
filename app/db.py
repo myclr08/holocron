@@ -859,6 +859,48 @@ def _migration_0018_gorev_son_durum(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0019_arsiv(conn: sqlite3.Connection) -> None:
+    """Arsiv: belgelerin ust verisi ve gorev/kayit baglari.
+
+    Dosyanin kendisi veritabaninda DEGIL, Belgeler altindaki
+    `holocron-belgeler` klasorundedir; burada adi, boyutu, icerik ozeti ve
+    baglari durur. Baglar coktan coga: bir belge birden cok goreve ve kayda
+    baglanabilir. Bag Jira'ya hic gitmez.
+
+    `target_id` metindir: gorevde gorev kimligi, kayitta Jira anahtari
+    (buyuk harf). Bag silinince dosya silinmez; belge silinince baglari da
+    gider (ON DELETE CASCADE).
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS documents (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            file_name  TEXT NOT NULL UNIQUE,
+            sha256     TEXT,
+            size       INTEGER NOT NULL DEFAULT 0,
+            kind       TEXT NOT NULL DEFAULT 'other',
+            source     TEXT NOT NULL DEFAULT 'upload',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_documents_sha ON documents(sha256);
+
+        CREATE TABLE IF NOT EXISTS document_links (
+            document_id INTEGER NOT NULL,
+            target_type TEXT NOT NULL CHECK (target_type IN ('task', 'issue')),
+            target_id   TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            PRIMARY KEY (document_id, target_type, target_id),
+            FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_document_links_target
+            ON document_links(target_type, target_id);
+        """
+    )
+
+
 # Eski `calls.copilot_*` / ozet anahtarlarinin yeni `copilot.*` karsiliklari.
 COPILOT_AYAR_GOCU: tuple[tuple[str, str], ...] = (
     ("calls.copilot_yolu", "copilot.yolu"),
@@ -889,6 +931,7 @@ MIGRATIONS: list[tuple[int, str, Migration]] = [
     (16, "drop teams calls and meeting notes", _migration_0016_gorusme_ve_aramalar_kaldirildi),
     (17, "gamify activity log", _migration_0017_rozet_etkinlikleri),
     (18, "task status field and history", _migration_0018_gorev_son_durum),
+    (19, "document archive", _migration_0019_arsiv),
 ]
 
 SCHEMA_VERSION = MIGRATIONS[-1][0]

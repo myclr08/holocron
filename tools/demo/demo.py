@@ -104,12 +104,16 @@ def klasoru_hazirla(klasor: Path, sifirla: bool) -> Path:
     """Veri klasorunu kurar; `--reset` verildiyse eski veriyi siler."""
     klasor.mkdir(parents=True, exist_ok=True)
     if sifirla:
+        import shutil
+
         for ad in ("holocron.db", "holocron.key", "holocron.log", "holocron.port"):
             hedef = klasor / ad
             try:
                 hedef.unlink()
             except FileNotFoundError:
                 pass
+        # Arsiv belgeleri de demo klasorundedir; sifirlamada onlar da gider.
+        shutil.rmtree(klasor / "Belgeler", ignore_errors=True)
     return klasor
 
 
@@ -134,6 +138,9 @@ def tohumla(context, sahte, an: datetime | None = None) -> dict[str, int]:
 
     anahtarlar = repository.all_member_keys(conn)
     tohum.geri_kalani_kur(context, anahtarlar, an)
+    from demo import belgeler
+
+    belgeler.belgeleri_kur(context)
     return {
         "kayit": repository.issue_count(conn),
         "filo": len(repository.list_groups(conn)),
@@ -186,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # Holocron'un veri yolunu demo klasorune cek; gercek kurulum bozulmasin.
     os.environ["HOLOCRON_HOME"] = str(klasor)
+    # Arsiv ve guncelleme yedekleri de gercek Belgeler'e degil demo klasorune.
+    os.environ["HOLOCRON_DOCUMENTS"] = str(klasor / "Belgeler")
 
     # `app` ve `demo` ancak HOLOCRON_HOME kurulduktan sonra ice aktarilir.
     import uvicorn

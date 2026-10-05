@@ -78,12 +78,15 @@ KIND_BADGE_EARNED = "badge_earned"
 # Ambar: bir depoda PR'lar ambara alindi / ambardan cikarildi (PR acildi).
 KIND_AMBAR_HOLD = "ambar_al"
 KIND_AMBAR_RELEASE = "ambar_cikar"
+# Arsiv: en az bir veri karti (belge) bagli gorev kapatildi.
+KIND_DONE_WITH_DOCS = "done_with_docs"
 
 # Kural tohumu: Ayarlar -> "Sefer" kartindan puanlar degistirilebilir.
 SEED_RULES: tuple[dict[str, Any], ...] = (
     {"source": SOURCE_TASK, "kind": KIND_DONE, "points": 10, "params_json": None},
     {"source": SOURCE_TASK, "kind": KIND_DONE_BEFORE_DUE, "points": 5, "params_json": None},
     {"source": SOURCE_TASK, "kind": KIND_DONE_OVERDUE, "points": 5, "params_json": None},
+    {"source": SOURCE_TASK, "kind": KIND_DONE_WITH_DOCS, "points": 3, "params_json": None},
     {"source": SOURCE_MAIL, "kind": KIND_MAIL_FAST, "points": 5, "params_json": None},
     # params_json.group_points: {"<grup id>": puan} -- grup basina puan.
     {"source": SOURCE_JIRA, "kind": KIND_LEFT_GROUP, "points": 15, "params_json": "{}"},
@@ -102,6 +105,7 @@ RULE_LABELS: dict[str, str] = {
     KIND_DONE: "Görev kapatıldı",
     KIND_DONE_BEFORE_DUE: "Son tarihinden önce kapatıldı (ek puan)",
     KIND_DONE_OVERDUE: "Gecikmiş görev kapatıldı",
+    KIND_DONE_WITH_DOCS: "Veri kartı bağlı görev kapatıldı (ek puan)",
     KIND_MAIL_FAST: "E-posta görevi 24 saat içinde ele alındı",
     KIND_LEFT_GROUP: "Kayıt filtre filosundan düştü",
     KIND_STATUS_DONE: "Jira kaydı tamamlandı",
@@ -164,6 +168,9 @@ BADGE_NOTED_20 = "noted_20"
 BADGE_LINKED_25 = "linked_25"
 BADGE_CLEAN_DESK = "clean_desk"
 BADGE_ARCHIVIST = "archivist"
+BADGE_SCRIBE = "katip"
+# "Katip" kac belgeli gorev kapanisi ister.
+SCRIBE_TASKS = 10
 
 # Jira akisi
 BADGE_FIRST_ISSUE = "first_issue"
@@ -303,6 +310,8 @@ BADGES: tuple[dict[str, Any], ...] = (
            CATEGORY_TASK, RARITY_RARE),
     _badge(BADGE_ARCHIVIST, "Arşivci", "30 günden eski 20 tamamlanmış görev katlandı",
            CATEGORY_TASK, RARITY_COMMON),
+    _badge(BADGE_SCRIBE, "Kâtip", f"Veri kartı bağlı {SCRIBE_TASKS} görev kapat",
+           CATEGORY_TASK, RARITY_RARE),
     # --- Jira akisi ---
     _badge(BADGE_FIRST_ISSUE, "İlk Kapanış", "İlk Jira kaydı tamamlandı",
            CATEGORY_JIRA, RARITY_COMMON),
@@ -420,6 +429,7 @@ SERIES_BADGES: dict[str, tuple[str, int]] = {
     BADGE_TASK_50: ("task_done", 50),
     BADGE_TASK_200: ("task_done", 200),
     BADGE_EARLY_10: ("task_early", 10),
+    BADGE_SCRIBE: ("task_docs", SCRIBE_TASKS),
     BADGE_FIRST_ISSUE: ("issue_done", 1),
     BADGE_DROP_25: ("issue_drop", 25),
     BADGE_DROP_100: ("issue_drop", 100),
@@ -436,7 +446,7 @@ SERIES_BADGES: dict[str, tuple[str, int]] = {
 
 SERIES_NAMES: tuple[str, ...] = (
     "task_done", "task_early", "issue_done", "issue_drop", "quest_done",
-    "mail_fast", "dawn", "friday", "fix", "excel", "ambar_hold",
+    "mail_fast", "dawn", "friday", "fix", "excel", "ambar_hold", "task_docs",
 )
 
 # Kod -> (olcu adi, esik). Olcu anlik sayidir; kazanma ani bugundur.
@@ -848,7 +858,26 @@ def _award_task_done(
         )
         if bonus:
             events.append(bonus)
+    # Arsiv eki: kapanis aninda en az bir veri karti bagliysa kucuk ek puan.
+    # Bag ekleyip kaldirarak puan kasilamaz: ek puan yalnizca kapanis ilk kez
+    # puanlanirken bakilir (yukaridaki `_already_scored` kapisi) ve referans
+    # gorevin kendisidir; ayni gorev icin ikinci satir yazilamaz.
+    if _task_has_documents(context, task):
+        docs = award(
+            context, SOURCE_TASK, KIND_DONE_WITH_DOCS, ref,
+            f"Veri kartıyla kapatıldı: {task['title']}", now=now,
+        )
+        if docs:
+            events.append(docs)
     return events
+
+
+def _task_has_documents(context: Any, task: dict[str, Any]) -> bool:
+    row = context.connection().execute(
+        "SELECT 1 FROM document_links WHERE target_type = 'task' AND target_id = ? LIMIT 1",
+        (str(task["id"]),),
+    ).fetchone()
+    return row is not None
 
 
 def _already_scored(context: Any, ref: str, kinds: Sequence[str]) -> bool:
@@ -1465,6 +1494,8 @@ def badge_facts(
                 series["friday"].append(stamp)
         elif kind == KIND_DONE_BEFORE_DUE:
             series["task_early"].append(stamp)
+        elif kind == KIND_DONE_WITH_DOCS:
+            series["task_docs"].append(stamp)
         elif kind == KIND_MAIL_FAST:
             series["mail_fast"].append(stamp)
         elif kind == KIND_QUEST_DONE:

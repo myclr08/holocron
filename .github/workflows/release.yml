@@ -119,7 +119,22 @@ jobs:
         with:
           path: artifacts
 
+      # Uygulama ici guncelleme indirdigi zip'i bu dosyayla dogrular; ozeti
+      # olmayan ya da tutmayan paket KURULMAZ. Bu adim dusmesin diye zip
+      # sayisi da denetlenir (uc paket bekleniyor).
+      - name: SHA-256 özetleri
+        run: |
+          mkdir -p release
+          find artifacts -name '*.zip' -exec cp {} release/ \;
+          count=$(ls release/*.zip | wc -l)
+          if [ "$count" -ne 3 ]; then echo "Beklenen 3 zip, bulunan $count"; exit 1; fi
+          cd release
+          sha256sum *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.zip
+          files: |
+            release/*.zip
+            release/SHA256SUMS.txt
           generate_release_notes: true

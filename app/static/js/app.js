@@ -130,6 +130,7 @@ function viewHash(view, activeId) {
   if (view === "tasks") return "#gorevlerim";
   if (view === "campaign") return "#sefer";
   if (view === "ambar") return "#ambar";
+  if (view === "arsiv") return "#arsiv";
   if (view === "groups" && activeId) return "#filo/" + encodeURIComponent(activeId);
   return "";
 }
@@ -168,6 +169,7 @@ function resolveStartupView() {
   if (hash === "#gorevlerim") return { view: "tasks", groupId: null };
   if (hash === "#sefer") return { view: "campaign", groupId: null };
   if (hash === "#ambar") return { view: "ambar", groupId: null };
+  if (hash === "#arsiv") return { view: "arsiv", groupId: null };
   const match = /^#filo\/(.+)$/.exec(hash);
   if (match) {
     // Grup id'leri sayisal (SQLite rowid); hash'ten string gelir, karsilastirma icin cevrilir.
@@ -338,7 +340,7 @@ async function move(index, delta) {
 }
 
 function showPlaceholder() {
-  if (state.view === "tasks" || state.view === "campaign" || state.view === "ambar") return;
+  if (["tasks", "campaign", "ambar", "arsiv"].includes(state.view)) return;
   state.activeId = null;
   state.group = null;
   el("placeholder").hidden = false;
@@ -353,6 +355,7 @@ async function selectGroup(groupId, keepView) {
     leaveTasks();
     if (typeof leaveCampaign === "function") leaveCampaign();
     if (typeof leaveAmbar === "function") leaveAmbar();
+    if (typeof leaveArsiv === "function") leaveArsiv();
   }
   state.activeId = groupId;
   if (changing || !keepView) {
@@ -362,7 +365,7 @@ async function selectGroup(groupId, keepView) {
     clearSelection();
   }
   el("placeholder").hidden = true;
-  if (state.view !== "tasks" && state.view !== "campaign" && state.view !== "ambar") {
+  if (!["tasks", "campaign", "ambar", "arsiv"].includes(state.view)) {
     el("group-view").hidden = false;
   }
   renderGroups();
@@ -739,6 +742,10 @@ function renderDrawerBody() {
     );
   }
   renderDrawerLocal(body);
+  // Arsiv: kayda bagli veri kartlari (yalnizca yerel, Jira'ya gitmez).
+  if (typeof veriKartlariBolumu === "function" && state.drawerKey) {
+    body.appendChild(veriKartlariBolumu("issue", state.drawerKey));
+  }
   renderDrawerTeams(body);
   const selected = state.group && state.group.detail_fields;
   (state.drawerFields || [])
@@ -2269,6 +2276,7 @@ function showTasks() {
   // Sefer ekrani aciksa once o kapanir: ikisi de ayni alanda durur.
   if (typeof leaveCampaign === "function") leaveCampaign();
   if (typeof leaveAmbar === "function") leaveAmbar();
+  if (typeof leaveArsiv === "function") leaveArsiv();
   state.view = "tasks";
   el("placeholder").hidden = true;
   el("group-view").hidden = true;
@@ -2755,6 +2763,10 @@ function taskModal(existing, preset) {
 
   // Kaynak alanlari bilgi amaclidir, duzenlenemez.
   if (existing && existing.source === "mail") body.appendChild(mailSourceBox(existing));
+  // Arsiv: goreve bagli veri kartlari. Yeni gorevde kimlik yok, once kaydedilir.
+  if (existing && typeof veriKartlariBolumu === "function") {
+    body.appendChild(veriKartlariBolumu("task", existing.id));
+  }
 
   const save = async () => {
     const payload = {
@@ -3141,7 +3153,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Son gorunum: hash/localStorage'daki filo/gorevlerim/sefer'e donulur.
   const startupView = resolveStartupView();
-  if (["tasks", "campaign", "ambar"].includes(startupView.view)) {
+  if (["tasks", "campaign", "ambar", "arsiv"].includes(startupView.view)) {
     state.view = startupView.view;
   }
   loadGroups(startupView.groupId || undefined)
@@ -3149,8 +3161,27 @@ document.addEventListener("DOMContentLoaded", () => {
       if (startupView.view === "tasks") showTasks();
       else if (startupView.view === "campaign") showCampaign();
       else if (startupView.view === "ambar" && typeof showAmbar === "function") showAmbar();
+      else if (startupView.view === "arsiv" && typeof showArsiv === "function") showArsiv();
     })
     .catch(fail);
   refreshTaskBadge();
   pollRefresh();
+  checkUpdateBadge();
 });
+
+/** Ayarlar dugmesindeki kucuk "yeni surum" noktasi. Sunucu en fazla 12
+ * saatte bir GitHub'a sorar; ag yoksa sessizce hicbir sey gostermez. */
+async function checkUpdateBadge() {
+  try {
+    const data = await api("/api/guncelleme/rozet");
+    const dot = el("update-dot");
+    if (!dot) return;
+    dot.hidden = !data.newer;
+    if (data.newer) {
+      el("settings-link").title = `Yeni sürüm: v${data.latest} (Ayarlar → Güncelleme)`;
+      el("settings-link").href = "/settings#guncelleme";
+    }
+  } catch (err) {
+    // Rozet ikincil bilgi.
+  }
+}

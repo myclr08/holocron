@@ -25,6 +25,8 @@ from tests.fake_jira import FakeJira  # noqa: E402
 def isolated_home(tmp_path, monkeypatch):
     """Her test kendi veri klasorunde calisir; gercek holocron.db'ye dokunulmaz."""
     monkeypatch.setenv("HOLOCRON_HOME", str(tmp_path))
+    # Arsiv ve yedekler de gercek Belgeler klasorune degil, teste yazar.
+    monkeypatch.setenv("HOLOCRON_DOCUMENTS", str(tmp_path / "Belgeler"))
     return tmp_path
 
 

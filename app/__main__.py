@@ -37,6 +37,13 @@ def pick_port(preferred: int = PREFERRED_PORT, host: str = HOST) -> int:
     """Once tercih edilen portu dener; doluysa isletim sisteminden bos port ister."""
     for candidate in (preferred, 0):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            # uvicorn de SO_REUSEADDR ile dinler. Sinamada o olmazsa Linux'ta
+            # az once kapanan surecin TIME_WAIT baglantilari 8765'i "dolu"
+            # gosterir ve guncellemeden sonra uygulama baska porta kacar:
+            # acik sekme yeniden baglanamaz. Windows'ta bu secenek baska
+            # surecin portunu calmak demektir, orada kullanilmaz.
+            if os.name != "nt":
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 sock.bind((host, candidate))
             except OSError:

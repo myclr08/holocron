@@ -1,6 +1,6 @@
 """Rozet simgelerini (`app/static/rozetler/*.svg`) ureten kucuk arac.
 
-Neden urettik, elle cizmedik: 54 rozet var ve hepsinin AYNI dili konusmasi
+Neden urettik, elle cizmedik: 59 rozet var ve hepsinin AYNI dili konusmasi
 gerekiyor -- ayni 24x24 kutu, ayni cizgi kalinligi, kategori basina ayni
 cerceve, nadirlige gore ayni halka rengi. Tek tek yazilan SVG'lerde bu duzen
 bir iki surumde dagilir; burada kural tek yerde durur.
@@ -127,6 +127,11 @@ GOVDELER: dict[str, list[str]] = {
                                                            "l-1-2.6 l-2.6-1 l2.6-1z")],
     gamify.BADGE_ARCHIVIST: [r(6.2, 9, 11.6, 8.4, 1), l(6.2, 12, 17.8, 12),
                              p("M6.2 9 l1.8-2.4 h8 l1.8 2.4"), l(10.6, 14.4, 13.4, 14.4)],
+    # Katip: kivrik uclu parsomen + uzerinde yazan kalem ucu.
+    gamify.BADGE_SCRIBE: [p("M7.4 6.4 h7.4 v9.8 a1.8 1.8 0 0 1-1.8 1.8 h-7.2 a1.8 1.8 0 0 0 1.6-1.8z"),
+                          p("M5.8 17.9 a1.6 1.6 0 0 1-1.6-1.6 v-.4 h3.2"),
+                          l(9.2, 9.4, 12.8, 9.4), l(9.2, 12, 11.6, 12),
+                          p("M18.6 8.6 l-4.4 4.6 l-.5 1.9 l1.9-.6 l4.4-4.5z")],
     # --- Jira akisi ---
     gamify.BADGE_FIRST_ISSUE: [r(6.4, 8, 11.2, 8, 1.4), p("M9 12 l1.8 1.8 l3.6-3.8")],
     gamify.BADGE_FINISHER: [l(8, 6, 8, 18), p("M8 6.8 h7.6 v5.6 h-7.6"),

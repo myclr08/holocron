@@ -40,7 +40,8 @@
       </div>
       <div class="topbar-actions">
         <button id="local-fields" title="Kendi alanlarınızı tanımlayın">Alanlar</button>
-        <a class="button" href="/settings">Ayarlar</a>
+        <a class="button settings-link" href="/settings" id="settings-link">Ayarlar<span
+            class="update-dot" id="update-dot" hidden title="Yeni sürüm var"></span></a>
         <button class="danger" data-action="shutdown">Kapat</button>
       </div>
     </header>
@@ -70,6 +71,13 @@
         <span class="color-strip color-yellow"></span>
         <span class="name">Ambar</span>
         <span class="count" id="ambar-count">0</span>
+      </div>
+      <!-- Arsiv: holocron bir bilgi arsividir; sayac belge (veri karti) sayisi. -->
+      <div class="tasks-entry" id="arsiv-entry" role="button" tabindex="0"
+           title="Arşiv: göreve ve kayda iliştirilen belgeler">
+        <span class="color-strip color-yellow"></span>
+        <span class="name">Arşiv</span>
+        <span class="count" id="arsiv-count">0</span>
       </div>
       <div id="group-list"></div>
     </aside>
@@ -305,6 +313,50 @@
           </div>
         </div>
       </section>
+
+      <section id="arsiv-view" hidden>
+        <div class="group-head">
+          <div class="group-title">
+            <span class="color-strip color-yellow"></span>
+            <h2>ARŞİV</h2>
+            <span class="badge" id="arsiv-total"></span>
+          </div>
+          <div class="group-actions">
+            <button class="primary" id="arsiv-add" title="Dosya seçip Arşiv'e kopyala">Belge ekle</button>
+            <input type="file" id="arsiv-file" multiple hidden />
+            <button id="arsiv-open-folder" title="Arşiv klasörünü dosya yöneticisinde aç">Klasörü aç</button>
+            <button id="arsiv-rescan" title="Klasöre elle bırakılan dosyaları listeye al">Yeniden tara</button>
+          </div>
+        </div>
+        <p class="ambar-lead">
+          Holocron'un bilgi arşivi: göreve ve Jira kaydına iliştirdiğiniz belgeler. Dosyalar
+          <code id="arsiv-folder"></code> klasörüne kopyalanır; bağlar yalnızca bu makinede durur,
+          Jira'ya gitmez.
+        </p>
+
+        <div class="toolbar">
+          <div class="window-picker" id="arsiv-kinds" role="group" aria-label="Tür süzgeci"></div>
+          <div class="window-picker" id="arsiv-states" role="group" aria-label="Bağ süzgeci"></div>
+          <input type="search" id="arsiv-search" placeholder="Ara (ad, görev, kayıt)" autocomplete="off" />
+          <span class="hint" id="arsiv-hint"></span>
+        </div>
+
+        <div class="campaign-empty arsiv-empty" id="arsiv-empty" hidden>
+          <h3>Arşiv boş</h3>
+          <p class="hint">
+            Bir görevin ya da kaydın detayındaki <strong>Veri kartları</strong> bölümüne dosya
+            sürükleyin, ya da bu ekrana bırakın. Klasöre elle koyduğunuz dosyalar
+            <strong>Yeniden tara</strong> ile "bağlanmamış" olarak gelir.
+          </p>
+        </div>
+
+        <div class="arsiv-none" id="arsiv-none" hidden>
+          <p class="arsiv-quote">“Arşivlerde yoksa, yok demektir.”</p>
+          <p class="hint">Jocasta Nu, Jedi Arşivleri baş kütüphanecisi</p>
+        </div>
+
+        <div class="arsiv-grid" id="arsiv-grid"></div>
+      </section>
     </main>
   </div>
 
@@ -394,6 +446,7 @@
   <script src="/static/js/app.js"></script>
   <script src="/static/js/campaign.js"></script>
   <script src="/static/js/ambar.js"></script>
+  <script src="/static/js/arsiv.js"></script>
   <script src="/static/js/addressbox.js"></script>
   <script src="/static/js/mailsend.js"></script>
 </body>

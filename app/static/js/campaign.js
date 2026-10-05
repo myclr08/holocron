@@ -32,6 +32,7 @@ const campaignState = {
 function showCampaign() {
   if (typeof leaveTasks === "function") leaveTasks();
   if (typeof leaveAmbar === "function") leaveAmbar();
+  if (typeof leaveArsiv === "function") leaveArsiv();
   state.view = "campaign";
   el("placeholder").hidden = true;
   el("group-view").hidden = true;

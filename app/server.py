@@ -13,6 +13,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__, gamify, paths
 from .api import router
 from .api_ambar import router as ambar_router
+from .api_arsiv import router as arsiv_router
+from .api_guncelle import router as guncelle_router
 from .api_gamify import router as gamify_router
 from .api_mailsend import router as mailsend_router
 from .context import AppContext
@@ -68,6 +70,10 @@ def create_app(context: AppContext) -> FastAPI:
     app.include_router(gamify_router)
     # Ambar: birlesmis PR'lari PR yoluyla geri almak / geri getirmek.
     app.include_router(ambar_router)
+    # Arsiv: goreve/kayda bagli belgeler (veri kartlari).
+    app.include_router(arsiv_router)
+    # Ayarlar -> Guncelleme: GitHub surumu denetle, yedekle, kur.
+    app.include_router(guncelle_router)
 
     # Acilista suresi dolmus sefer kapatilir: kullanici uygulamayi gunlerce
     # acmasa da sefer dogru gunde bitmis gorunur. Puan ikincil, uygulama

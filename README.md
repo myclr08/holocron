@@ -14,7 +14,7 @@ listeyi Excel'e, Teams'e ya da e-postaya bir tıkla taşır.
 > uydurmadır (`https://jira.example.com`, `DEMO-1`, `project = DEMO`,
 > `ornek@example.com`).
 
-Güncel sürüm: **v0.15.0** (bkz. [Sürüm notları](#sürüm-notları)).
+Güncel sürüm: **v0.16.0** (bkz. [Sürüm notları](#sürüm-notları)).
 
 ## Ne yapar
 
@@ -31,6 +31,8 @@ Güncel sürüm: **v0.15.0** (bkz. [Sürüm notları](#sürüm-notları)).
 | **Copilot** | Makinenizde kurulu **Copilot CLI**'yi bulup çalıştırabilen köprü: yol, vekil sunucu ve model sırası Ayarlar'dan yönetilir, **Copilot'u sına** gerçekten çalışıp çalışmadığını söyler. |
 | **Sefer** | Bitiş tarihi olan XP hedefi: görev kapatmak, kaydın filodan düşmesi ve durum geçişleri puan verir; rütbe, rozetler, haftalık emirler ve "ne için puan aldım" defteri (yanlış satır silinebilir). |
 | **Ambar** | Ana dala birleşmiş PR'ları sürümden önce **PR yoluyla** geri alır, sürümden sonra geri getirir. Holocron ana dala yazmaz, PR birleştirmez; yalnızca `ambar/` dalı ve PR açar. |
+| **Arşiv** | Göreve ve Jira kaydına iliştirilen belgeler ("veri kartları"): sürükle-bırak, dosya `Belgeler\holocron\holocron-belgeler` altına kopyalanır, aynı içerik bir kez saklanır, bağlar yalnızca yerelde durur. |
+| **Yazılım güncelleme** | Ayarlar → Güncelleme: GitHub'daki son sürümü denetler, önce verileri yedekler, SHA-256 özetiyle doğrulanmış paketi kurar ve Holocron'u yeniden başlatır; açılmazsa eskiye döner. |
 | **Excel'e aktarma** | Gruplar, görevler ve XP defteri için gerçek tarih/sayı hücreli, köprülü `.xlsx` dosyaları. |
 | **Tema** | Koyu Star Wars atmosferi: yıldız alanı, ışın kılıcı renkleri, açılış akışı — hepsi kapatılabilir. Dış kaynak, CDN, izleme yok. |
 
@@ -745,6 +747,7 @@ açmasanız da sefer doğru günde bitmiş görünür.
 | Görev kapatıldı | 10 |
 | Son tarihinden önce kapatıldı (ek) | +5 |
 | Gecikmiş görev kapatıldı (10 yerine) | 5 |
+| Veri kartı bağlı görev kapatıldı (ek) | +3 |
 | E-posta görevi 24 saat içinde ele alındı | 5 |
 | **Kayıt bir filtre filosundan düştü** | 15 |
 | Jira kaydı tamamlandı (`statusCategory` → done) | 20 |
@@ -803,7 +806,7 @@ bırakmadığı için küçük bir etkinlik defterine (`gamify_events`) tek sat�
 yazılır; sefere bağlı değildir, sayım seferin başlangıcından sonrasına bakar.
 
 
-**Görev** (11)
+**Görev** (12)
 
 | Rozet | Nadirlik | Nasıl kazanılır |
 | --- | --- | --- |
@@ -818,6 +821,7 @@ yazılır; sefere bağlı değildir, sayım seferin başlangıcından sonrasına
 | Bağlantı Subayı | Nadir | Jira kaydına bağlı 25 görev |
 | Temiz Masa | Nadir | 7 gün boyunca gecikmiş görev yok |
 | Arşivci | Yaygın | 30 günden eski 20 tamamlanmış görev katlandı |
+| Kâtip | Nadir | Veri kartı bağlı 10 görev kapat |
 
 **Jira akışı** (9)
 
@@ -1003,6 +1007,104 @@ işlemde 5+ PR'ı ambara alma). Süren sefer yoksa hiçbir şey yazılmaz.
 > üstü gerekir; ağaç açılamazsa (bozuk klon, disk) klona dokunulmadan anlaşılır
 > bir hata verilir. Push, klonun kendi git kimlik bilgisiyle yapılır.
 
+### Arşiv
+
+Holocron bir bilgi arşividir; **Arşiv** onun belge rafı. Sol menüde Ambar'ın
+altındaki **Arşiv** satırı (`Arşiv · 7`) belge sayısını gösterir.
+
+**Belge iliştirmek.** Bir görevin penceresinde (Görevlerim → karta tıkla) ve bir
+kaydın çekmecesinde (filo → satıra tıkla) **Veri kartları** bölümü durur. Dosyayı
+bölümün üstüne sürükleyin ya da **Dosya seç** ile seçin; birden çok dosya
+birlikte gelebilir. **Arşivden bağla** Arşiv'de zaten duran bir belgeyi bu
+göreve/kayda bağlar. Bir belge birden çok göreve ve kayda bağlanabilir.
+
+**Dosyalar nerede?** Dosya **kopyalanır**, sürüklediğiniz asıl dosya yerinde
+kalır. Kopya `<Belgeler>\holocron\holocron-belgeler\` altına yazılır.
+Belgeler klasörü Windows'un bilinen klasör API'sinden okunur
+(`SHGetKnownFolderPath(FOLDERID_Documents)`), yani OneDrive'a ya da grup
+ilkesiyle başka bir sürücüye yönlendirilmiş Belgeler de doğru bulunur; Linux'ta
+`XDG_DOCUMENTS_DIR`, olmazsa `~/Documents`. `HOLOCRON_DOCUMENTS` ortam
+değişkeni bu yeri değiştirir (testler ve demo bunu kullanır).
+
+- **Aynı dosya iki kez kopyalanmaz.** İçerik SHA-256 özetiyle tanınır; aynı
+  dosyayı başka bir göreve sürüklerseniz var olan belge kullanılır, yalnız bağ
+  eklenir.
+- **Ad çakışması.** İçeriği farklı ama adı aynı dosya `rapor (2).pdf` olur;
+  karşılaştırma Windows gibi büyük/küçük harf ayırmaz. Ad güvenli hâle getirilir
+  (yol parçaları, `<>:"/\|?*`, `CON`/`NUL` gibi ayrılmış adlar).
+- **Sınır.** Tek belge en çok **100 MB**.
+- **Bağ Jira'ya gitmez.** Bağlar `holocron.db` içindedir (`documents`,
+  `document_links`, göç 19); Jira'ya hiçbir istek atılmaz. Bağı kaldırmak (✕)
+  dosyayı silmez.
+
+**Arşiv ekranı.** Bütün belgeler veri kartı olarak: tür simgesi (PDF, belge,
+tablo, görsel, diğer), ad, boyut, tarih ve bağlı görev/kayıtlar. Türe ve bağ
+durumuna göre süzülür (**Bağlı / Bağlanmamış**), ad ve bağ etiketlerinde
+aranır. **Aç** dosyayı varsayılan uygulamasıyla açar, **Klasörde göster**
+dosyayı dosya yöneticisinde seçili gösterir, **Bağla** bir göreve ya da Jira
+anahtarına bağlar. Ekrana bırakılan dosya bağlanmamış olarak girer. Klasöre elle
+koyduğunuz dosyalar ekran açılınca (ya da **Yeniden tara** ile) "bağlanmamış"
+olarak listeye gelir; elle silinmiş dosyanın kartı "dosya kayıp" der.
+
+**Arşivden sil** dosyayı klasörden ve bütün bağlarını veritabanından siler;
+onay ister ve geri alınamaz. Aramada sonuç çıkmazsa ekran Jocasta Nu'yu anar:
+*"Arşivlerde yoksa, yok demektir."*
+
+**Sefer.** Kapanış anında en az bir veri kartı bağlı görev **+3 XP** ek puan
+alır (*Veri kartı bağlı görev kapatıldı*, Ayarlar → Sefer'den değiştirilir).
+Ek puan yalnızca görevin ilk kapanışında bakılır ve görev başına bir kezdir:
+bağ ekleyip kaldırarak ya da görevi açıp kapatarak çoğaltılamaz. **Kâtip**
+rozeti (nadir): veri kartı bağlı 10 görev kapatmak.
+
+### Yazılım güncelleme
+
+**Ayarlar → Güncelleme** yüklü sürümü gösterir. **Güncellemeleri denetle**
+GitHub'daki son sürümü sorar (Ağ ayarlarındaki vekil sunucu ve özel CA ile; Ambar'a
+özel vekil yazılmışsa o kullanılır). Yeni sürüm varsa sürüm notları ve
+**Güncelle** düğmesi çıkar; ana ekranda **Ayarlar** düğmesinin köşesinde küçük
+sarı bir nokta yanar (arka plan denetimi en fazla 12 saatte bir). Ağ yoksa açık
+bir "GitHub'a ulaşılamadı" mesajı verilir.
+
+**Güncelle** sırasıyla:
+
+1. **Yedek.** `holocron.db` (sqlite yedekleme API'siyle, tutarlı anlık görüntü)
+   ve `holocron.key`, `<Belgeler>\holocron\holocron-yedek\<YYYY-MM-DD_HHMMSS>_v<eski sürüm>\`
+   klasörüne alınır. Son **10** yedek tutulur. **Yedek alınamazsa güncelleme
+   başlamaz.**
+2. **İndirme ve doğrulama.** Kurulumunuzla aynı türdeki zip indirilir (Python
+   kurulu Windows'ta `holocron-windows-x64-lite.zip`, `python-embed` ile
+   kurulduysa tam paket, Linux'ta Linux paketi) ve sürümle yayımlanan
+   `SHA256SUMS.txt` ile karşılaştırılır. Özet tutmazsa ya da özet dosyası yoksa
+   **kurulmaz**.
+3. **Hazırlık.** Zip kurulum klasöründeki `.holocron-guncelleme\` altına açılır,
+   paketteki sürüm numarası denetlenir.
+4. **Devir.** Çalışan uygulama kendi dosyalarının üstüne yazamaz (Windows
+   kilitler); bu yüzden konsolsuz, bağımsız bir yardımcı süreç başlar ve
+   Holocron kapanır. Yardımcı uygulamanın çıkmasını bekler, **yalnızca yeni
+   paketin getirdiği program dosyalarını** (`app\`, `wheels\`, başlatıcılar,
+   `requirements.txt`...) değiştirir; `holocron.db`, `holocron.key`,
+   `holocron.log`, `holocron.port`, `.venv\` ve klasördeki başka hiçbir şeye
+   dokunmaz. Sonra Holocron'u `holocron.bat` ile (Linux'ta `holocron.sh`)
+   yeniden başlatır.
+5. **Bağımlılıklar.** `requirements.txt` değiştiyse başlatıcı her açılıştaki
+   özet karşılaştırmasıyla bunu görür ve paketleri yeni `wheels\` klasöründen
+   kurar (bkz. *Yükseltme*). `.venv` silinip yeniden kurulmaz.
+6. **Geri dönüş.** Yeni sürüm beş dakika içinde `/api/health` üzerinden kendi
+   sürüm numarasıyla cevap vermezse eski dosyalar geri konur ve eski sürüm
+   başlatılır. Bir dosya yerine konamazsa (kilit, izin) o ana kadar yapılan her
+   şey geri alınır.
+
+Arayüz adımları sırayla gösterir, uygulama kapanınca bağlantıyı bekler ve yeni
+sürüm açılınca sayfayı kendiliğinden yeniler. Her adım veri klasöründeki
+`guncelleme.log` dosyasına yazılır. Git deposundan çalışan geliştirme kopyası
+güncellenmez (`git pull` kullanın); yazma izni olmayan klasördeki kurulum da.
+
+> **0.15.0'dan geçiş.** 0.15.0'da güncelleyici yok: 0.16.0'ı bir kez elle
+> kurun. Holocron'u kapatın, `holocron-windows-x64-lite.zip`'i mevcut klasörün
+> **üstüne** açın (`holocron.db`, `holocron.key` ve `.venv` yerinde kalır;
+> önce bu iki dosyanın bir kopyasını almak iyi olur) ve `holocron.bat`'ı
+> çalıştırın. Sonraki sürümler Ayarlar → Güncelleme'den gelir.
+
 ### Güncelle
 
 **Güncelle** bütün grupları, **Güncelle (bu grup)** yalnız açık olanı tazeler.
@@ -1057,6 +1159,11 @@ Holocron bir istemcidir; kendi sunucusu, hesabı, bulutu yoktur.
   okur, Jira'ya yazmaz.
 - Paketi yazma izni olmayan bir klasöre açtıysanız veri ve log
   `%LOCALAPPDATA%\Holocron` altına düşer.
+- **Arşiv belgeleri** `<Belgeler>\holocron\holocron-belgeler` altında, güncelleme
+  öncesi **yedekler** `<Belgeler>\holocron\holocron-yedek` altında durur. Bağlar
+  yalnızca `holocron.db` içindedir; Jira'ya gitmez.
+- **Güncelleme denetimi** `api.github.com` adresine yalnızca son sürümü sormak
+  ve zip'i indirmek için gider; kimlik ya da veri göndermez.
 
 ## Sorun giderme
 
@@ -1310,6 +1417,10 @@ yanlış numaralı bir release çıkmaz.
 git tag v0.7.3 && git push origin v0.7.3
 ```
 
+Release iş akışı üç zip'in yanına `SHA256SUMS.txt` yayımlar. Uygulama içi
+güncelleme indirdiği zip'i bu dosyayla doğrular; dosyası olmayan release'i
+kurmaz.
+
 ## Dosya düzeni
 
 | Yol | İçerik |
@@ -1342,6 +1453,11 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/ambar_git.py` | Ambar'ın git işleri (alt süreç, kabuk yok): dal, revert, push, klonu geri döndürme, ambardakileri ana daldan türetme |
 | `app/ambar_github.py` | GitHub REST istemcisi (PR listesi, PR açma; Enterprise adresi) |
 | `app/api_ambar.py` | Ambar uçları (ayrı router) |
+| `app/arsiv.py` | Arşiv: kopyalama, SHA-256 tekilleştirme, ad temizliği, bağlar, tarama, açma |
+| `app/api_arsiv.py` | Arşiv uçları (ayrı router, ham gövdeli yükleme) |
+| `app/guncelle.py` | Güncelleme: sürüm denetimi, yedek ve sıra, indirme, SHA-256, hazırlık, devir |
+| `app/guncelleyici.py` | Kapanan uygulamanın yerine dosyaları değiştiren yardımcı (yalnız standart kitaplık) |
+| `app/api_guncelle.py` | Güncelleme uçları (ayrı router) |
 | `app/copilot.py` | Copilot CLI'yi bulma, çağırma, sınama, metin düzeltme (genel yardımcı) |
 | `app/copilot_sablon_duzelt.txt` | "Metni düzelt" istem şablonu (Ayarlar'dan değiştirilebilir) |
 | `app/static/` | Vanilla HTML/CSS/JS arayüz, dış bağımlılık yok |
@@ -1354,6 +1470,8 @@ git tag v0.7.3 && git push origin v0.7.3
 | `app/static/js/campaign-settings.js` | Ayarlar → Sefer kartı (XP kuralları, koruma durumu) |
 | `app/static/js/ambar.js` | Ambar ekranı (sekmeler, listeler, iki düğme, sonuç penceresi) |
 | `app/static/js/ambar-settings.js` | Ayarlar → Ambar kartı (token, API adresi, depolar, Sına) |
+| `app/static/js/arsiv.js` | Arşiv ekranı ve görev/kayıt detayındaki "Veri kartları" bölümü |
+| `app/static/js/guncelleme-settings.js` | Ayarlar → Güncelleme kartı (denetim, adımlar, yeniden bağlanma) |
 | `app/static/js/duzelt.js` | "Düzelt" bileşeni: düğme, öneri paneli, kelime düzeyinde fark |
 | `app/static/js/teamslink.js` | Teams mesajı iliştirme: yapıştırma çevirisi, çip, etiket kısaltma, temizleme |
 | `app/static/js/zenginalan.js` | Çok satırlı alanların zengin düzenleyicisi: canlı, atomik Teams çipi |
@@ -1371,6 +1489,7 @@ git tag v0.7.3 && git push origin v0.7.3
 
 | Sürüm | Tarih | Ne geldi |
 | --- | --- | --- |
+| **v0.16.0** | 6 Ekim 2026 | **Arşiv**: göreve ve Jira kaydına belge iliştirme ("veri kartları"). Görev penceresinde ve kayıt çekmecesinde sürükle-bırak / dosya seç / Arşivden bağla; dosya `<Belgeler>\holocron\holocron-belgeler` altına kopyalanır (yönlendirilmiş/OneDrive Belgeler bilinen klasör API'siyle bulunur), içerik SHA-256 ile bir kez saklanır, ad çakışmasında `ad (2).uzantı`, 100 MB sınırı. Bağlar çoktan çoğa ve yalnızca yerelde (göç 19), Jira'ya gitmez; bağı kaldırmak dosyayı silmez. Sol menüde **Arşiv** ekranı: tür/bağ süzgeci, arama, Aç, Klasörde göster, Bağla, onaylı **Arşivden sil**; klasöre elle bırakılan dosyalar "bağlanmamış" gelir. Sefer'e *Veri kartı bağlı görev kapatıldı* (+3 XP, görev başına bir kez) ve **Kâtip** rozeti (10 belgeli görev). **Yazılım güncelleme**: Ayarlar → Güncelleme GitHub'daki son sürümü denetler (Ağ ayarlarının vekiliyle), sürüm notlarını gösterir, ana ekranda küçük rozet yakar. Güncelle önce `holocron.db` (sqlite yedekleme API'si) ve `holocron.key`'i `Belgeler\holocron\holocron-yedek` altına alır (son 10; yedek olmazsa durur), kurulumla aynı tür zip'i indirip `SHA256SUMS.txt` ile doğrular, konsolsuz bir yardımcıya devreder: yardımcı uygulamanın kapanmasını bekler, yalnızca program dosyalarını değiştirir (veri, anahtar, log, `.venv` dokunulmaz), `holocron.bat`/`holocron.sh` ile yeniden başlatır, yeni sürüm açılmazsa eskiye döner; arayüz adımları gösterip yeniden bağlanır. Release iş akışı artık `SHA256SUMS.txt` yayımlıyor. Linux'ta yeniden başlatmada port 8765'in TIME_WAIT yüzünden "dolu" görünmesi giderildi. Demo'ya uydurma belgeler eklendi |
 | **v0.15.0** | 4 Ekim 2026 | **Ambar**: ana dala birleşmiş PR'ları sürümden önce PR yoluyla geri almak (**Ambara al**) ve sürümden sonra geri getirmek (**Ambardan çıkar**). Sol menüde simgesiz **Ambar** satırı (`Ambar · 5`), Tümü + depo sekmeleri, son N günün birleşen PR'ları (yazar, tarih, değişen dosyalar, not), ana daldan türetilen **Ambardakiler** listesi ve onay bekleyen ambar PR'ları. Depo başına `ambar/al-…` / `ambar/cikar-…` dalı **geçici bir `git worktree` içinde** (kullanıcının klonunda dal değişmez, çalışma ağacına dokunulmaz; yerel dal ve ağaç iş bitince silinir), yeniden eskiye `git revert` (birleşme commit'inde `-m 1`), tek PR; çakışmada (**Rota hesaplama hatası**) temiz iptal, diğer depolar sürer. Ana dala yazma, birleştirme, zorla itme yok. Ayarlar → **Ambar**: GitHub token (şifreli, depo başına da), API adresi (Enterprise), git yolu, GitHub'a özel vekil, depolar ve **Sına**. Yeni bağımlılık yok (git alt süreci + mevcut `requests`). Sefer'e iki kural (*Ambara alındı* 20 XP, *Ambardan çıkarıldı* 30 XP) ve dört rozet (İlk Kargo, Temiz Kalkış, Rota Ustası, Ağır Yük) |
 | **v0.14.0** | 20 Eylül 2026 | **Teams mesajı iliştirme**: Teams'ten kopyalanan mesaj bloğu yapıştırıldığı yerde `[[teams: Ad · tarih|url]]` biçiminde tek satırlık bir işarete dönüşür — Görevlerim'in Açıklama/Not alanlarında, Jira kaydı çekmecesindeki yerel alanlarda ve grid'in tablo hücrelerindeki tek satırlık yerel alanda. Salt-okunur her yerde (kanban kartı, grid hücresi, çekmece değeri, geçmiş popover'ı, "Düzelt" fark paneli) küçük, tıklanabilir bir çip olarak çizilir; tıklayınca önce `msteams:` ile uygulamada açılmayı dener. Etiket kısa tutulur (en fazla 48 karakter: önce sohbet adı düşer, sonra metin kırpılır, tam hâli `title`'da durur). Çok satırlı alanlarda yapıştırma artık zengin bir düzenleyiciye (contenteditable) düşer: çip yapıştırılır yapıştırılmaz görünür, tek Backspace/Delete ile bütün olarak silinir, tıklayınca "Teams'te aç / Kaldır" menüsü açılır. İşaret Excel dökümüne, e-posta ve Teams mesaj gövdesine hiç girmez; "Düzelt" bağlantılara dokunmaz, tablo hücresi kırpması işaretin ortasından kesmez. Görevlerim'e geçmişli bir **"Son durum"** alanı eklendi: her değişim `task_status_history` defterine düşer, kartta son satır tarihiyle durur, tıklayınca Jira alan geçmişiyle aynı kalıptaki kronolojik pencere açılır; Excel'de ayrı sütun ve "Son durum geçmişi" sayfası var (göç 18). |
 | **v0.13.0** | 20 Eylül 2026 | **"Düzelt" düğmesi**: Görevlerim penceresindeki Açıklama/Not alanlarının ve Jira kaydı çekmecesindeki çok satırlı yerel metin alanlarının sağ alt köşesinde hap biçimli bir **Düzelt** düğmesi (kısayol `Ctrl+Shift+D`). Metin Copilot'a gider; imla, yazım, noktalama, anlam düşüklüğü ve bozuk cümle düzeltilir, anlam ve maddeler korunur, özel adlar ile kısaltmalar aynen kalır. Sonuç alanın yerinde **önce/sonra** paneliyle gelir: fark **tarayıcıda kelime düzeyinde** (LCS) hesaplanır, çıkan kırmızı üstü çizili, gelen yeşil altı çizili, sağ üstte "model · N sn · M değişiklik". Çipler "İmla ve noktalama" ve "Anlam düşüklüğü" varsayılan açık, "Daha resmi" ile "Kısalt" isteğe bağlı; **Yeniden dene** aynı metni seçili çiplerle tekrarlar. **Uygula** alanı değiştirir ama Kaydet'e kadar kaydetmez, `Ctrl+Z` eski metni geri getirir (önce tarayıcının kendi geri alma yığını denenir). Yeni uç `POST /api/copilot/duzelt` modelden JSON değil **düz metin** ister: metin bir dosyaya yazılır, model düzeltilmişini ayrı bir dosyaya yazar, Holocron oradan okur (yedek yol `stdout`), zaman aşımı **30 sn**, sınır **4000 karakter**; hata olursa panel yerine tek satır hata çıkar ve **alandaki metne dokunulmaz**. Ayarlar → Copilot'a **Metin düzeltme** bölümü geldi. Jira kaydı çekmecesindeki yerel **metin** alanları artık çok satırlı açılıyor (`Enter` yeni satır, `Ctrl+Enter` kaydeder, `Esc` vazgeçer). **Ayarlar Geri** artık her zaman ilk filoya değil, ana ekranda **son bakılan yere** dönüyor: görünüm (seçili filo, Görevlerim, Sefer) adres çubuğunda hash olarak tutuluyor (`#filo/<id>`, `#gorevlerim`, `#sefer`) ve yedek olarak `localStorage`'a yazılıyor. **Alan geçmişi popover'ı** artık ok kalıbı yerine **eskiden yeniye kronolojik bloklar** gösteriyor: ilk girdi **"ilk değer"** etiketiyle, son girdi vurguyla, boş değer **"— (boş)"**; 20 ve üzeri girdide en eskiler **"… önceki N değişikliği göster"** arkasına katlanır (kayıt çekmecesindeki satır içi ok kalıbı değişmedi). **Demo ortamı** (`tools/demo/demo.py`): tek komutla stdlib üzerinde sahte bir Jira Data Center sunucusu, 3 proje ve ~120 uydurma Türkçe kayıtla tohumlanmış veri (4 filo, yerel ek alanlar, 12 görev, 15 kişi, üç haftalık XP geçmişi), `--copilot-sahte` ile PATH'e sahte bir `copilot` betiği; gerçek kurulumun `holocron.db`'sine dokunmadan ayrı veri klasöründe çalışır, `--reset` sıfırdan tohumlar. **Sefer rozetleri 11 → 54**: katalog sekiz kategoriye (görev, Jira akışı, seri, haftalık emirler, XP/rütbe, zaman ve ritim, iletişim, keşif) ve üç nadirliğe (yaygın, nadir, efsanevi) ayrıldı; nadirlik hem simge rengini hem ödenen XP'yi belirler, seri rozetleri **geriye dönük** olarak eşiği dolduran olayın gününe yazılır. Copilot "Düzelt" ve Excel dökümü için kullanım defteri eklendi (`gamify_events`, göç 17). Rozet duvarı kategori sekmeleriyle yeniden düzenlendi, kilitli kutucuklar artık nasıl kazanılacağını, bir ilerleme çubuğunu ve "12/25" sayısını gösteriyor. **Kayıt çekmecesi**: "Alanları seç" ve "Boş alanları da göster" artık çekmece başlığının altında sağa yaslı tek satırlık bir araç çubuğunda, switch klavye/okuyucu erişilebilir (`role="switch"`). |

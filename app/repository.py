@@ -1321,6 +1321,11 @@ def delete_task(conn: sqlite3.Connection, task_id: int) -> bool:
             (MAIL_TASK_DELETED, task["id"]),
         )
         conn.execute("UPDATE mail_messages SET task_id = NULL WHERE task_id = ?", (task["id"],))
+        # Arsiv baglari: gorev gidince bag da gider, belge (dosya) Arsiv'de kalir.
+        conn.execute(
+            "DELETE FROM document_links WHERE target_type = 'task' AND target_id = ?",
+            (str(task["id"]),),
+        )
     _renumber_tasks(conn, task["status"])
     return True
 

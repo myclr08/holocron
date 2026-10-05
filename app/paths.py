@@ -17,11 +17,23 @@ import tempfile
 from pathlib import Path
 
 _ENV_HOME = "HOLOCRON_HOME"
+# Belgelerim klasorunun yerine gecer: testler ve demo gercek Belgeler'e yazmasin.
+_ENV_DOCUMENTS = "HOLOCRON_DOCUMENTS"
 
 DB_FILENAME = "holocron.db"
 KEY_FILENAME = "holocron.key"
 LOG_FILENAME = "holocron.log"
 PORT_FILENAME = "holocron.port"
+
+# Belgeler altindaki klasorler: Arsiv dosyalari ve guncelleme oncesi yedekler.
+DOCS_FOLDER = "holocron"
+ARCHIVE_FOLDER = "holocron-belgeler"
+BACKUP_FOLDER = "holocron-yedek"
+
+# FOLDERID_Documents: Windows'un "Belgeler" bilinen klasoru. OneDrive ya da
+# grup ilkesi Belgeler'i baska yere yonlendirdiyse gercek yeri yalnizca bu
+# API soyler; `~/Documents` o makinede bos, unutulmus bir klasor olabilir.
+_FOLDERID_DOCUMENTS = "FDD39AD0-238F-46AF-ADB4-6C85480369C7"
 
 # Yazilabilirlik sinamasi her cagride diske gitmesin.
 _RESOLVED: dict[str, Path] = {}
@@ -113,3 +125,91 @@ def port_path() -> Path:
 
 def static_dir() -> Path:
     return Path(__file__).resolve().parent / "static"
+
+
+# --- Belgeler -------------------------------------------------------------
+
+
+def _windows_documents() -> Path | None:
+    """`SHGetKnownFolderPath(FOLDERID_Documents)`; olmazsa `None`."""
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        import ctypes
+        import uuid
+        from ctypes import wintypes
+
+        class _Guid(ctypes.Structure):
+            _fields_ = [
+                ("Data1", wintypes.DWORD),
+                ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD),
+                ("Data4", ctypes.c_ubyte * 8),
+            ]
+
+        raw = uuid.UUID(_FOLDERID_DOCUMENTS).bytes_le
+        guid = _Guid.from_buffer_copy(raw)
+        shell32 = ctypes.windll.shell32  # type: ignore[attr-defined]
+        ole32 = ctypes.windll.ole32  # type: ignore[attr-defined]
+        shell32.SHGetKnownFolderPath.argtypes = [
+            ctypes.POINTER(_Guid), wintypes.DWORD, wintypes.HANDLE,
+            ctypes.POINTER(ctypes.c_wchar_p),
+        ]
+        shell32.SHGetKnownFolderPath.restype = ctypes.c_long
+        found = ctypes.c_wchar_p()
+        result = shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(found))
+        try:
+            value = found.value if result == 0 else None
+        finally:
+            ole32.CoTaskMemFree(found)
+    except Exception:  # noqa: BLE001 - API yoksa ev dizinine dusulur
+        return None
+    return Path(value) if value else None
+
+
+def _xdg_documents() -> Path | None:
+    """Linux masaustlerinde `user-dirs.dirs` icindeki XDG_DOCUMENTS_DIR."""
+    config = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    try:
+        text = (Path(config) / "user-dirs.dirs").read_text(encoding="utf-8")
+    except (OSError, RuntimeError, UnicodeDecodeError):
+        return None
+    for line in text.splitlines():
+        name, _, value = line.strip().partition("=")
+        if name != "XDG_DOCUMENTS_DIR":
+            continue
+        value = value.strip().strip('"').replace("$HOME", str(Path.home()))
+        if value and value.rstrip("/") != str(Path.home()):
+            return Path(value)
+    return None
+
+
+def documents_dir() -> Path:
+    """Kullanicinin Belgeler klasoru (yonlendirilmis/OneDrive dahil)."""
+    override = os.environ.get(_ENV_DOCUMENTS)
+    if override:
+        return Path(override).expanduser()
+    found = _windows_documents() or _xdg_documents()
+    if found is not None:
+        return found
+    try:
+        return Path.home() / "Documents"
+    except (RuntimeError, OSError):  # pragma: no cover - ev dizini yoksa
+        return fallback_dir() / "Documents"
+
+
+def holocron_documents() -> Path:
+    """`<Belgeler>/holocron`: Arsiv ve yedeklerin ortak ust klasoru."""
+    return documents_dir() / DOCS_FOLDER
+
+
+def archive_dir() -> Path:
+    """Arsiv dosyalarinin kopyalandigi klasor; yoksa olusturulur."""
+    folder = holocron_documents() / ARCHIVE_FOLDER
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def backup_dir() -> Path:
+    """Guncelleme oncesi veri yedeklerinin klasoru (olusturmaz)."""
+    return holocron_documents() / BACKUP_FOLDER

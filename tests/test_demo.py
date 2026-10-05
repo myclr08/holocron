@@ -352,3 +352,30 @@ def test_five_seeded_tasks_carry_a_status_ledger(context, sahte):
     gorevler = {gorev["title"]: gorev for gorev in repository.list_tasks(conn)}
     for baslik, kayitlar in defterli.items():
         assert gorevler[baslik]["son_durum"] == kayitlar[-1]["metin"]
+
+
+def test_the_demo_archive_has_linked_and_unlinked_documents(context, sahte):
+    """Demo Arsiv'i: gecerli dosyalar, baglar ve klasore elle birakilmis bir belge."""
+    import zipfile
+
+    from app import arsiv, paths, repository
+    from demo import belgeler
+
+    conn = context.connection()
+    repository.upsert_issues(conn, sahte.kayitlar[:30])
+    tohum.geri_kalani_kur(context, [str(k["key"]) for k in sahte.kayitlar[:30]], SIMDI)
+    assert belgeler.belgeleri_kur(context) == 6
+    assert belgeler.belgeleri_kur(context) == 0  # ikinci kez yazmaz
+
+    klasor = paths.archive_dir()
+    assert (klasor / "Kapsam Dokümanı v2.pdf").read_bytes().startswith(b"%PDF-1.4")
+    assert zipfile.is_zipfile(klasor / "Test Senaryoları.xlsx")
+    assert (klasor / "Mimari Çizim.png").read_bytes().startswith(b"\x89PNG")
+
+    arsiv.rescan(conn, klasor)
+    belgeler_listesi = arsiv.list_documents(conn, folder=klasor)
+    assert len(belgeler_listesi) == 7
+    bagsiz = sorted(b["name"] for b in belgeler_listesi if not b["links"])
+    assert bagsiz == ["Ekran Görüntüsü 12.png", "Yapılandırma Yedeği.json"]
+    test_senaryolari = next(b for b in belgeler_listesi if b["name"] == "Test Senaryoları.xlsx")
+    assert len([l for l in test_senaryolari["links"] if l["type"] == "task"]) == 2
